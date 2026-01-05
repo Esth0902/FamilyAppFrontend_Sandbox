@@ -75,21 +75,20 @@ export default function ConnectedHome() {
         try {
             const token = await SecureStore.getItemAsync("authToken");
             if (token) {
-                await fetch(`${API_BASE_URL}/logout`, {
+                fetch(`${API_BASE_URL}/logout`, {
                     method: "POST",
                     headers: {
                         Accept: "application/json",
                         "Content-Type": "application/json",
                         Authorization: `Bearer ${token}`,
                     },
-                });
+                }).catch(e => console.log("Logout backend error:", e));
             }
         } catch (e) {
             console.error("Erreur logout:", e);
         } finally {
             await SecureStore.deleteItemAsync("authToken");
             await SecureStore.deleteItemAsync("user");
-            router.dismissAll();
             router.replace("/");
         }
     };

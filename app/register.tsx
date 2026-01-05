@@ -28,8 +28,11 @@ export default function Register() {
     const [password, setPassword] = useState("password123");
     const [passwordConfirm, setPasswordConfirm] = useState("password123");
     const [loading, setLoading] = useState(false);
+    const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
     const onRegister = async () => {
+        setFieldErrors({});
+
         if (password !== passwordConfirm) {
             Alert.alert("Oups", "Les mots de passe ne correspondent pas.");
             return;
@@ -52,29 +55,21 @@ export default function Register() {
                 }),
             });
 
-            const data: any = await response.json();
+            const data= await response.json();
 
             if (!response.ok) {
-                console.log("Register error:", data);
-                let msg = "Impossible de créer le compte.";
-
-                if (typeof data === "object" && data !== null) {
-                    if ("message" in data && typeof data.message === "string") {
-                        msg = data.message;
-                    }
-                    if ("errors" in data && typeof data.errors === "object") {
-                        const errors = data.errors as Record<string, string[]>;
-                        const first = Object.values(errors)[0];
-                        if (Array.isArray(first) && first.length > 0) {
-                            msg = first[0];
-                        }
-                    }
+                if (data.errors) {
+                    const errors: any = {};
+                    Object.keys(data.errors).forEach(key => {
+                        errors[key] = data.errors[key][0];
+                    });
+                    setFieldErrors(errors);
+                } else {
+                    Alert.alert("Erreur", data.message || "Erreur inconnue");
                 }
-                Alert.alert("Erreur", msg);
                 return;
             }
 
-            // Stockage sécurisé (comme sur le Login)
             if (data.token) {
                 await SecureStore.setItemAsync("authToken", data.token);
             }
@@ -83,7 +78,7 @@ export default function Register() {
             }
 
             Alert.alert("Bienvenue !", "Votre compte a été créé avec succès.");
-            router.replace("/(tabs)");
+            router.replace("/(tabs)/home");
 
         } catch (error: unknown) {
             console.error(error);
@@ -134,6 +129,9 @@ export default function Register() {
                         value={email}
                         onChangeText={setEmail}
                     />
+                    {fieldErrors.email && (
+                        <Text style={styles.errorText}>{fieldErrors.email}</Text>
+                    )}
 
                     <Text style={[styles.label, { color: theme.text }]}>Mot de passe</Text>
                     <TextInput
@@ -250,5 +248,12 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         marginTop: 24,
         marginBottom: 40,
-    }
+    },
+    errorText: {
+        color: 'red',
+        fontSize: 12,
+        marginTop: -12,
+        marginBottom: 10,
+        marginLeft: 4,
+    },
 });

@@ -89,10 +89,15 @@ export default function SetupHousehold() {
             const data = await response.json();
 
             if (response.ok) {
-
                 setCreatedHouseholdId(data.household.id);
+
+                const userStr = await SecureStore.getItemAsync("user");
+                if (userStr) {
+                    const userData = JSON.parse(userStr);
+                    userData.household_id = data.household.id;
+                    await SecureStore.setItemAsync("user", JSON.stringify(userData));
+                }
                 setStep('success');
-                //updateStoredUser(data.household);
             } else {
                 Alert.alert("Erreur", data.message || "Impossible de créer le foyer.");
             }
@@ -134,7 +139,7 @@ export default function SetupHousehold() {
     };
 
     const finishSetup = () => {
-        router.replace('/(tabs)');
+        router.replace('/(tabs)/home');
     };
 
     if (step === 'success') {
@@ -187,7 +192,13 @@ export default function SetupHousehold() {
             style={{ flex: 1, backgroundColor: theme.background }}
         >
             <View style={[styles.headerBar, { borderBottomColor: theme.icon }]}>
-                <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+                <TouchableOpacity onPress={() => {
+                    if (router.canGoBack()) {
+                        router.back();
+                    } else {
+                        router.replace('/');
+                    }
+                }}>
                     <MaterialCommunityIcons name="close" size={24} color={theme.text} />
                 </TouchableOpacity>
                 <Text style={[styles.headerTitle, { color: theme.text }]}>Nouveau Foyer</Text>

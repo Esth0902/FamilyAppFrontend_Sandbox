@@ -19,17 +19,26 @@ export default function RootLayout() {
         const checkAuth = async () => {
             try {
                 const token = await SecureStore.getItemAsync('authToken');
-                const isPublicRoute = segments.length === 0 || segments[0] === 'login';
+                const userStr = await SecureStore.getItemAsync('user');
+                const user = userStr ? JSON.parse(userStr) : null;
+
+                const isPublicRoute = segments.length === 0 || segments[0] === 'login' || segments[0] === 'register';
 
                 console.log("🔍 Check Auth -> Token:", !!token, "| Segment:", segments[0]);
 
-                if (token && isPublicRoute) {
-                    router.replace('/(tabs)');
-                } else if (!token && !isPublicRoute) {
+                if (token) {
+                    const hasHousehold = user?.household_id || (user?.households && user.households.length > 0);
+
+                    if (!hasHousehold && segments[0] !== 'householdSetup') {
+                        router.replace('/householdSetup');
+                    } else if (hasHousehold && isPublicRoute) {
+                        router.replace('/(tabs)/home');
+                    }
+                } else if (!isPublicRoute) {
                     router.replace('/');
                 }
-            } catch (e) {
-                console.error("Erreur vérification auth:", e);
+            } catch (err) {
+                console.error("Erreur auth: ", err);
             }
         };
 

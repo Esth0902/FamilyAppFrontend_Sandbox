@@ -59,7 +59,7 @@ export default function Login() {
                 await SecureStore.setItemAsync("user", JSON.stringify(data.user));
             }
 
-            router.replace("/(tabs)");
+            router.replace("/(tabs)/home");
 
         } catch (error) {
             console.error(error);
