@@ -4,6 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useColorScheme, Platform } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { Colors } from "@/constants/theme";
+import { MaterialCommunityIcons } from '@expo/vector-icons'; // Importe MaterialCommunityIcons
 
 export default function TabsLayout() {
     const colorScheme = useColorScheme();
@@ -42,6 +43,20 @@ export default function TabsLayout() {
                     tabBarIcon: ({ color, focused }) => (
                         <Ionicons
                             name={focused ? "home" : "home-outline"}
+                            size={24}
+                            color={color}
+                        />
+                    ),
+                }}
+            />
+
+            <Tabs.Screen
+                name="meal"
+                options={{
+                    title: "Repas",
+                    tabBarIcon: ({ color, focused }) => (
+                        <MaterialCommunityIcons
+                            name={focused ? "silverware-fork-knife" : "silverware-fork-knife"}
                             size={24}
                             color={color}
                         />
