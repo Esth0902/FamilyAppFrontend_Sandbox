@@ -408,7 +408,7 @@ export default function RecipesScreen() {
 
                                 {/* Choix 2 : Idées / Inspiration */}
                                 <TouchableOpacity
-                                    style={[styles.choiceBtn, { backgroundColor: '#8A2BE2' }]} // Une couleur distincte (ex: Violet) ou themeColors.tint avec opacity
+                                    style={[styles.choiceBtn, { backgroundColor: '#8A2BE2' }]}
                                     onPress={() => { setAiIntent('ideas'); setPreviewRecipe(null); setModalMode('ai'); }}
                                 >
                                     <MaterialCommunityIcons name="lightbulb-on" size={28} color="white" />

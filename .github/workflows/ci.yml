@@ -1,0 +1,34 @@
+name: CI Frontend (React Native)
+
+on:
+  push:
+    branches: [ "master", "main" ]
+  pull_request:
+    branches: [ "master", "main" ]
+
+jobs:
+  frontend-check:
+    name: Tests & Qualité
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Récupérer le code
+        uses: actions/checkout@v4
+
+      - name: Configurer Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Installer les dépendances
+        run: npm ci
+
+      - name: Vérification TypeScript (Type Check)
+        run: npx tsc --noEmit
+
+      - name: Linting (Qualité du code)
+        run: npm run lint
+
+      - name: Tests Unitaires (Jest)
+        run: npx jest --ci --runInBand --passWithNoTests
