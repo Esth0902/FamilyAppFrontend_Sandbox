@@ -42,7 +42,7 @@ export default function RecipeDetailScreen() {
     const [editForm, setEditForm] = useState<{
         title: string;
         description: string;
-        instructions: string;
+        instructions: string[];
         ingredients: IngredientForm[];
     } | null>(null);
 
@@ -105,8 +105,8 @@ export default function RecipeDetailScreen() {
                 text = text.replace(/(?:Étape|Etape)\s*\d+\s*:/gi, '|||');
                 parsedInstructions = text
                     .split('|||')
-                    .map(s => s.trim())
-                    .filter(s => s.length > 0);
+                    .map((s: string) => s.trim())
+                    .filter((s: string) => s.length > 0);
             }
 
             if (parsedInstructions.length === 0) {
@@ -177,8 +177,8 @@ export default function RecipeDetailScreen() {
 
     const saveRecipe = async () => {
         if (!recipe || !editForm) return;
-        const instructionsArray = Array.isArray(editForm.instructions) ? editForm.instructions : [editForm.instructions];
-        const formattedInstructions = instructionsArray
+
+        const formattedInstructions = editForm.instructions
             .map((step: string) => step.trim())
             .filter((step: string) => step.length > 0)
             .map((step: string, i: number) => `Étape ${i + 1} : ${step}`)
