@@ -46,7 +46,7 @@ export default function RecipesScreen() {
     const [formMode, setFormMode] = useState<'create' | 'edit'>('create');
     const [aiIntent, setAiIntent] = useState<'specific' | 'ideas'>('ideas');
     useEffect(() => {
-        fetchRecipes();
+        void fetchRecipes();
     }, []);
 
     const fetchRecipes = async () => {
@@ -181,7 +181,7 @@ export default function RecipesScreen() {
             resetForm();
             setSelectedRecipe(null);
             setFormMode('create');
-        } catch (err) {
+        } catch {
             Alert.alert('Erreur', "Impossible d'enregistrer la recette.");
         } finally {
             setSubmitting(false);
@@ -205,7 +205,7 @@ export default function RecipesScreen() {
             await apiFetch(`/recipes/${id}`, { method: "DELETE" });
             setRecipes(prev => prev.filter(r => r.id !== id));
             Alert.alert("Succès", "Recette supprimée !");
-        } catch (e) {
+        } catch {
             Alert.alert("Erreur", "Impossible de supprimer la recette.");
         } finally {
             setSubmitting(false);
@@ -232,7 +232,7 @@ export default function RecipesScreen() {
             else {
                 setAiSuggestions([]);
             }
-        } catch (err: any) {
+        } catch {
             Alert.alert('Erreur', 'Impossible de trouver des idées.');
             setAiSuggestions([]);
         } finally {
@@ -249,7 +249,7 @@ export default function RecipesScreen() {
             });
             setPreviewRecipe(response);
             setModalMode('preview');
-        } catch (err) {
+        } catch {
             Alert.alert("Erreur", "Impossible de charger les détails.");
         } finally {
             setSubmitting(false);
@@ -275,7 +275,7 @@ export default function RecipesScreen() {
             setRecipes(prev => [response, ...prev]);
             closeAndResetModal();
             Alert.alert("Succès", "Recette ajoutée !");
-        } catch (err) {
+        } catch {
             Alert.alert("Erreur", "L'enregistrement a échoué.");
         } finally {
             setSubmitting(false);
@@ -308,40 +308,13 @@ export default function RecipesScreen() {
         setModalMode('choice');
     };
 
-        const openEditModal = async (recipe: Recipe) => {
-            setSubmitting(true);
-            try {
-                const full = await apiFetch(`/recipes/${recipe.id}`);
-                setSelectedRecipe(recipe);
-                setFormMode('edit');
-
-                let parsedInstructions = [""];
-                if (full.instructions) {
-                    let text = full.instructions.replace(/[\r\n]+/g, ' ');
-                    text = text.replace(/(?:Étape|Etape)\s*\d+\s*:/gi, '|||');
-                    parsedInstructions = text.split('|||').map((s: string) => s.trim()).filter((s: string) => s.length > 0);
-                }
-                if (parsedInstructions.length === 0) parsedInstructions = [""];
-
-                setNewRecipe({
-                    title: full.title ?? '',
-                    description: full.description ?? '',
-                    instructions: parsedInstructions, // Tableau
-                    ingredients: (full.ingredients ?? []).map((ing: any) => ({
-                        name: ing.name ?? '',
-                        quantity: String(ing.pivot?.quantity ?? ing.quantity ?? ''),
-                        unit: String(ing.pivot?.unit ?? ing.unit ?? 'unité'),
-                    })),
-                });
-
-                setIsModalVisible(true);
-                setModalMode('manual');
-            } catch (e) {
-                Alert.alert("Erreur", "Impossible de charger la recette.");
-            } finally {
-                setSubmitting(false);
-            }
-        };
+    if (loading) {
+        return (
+            <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: themeColors.background }}>
+                <ActivityIndicator size="large" color={themeColors.tint} />
+            </View>
+        );
+    }
 
     return (
         <View style={[styles.container, { backgroundColor: themeColors.background, paddingTop: insets.top > 0 ? insets.top : 20 }]}>
@@ -515,7 +488,7 @@ export default function RecipesScreen() {
                                     <TouchableOpacity style={[styles.submitBtn, { backgroundColor: themeColors.tint, flex: 2 }]} onPress={handleFinalize} disabled={submitting}>
                                         {submitting ? <ActivityIndicator color="white" /> : <Text style={{color:'white', fontWeight:'bold'}}>Enregistrer la recette</Text>}
                                     </TouchableOpacity>
-                                    <TouchableOpacity style={[styles.submitBtn, { backgroundColor: '#DDD', flex: 1 }]}onPress={() => { setPreviewRecipe(null); setModalMode('ai'); }}>
+                                    <TouchableOpacity style={[styles.submitBtn, { backgroundColor: '#DDD', flex: 1 }]} onPress={() => { setPreviewRecipe(null); setModalMode('ai'); }}>
                                         <Text style={{color: '#333'}}>Retour</Text>
                                     </TouchableOpacity>
                                 </View>

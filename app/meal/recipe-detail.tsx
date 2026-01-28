@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
     View, Text, StyleSheet, ScrollView, TouchableOpacity,
     ActivityIndicator, TextInput, Alert
@@ -46,9 +46,53 @@ export default function RecipeDetailScreen() {
         ingredients: IngredientForm[];
     } | null>(null);
 
+    const fetchRecipeDetails = useCallback(async () => {
+        try {
+            const data = await apiFetch(`/recipes/${id}`);
+            setRecipe(data);
+
+            let parsedInstructions: string[] = [""];
+
+            if (data.instructions) {
+                let text = data.instructions.replace(/[\r\n]+/g, ' ');
+                text = text.replace(/(?:Étape|Etape)\s*\d+\s*:/gi, '|||');
+                parsedInstructions = text
+                    .split('|||')
+                    .map((s: string) => s.trim())
+                    .filter((s: string) => s.length > 0);
+            }
+
+            if (parsedInstructions.length === 0) {
+                parsedInstructions = [data.instructions || ""];
+            }
+
+            setEditForm({
+                title: data.title ?? '',
+                description: data.description ?? '',
+                instructions: parsedInstructions.length > 0 ? parsedInstructions : [""],
+                ingredients: (data.ingredients ?? []).map((ing: any) => ({
+                    id: ing.id,
+                    name: ing.name ?? '',
+                    quantity: String(ing.pivot?.quantity ?? 0),
+                    unit: String(ing.pivot?.unit ?? 'unité'),
+                })),
+            });
+
+            if (autoEdit === 'true') {
+                setIsEditing(true);
+            }
+        } catch (error: any) {
+            console.error("Erreur:", error.message);
+        } finally {
+            setLoading(false);
+        }
+    }, [id, autoEdit]);
+
     useEffect(() => {
-        if (id) fetchRecipeDetails();
-    }, [id]);
+        if (id) {
+            void fetchRecipeDetails();
+        }
+    }, [id, fetchRecipeDetails]);
 
     const formatIngredient = (ing: Ingredient) => {
         const name = ing.name.charAt(0).toUpperCase() + ing.name.slice(1);
@@ -93,47 +137,7 @@ export default function RecipeDetailScreen() {
         ));
     };
 
-    const fetchRecipeDetails = async () => {
-        try {
-            const data = await apiFetch(`/recipes/${id}`);
-            setRecipe(data);
 
-            let parsedInstructions: string[] = [""];
-
-            if (data.instructions) {
-                let text = data.instructions.replace(/[\r\n]+/g, ' ');
-                text = text.replace(/(?:Étape|Etape)\s*\d+\s*:/gi, '|||');
-                parsedInstructions = text
-                    .split('|||')
-                    .map((s: string) => s.trim())
-                    .filter((s: string) => s.length > 0);
-            }
-
-            if (parsedInstructions.length === 0) {
-                parsedInstructions = [data.instructions || ""];
-            }
-
-            setEditForm({
-                title: data.title ?? '',
-                description: data.description ?? '',
-                instructions: parsedInstructions.length > 0 ? parsedInstructions : [""], // On force le type tableau
-                ingredients: (data.ingredients ?? []).map((ing: any) => ({
-                    id: ing.id,
-                    name: ing.name ?? '',
-                    quantity: String(ing.pivot?.quantity ?? 0),
-                    unit: String(ing.pivot?.unit ?? 'unité'),
-                })),
-            });
-
-            if (autoEdit === 'true') {
-                setIsEditing(true);
-            }
-        } catch (error: any) {
-            console.error("Erreur:", error.message);
-        } finally {
-            setLoading(false);
-        }
-    };
 
     if (loading) {
         return (
@@ -217,7 +221,7 @@ export default function RecipeDetailScreen() {
 
             setIsEditing(false);
             Alert.alert("Succès", "Recette modifiée !");
-        } catch (e) {
+        } catch {
             Alert.alert("Erreur", "Impossible de modifier la recette.");
         } finally {
             setLoading(false);
