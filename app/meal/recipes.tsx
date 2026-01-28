@@ -413,7 +413,7 @@ export default function RecipesScreen() {
                                 >
                                     <MaterialCommunityIcons name="lightbulb-on" size={28} color="white" />
                                     <View>
-                                        <Text style={styles.choiceBtnText}>Trouver l'inspiration</Text>
+                                        <Text style={styles.choiceBtnText}>Trouver l&apos;inspiration</Text>
                                         <Text style={{color:'rgba(255,255,255,0.8)', fontSize: 12}}>Suggestions selon mes goûts</Text>
                                     </View>
                                 </TouchableOpacity>
