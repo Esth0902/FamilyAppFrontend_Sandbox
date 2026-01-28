@@ -196,7 +196,7 @@ export default function SetupHousehold() {
                     if (router.canGoBack()) {
                         router.back();
                     } else {
-                        router.replace('/');
+                        router.replace('/(tabs)/home');
                     }
                 }}>
                     <MaterialCommunityIcons name="close" size={24} color={theme.text} />

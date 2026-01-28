@@ -48,9 +48,14 @@ export default function ConnectedHome() {
 
                         if (response.ok) {
                             const data = await response.json();
-                            setUser(data.user);
-
-                            await SecureStore.setItemAsync("user", JSON.stringify(data.user));
+                            const userToSave = {
+                                ...data.user,
+                                household_id: data.user.households && data.user.households.length > 0
+                                    ? data.user.households[0].id
+                                    : null
+                            };
+                            setUser(userToSave);
+                            await SecureStore.setItemAsync("user", JSON.stringify(userToSave));
                         } else {
                             const raw = await SecureStore.getItemAsync("user");
                             if (raw) setUser(JSON.parse(raw));

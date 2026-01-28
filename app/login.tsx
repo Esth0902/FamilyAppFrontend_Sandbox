@@ -22,8 +22,8 @@ export default function Login() {
     const colorScheme = useColorScheme();
     const theme = Colors[colorScheme ?? 'light'];
 
-    const [email, setEmail] = useState("parent@example.com");
-    const [password, setPassword] = useState("password");
+    const [email, setEmail] = useState("user@test.com");
+    const [password, setPassword] = useState("password123");
     const [loading, setLoading] = useState(false);
 
     const onLogin = async () => {
