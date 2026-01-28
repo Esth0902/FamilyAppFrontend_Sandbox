@@ -1,10 +1,9 @@
 import React from "react";
 import { Tabs } from "expo-router";
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useColorScheme, Platform } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
+import { useColorScheme } from "react-native";
 import { Colors } from "@/constants/theme";
-import { MaterialCommunityIcons } from '@expo/vector-icons'; // Importe MaterialCommunityIcons
+import {Ionicons, MaterialCommunityIcons} from '@expo/vector-icons';
 
 export default function TabsLayout() {
     const colorScheme = useColorScheme();

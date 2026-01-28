@@ -131,7 +131,7 @@ export default function SetupHousehold() {
             } else {
                 Alert.alert("Erreur", "Impossible de générer le lien.");
             }
-        } catch (error) {
+        } catch (_error) {
             Alert.alert("Erreur", "Problème lors du partage.");
         } finally {
             setInviteLoading(false);
@@ -149,7 +149,7 @@ export default function SetupHousehold() {
                     <MaterialCommunityIcons name="check-bold" size={60} color={theme.accentCool} />
                 </View>
 
-                <Text style={[styles.successTitle, { color: theme.text }]}>C'est tout bon !</Text>
+                <Text style={[styles.successTitle, { color: theme.text }]}>C&apos;est tout bon !</Text>
                 <Text style={[styles.successText, { color: theme.textSecondary }]}>
                     Le foyer <Text style={{fontWeight: 'bold', color: theme.tint}}>{houseName}</Text> est configuré.
                 </Text>
@@ -157,7 +157,7 @@ export default function SetupHousehold() {
                 <View style={styles.spacer} />
 
                 <TouchableOpacity
-                    style={[styles.actionButton, { backgroundColor: '#25D366' }]} // Vert WhatsApp
+                    style={[styles.actionButton, { backgroundColor: '#25D366' }]}
                     onPress={invitePartner}
                     disabled={inviteLoading}
                 >
@@ -166,7 +166,7 @@ export default function SetupHousehold() {
                     ) : (
                         <>
                             <MaterialCommunityIcons name="whatsapp" size={24} color="white" style={{ marginRight: 10 }} />
-                            <Text style={styles.actionButtonText}>Inviter l'autre parent</Text>
+                            <Text style={styles.actionButtonText}>Inviter l&apos;autre parent</Text>
                         </>
                     )}
                 </TouchableOpacity>
@@ -179,7 +179,7 @@ export default function SetupHousehold() {
                 {/* Bouton Terminer */}
                 <TouchableOpacity onPress={finishSetup} style={styles.secondaryButton}>
                     <Text style={[styles.secondaryButtonText, { color: theme.text }]}>
-                        Aller à l'accueil
+                        Aller à l&apos;accueil
                     </Text>
                 </TouchableOpacity>
             </View>
