@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
     View, Text, StyleSheet, ScrollView, TouchableOpacity,
-    ActivityIndicator, TextInput, Alert
+    ActivityIndicator, TextInput, Alert, Modal
 } from 'react-native';
 import { Stack, useRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -22,6 +22,7 @@ interface Ingredient {
 interface Recipe {
     id: number;
     title: string;
+    type: string;
     description: string | null;
     instructions: string | null;
     ingredients: Ingredient[];
@@ -38,36 +39,53 @@ export default function RecipeDetailScreen() {
     const [loading, setLoading] = useState(true);
 
     const [isEditing, setIsEditing] = useState(false);
-    type IngredientForm = { id?: number; name: string; quantity: string; unit: string };
+    type IngredientForm = { id?: number; name: string; quantity: string; unit: string; category: string };
     const [editForm, setEditForm] = useState<{
         title: string;
+        type: string;
         description: string;
         instructions: string[];
         ingredients: IngredientForm[];
     } | null>(null);
 
+    const RECIPE_TYPES = [
+        'petit-déjeuner',
+        'entrée',
+        'plat principal',
+        'dessert',
+        'collation',
+        'boisson',
+        'autre',
+    ] as const;
+
+    const [typePickerOpen, setTypePickerOpen] = useState(false);
+
+    function splitInstructions(instructions: string | null): string[] {
+        if (!instructions) return [];
+
+        let text = instructions.replace(/[\r\n]+/g, " ").trim();
+
+        text = text.replace(/(?:^|\s)(?:Étape|Etape)\s*\d+\s*:/gi, "|||");
+
+        text = text.replace(/(?:^|\s)(\d{1,2})\s*[\.\)\-:]\s+/g, "|||");
+
+        const steps = text
+            .split("|||")
+            .map(s => s.trim())
+            .filter(s => s.length > 0);
+
+        return steps.length > 0 ? steps : [instructions.trim()];
+    }
     const fetchRecipeDetails = useCallback(async () => {
         try {
             const data = await apiFetch(`/recipes/${id}`);
             setRecipe(data);
 
-            let parsedInstructions: string[] = [""];
-
-            if (data.instructions) {
-                let text = data.instructions.replace(/[\r\n]+/g, ' ');
-                text = text.replace(/(?:Étape|Etape)\s*\d+\s*:/gi, '|||');
-                parsedInstructions = text
-                    .split('|||')
-                    .map((s: string) => s.trim())
-                    .filter((s: string) => s.length > 0);
-            }
-
-            if (parsedInstructions.length === 0) {
-                parsedInstructions = [data.instructions || ""];
-            }
+            let parsedInstructions = splitInstructions(data.instructions);
 
             setEditForm({
                 title: data.title ?? '',
+                type: data.type ?? 'plat principal',
                 description: data.description ?? '',
                 instructions: parsedInstructions.length > 0 ? parsedInstructions : [""],
                 ingredients: (data.ingredients ?? []).map((ing: any) => ({
@@ -75,6 +93,7 @@ export default function RecipeDetailScreen() {
                     name: ing.name ?? '',
                     quantity: String(ing.pivot?.quantity ?? 0),
                     unit: String(ing.pivot?.unit ?? 'unité'),
+                    category: String(ing.category ?? 'autre'),
                 })),
             });
 
@@ -112,17 +131,10 @@ export default function RecipeDetailScreen() {
     };
 
     const renderInstructions = (instructions: string | null) => {
-        if (!instructions) return <Text style={{color: themeColors.text}}>Aucune instruction.</Text>;
+        const steps = splitInstructions(instructions);
 
-        let text = instructions.replace(/[\r\n]+/g, ' ');
-        text = text.replace(/(?:Étape|Etape)\s*\d+\s*:/gi, '|||');
-        const steps = text
-            .split('|||')
-            .map(step => step.trim())
-            .filter(step => step.length > 0);
-
-        if (steps.length === 0 && instructions.trim().length > 0) {
-            steps.push(instructions);
+        if (steps.length === 0) {
+            return <Text style={{ color: themeColors.text }}>Aucune instruction.</Text>;
         }
 
         return steps.map((step, index) => (
@@ -150,7 +162,7 @@ export default function RecipeDetailScreen() {
     if (!recipe) return null;
     const addIngredientRow = () => {
         if (!editForm) return;
-        setEditForm({ ...editForm, ingredients: [...editForm.ingredients, { name: '', quantity: '', unit: '' }] });
+        setEditForm({ ...editForm, ingredients: [...editForm.ingredients, { name: '', quantity: '', unit: '', category:'autre' }] });
     };
 
     const removeIngredientRow = (index: number) => {
@@ -190,6 +202,7 @@ export default function RecipeDetailScreen() {
 
         const payload = {
             title: editForm.title.trim(),
+            type: editForm.type || 'plat princpal',
             description: editForm.description?.trim() || null,
             instructions: formattedInstructions,
             ingredients: editForm.ingredients.map(i => ({
@@ -209,8 +222,9 @@ export default function RecipeDetailScreen() {
             setRecipe(updated);
             setEditForm({
                 title: updated.title ?? '',
+                type: updated.type ?? 'plat principal',
                 description: updated.description ?? '',
-                instructions: updated.instructions ?? '',
+                instructions: splitInstructions(updated.instructions),
                 ingredients: (updated.ingredients ?? []).map((ing: any) => ({
                     id: ing.id,
                     name: ing.name ?? '',
@@ -262,6 +276,25 @@ export default function RecipeDetailScreen() {
                             value={editForm.title}
                             onChangeText={(t) => setEditForm({ ...editForm, title: t })}
                         />
+
+                            <TouchableOpacity
+                                onPress={() => setTypePickerOpen(true)}
+                                style={[
+                                    styles.input,
+                                    {
+                                        borderColor: themeColors.icon,
+                                        flexDirection: 'row',
+                                        alignItems: 'center',
+                                        justifyContent: 'space-between',
+                                        marginBottom: 15,
+                                    },
+                                ]}
+                            >
+                                <Text style={{ color: themeColors.text }}>
+                                    {editForm.type || 'plat principal'}
+                                </Text>
+                                <MaterialCommunityIcons name="chevron-down" size={20} color={themeColors.icon} />
+                            </TouchableOpacity>
 
                         <TextInput
                             style={[styles.input, { color: themeColors.text, borderColor: themeColors.icon }]}
@@ -402,6 +435,48 @@ export default function RecipeDetailScreen() {
                     </View>
                 )}
             </ScrollView>
+            <Modal
+                visible={typePickerOpen}
+                transparent
+                animationType="fade"
+                onRequestClose={() => setTypePickerOpen(false)}
+            >
+                <TouchableOpacity
+                    activeOpacity={1}
+                    onPress={() => setTypePickerOpen(false)}
+                    style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' }}
+                >
+                    <View style={{ backgroundColor: themeColors.card, padding: 16, borderTopLeftRadius: 20, borderTopRightRadius: 20 }}>
+                        <Text style={{ color: themeColors.text, fontWeight: '700', fontSize: 16, marginBottom: 12 }}>
+                            Type de recette
+                        </Text>
+
+                        {RECIPE_TYPES.map((t) => (
+                            <TouchableOpacity
+                                key={t}
+                                onPress={() => {
+                                    if (!editForm) return;
+                                    setEditForm({ ...editForm, type: t });
+                                    setTypePickerOpen(false);
+                                }}
+                                style={{
+                                    paddingVertical: 12,
+                                    flexDirection: 'row',
+                                    alignItems: 'center',
+                                    justifyContent: 'space-between',
+                                    borderTopWidth: 1,
+                                    borderTopColor: themeColors.icon,
+                                }}
+                            >
+                                <Text style={{ color: themeColors.text }}>{t}</Text>
+                                {editForm?.type === t && (
+                                    <MaterialCommunityIcons name="check" size={20} color={themeColors.tint} />
+                                )}
+                            </TouchableOpacity>
+                        ))}
+                    </View>
+                </TouchableOpacity>
+            </Modal>
         </View>
     );
 }

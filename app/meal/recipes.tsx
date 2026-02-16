@@ -25,6 +25,7 @@ interface Recipe {
     id: number;
     title: string;
     description: string | null;
+    type: string;
 }
 type IngredientForm = { name: string; quantity: string; unit: string };
 
@@ -93,12 +94,37 @@ export default function RecipesScreen() {
             activeOpacity={0.85}
         >
             <View style={styles.recipeInfo}>
-                <Text style={[styles.recipeTitle, { color: themeColors.text }]}>{item.title}</Text>
+                {/* Ligne titre + badge */}
+                <View style={{ gap: 6 }}>
+                    <Text
+                        style={[styles.recipeTitle, { color: themeColors.text }]}
+                        numberOfLines={1}
+                    >
+                        {item.title}
+                    </Text>
+
+                    <View
+                        style={{
+                            alignSelf: "flex-start",
+                            paddingHorizontal: 10,
+                            paddingVertical: 4,
+                            borderRadius: 999,
+                            backgroundColor: colorScheme === "dark" ? "#2A2A2A" : "#EEE",
+                        }}
+                    >
+                        <Text style={{ color: themeColors.icon, fontSize: 12, fontWeight: "600" }}>
+                            {item.type ?? "autre"}
+                        </Text>
+                    </View>
+                </View>
+
+                {/* Description */}
                 <Text style={[styles.recipeDesc, { color: themeColors.icon }]} numberOfLines={2}>
                     {item.description || "Aucune description"}
                 </Text>
             </View>
 
+            {/* Actions à droite */}
             <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
                 <TouchableOpacity
                     onPress={() => openRecipeActions(item)}

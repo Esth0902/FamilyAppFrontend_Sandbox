@@ -143,7 +143,7 @@ export default function ConnectedHome() {
 
                             <TouchableOpacity
                                 style={[styles.primaryButton, { backgroundColor: theme.tint }]}
-                                onPress={() => { /* Navigation vers dashboard futur */ }}
+                                onPress={() => { router.push("/householdSetup") }}
                                 activeOpacity={0.8}
                             >
                                 <Text style={styles.primaryButtonText}>Voir mon tableau de bord</Text>
