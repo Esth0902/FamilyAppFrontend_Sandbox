@@ -13,6 +13,8 @@ import { apiFetch } from '@/src/api/client';
 interface Ingredient {
     id: number;
     name: string;
+    base_quantity?: number;
+    scaled_quantity?: number;
     pivot: {
         quantity: number;
         unit?: string | null;
@@ -26,6 +28,8 @@ interface Recipe {
     description: string | null;
     instructions: string | null;
     ingredients: Ingredient[];
+    base_servings?: number;
+    display_servings?: number;
 }
 
 export default function RecipeDetailScreen() {
@@ -37,6 +41,7 @@ export default function RecipeDetailScreen() {
 
     const [recipe, setRecipe] = useState<Recipe | null>(null);
     const [loading, setLoading] = useState(true);
+    const [displayServings, setDisplayServings] = useState(1);
 
     const [isEditing, setIsEditing] = useState(false);
     type IngredientForm = { id?: number; name: string; quantity: string; unit: string; category: string };
@@ -44,6 +49,7 @@ export default function RecipeDetailScreen() {
         title: string;
         type: string;
         description: string;
+        base_servings: string;
         instructions: string[];
         ingredients: IngredientForm[];
     } | null>(null);
@@ -59,6 +65,13 @@ export default function RecipeDetailScreen() {
     ] as const;
 
     const [typePickerOpen, setTypePickerOpen] = useState(false);
+    const parseServingsValue = (value: string) => {
+        const parsed = Number.parseInt(value, 10);
+        if (!Number.isFinite(parsed) || parsed < 1 || parsed > 30) {
+            return null;
+        }
+        return parsed;
+    };
 
     function splitInstructions(instructions: string | null): string[] {
         if (!instructions) return [];
@@ -80,6 +93,7 @@ export default function RecipeDetailScreen() {
         try {
             const data = await apiFetch(`/recipes/${id}`);
             setRecipe(data);
+            setDisplayServings(Number(data.display_servings ?? data.base_servings ?? 1));
 
             let parsedInstructions = splitInstructions(data.instructions);
 
@@ -87,6 +101,7 @@ export default function RecipeDetailScreen() {
                 title: data.title ?? '',
                 type: data.type ?? 'plat principal',
                 description: data.description ?? '',
+                base_servings: String(data.base_servings ?? 1),
                 instructions: parsedInstructions.length > 0 ? parsedInstructions : [""],
                 ingredients: (data.ingredients ?? []).map((ing: any) => ({
                     id: ing.id,
@@ -115,8 +130,12 @@ export default function RecipeDetailScreen() {
 
     const formatIngredient = (ing: Ingredient) => {
         const name = ing.name.charAt(0).toUpperCase() + ing.name.slice(1);
+        const baseServings = Math.max(1, Number(recipe?.base_servings ?? 1));
+        const safeDisplayServings = Math.max(1, displayServings);
+        const scaleFactor = safeDisplayServings / baseServings;
 
-        const quantity = Number(ing.pivot?.quantity ?? 0);
+        const baseQuantity = Number(ing.base_quantity ?? ing.pivot?.quantity ?? 0);
+        const quantity = Math.round(baseQuantity * scaleFactor * 100) / 100;
         const unit = String(ing.pivot?.unit ?? '').trim();
 
         if (quantity === 0 || unit.toLowerCase().includes('goût')) {
@@ -147,6 +166,14 @@ export default function RecipeDetailScreen() {
                 </Text>
             </View>
         ));
+    };
+
+    const decreaseDisplayServings = () => {
+        setDisplayServings((prev) => Math.max(1, prev - 1));
+    };
+
+    const increaseDisplayServings = () => {
+        setDisplayServings((prev) => Math.min(30, prev + 1));
     };
 
 
@@ -193,6 +220,10 @@ export default function RecipeDetailScreen() {
 
     const saveRecipe = async () => {
         if (!recipe || !editForm) return;
+        const parsedBaseServings = parseServingsValue(editForm.base_servings);
+        if (!parsedBaseServings) {
+            return Alert.alert("Erreur", "Le nombre de portions doit etre entre 1 et 30.");
+        }
 
         const formattedInstructions = editForm.instructions
             .map((step: string) => step.trim())
@@ -202,8 +233,9 @@ export default function RecipeDetailScreen() {
 
         const payload = {
             title: editForm.title.trim(),
-            type: editForm.type || 'plat princpal',
+            type: editForm.type || 'plat principal',
             description: editForm.description?.trim() || null,
+            base_servings: parsedBaseServings,
             instructions: formattedInstructions,
             ingredients: editForm.ingredients.map(i => ({
                 name: i.name.trim(),
@@ -224,14 +256,17 @@ export default function RecipeDetailScreen() {
                 title: updated.title ?? '',
                 type: updated.type ?? 'plat principal',
                 description: updated.description ?? '',
+                base_servings: String(updated.base_servings ?? parsedBaseServings),
                 instructions: splitInstructions(updated.instructions),
                 ingredients: (updated.ingredients ?? []).map((ing: any) => ({
                     id: ing.id,
                     name: ing.name ?? '',
                     quantity: String(ing.pivot?.quantity ?? 0),
                     unit: String(ing.pivot?.unit ?? 'unité'),
+                    category: String(ing.category ?? 'autre'),
                 })),
             });
+            setDisplayServings(parsedBaseServings);
 
             setIsEditing(false);
             Alert.alert("Succès", "Recette modifiée !");
@@ -269,6 +304,7 @@ export default function RecipeDetailScreen() {
                 <View style={styles.section}>
                     {isEditing && editForm ? (
                         <View>
+                        <Text style={[styles.fieldLabel, { color: themeColors.text }]}>Titre</Text>
                         <TextInput
                             style={[styles.input, { color: themeColors.text, borderColor: themeColors.icon, marginBottom: 15 }]}
                             placeholder="Titre de la recette"
@@ -277,6 +313,7 @@ export default function RecipeDetailScreen() {
                             onChangeText={(t) => setEditForm({ ...editForm, title: t })}
                         />
 
+                            <Text style={[styles.fieldLabel, { color: themeColors.text }]}>Type</Text>
                             <TouchableOpacity
                                 onPress={() => setTypePickerOpen(true)}
                                 style={[
@@ -296,6 +333,7 @@ export default function RecipeDetailScreen() {
                                 <MaterialCommunityIcons name="chevron-down" size={20} color={themeColors.icon} />
                             </TouchableOpacity>
 
+                        <Text style={[styles.fieldLabel, { color: themeColors.text }]}>Description</Text>
                         <TextInput
                             style={[styles.input, { color: themeColors.text, borderColor: themeColors.icon }]}
                             placeholder="Description"
@@ -303,6 +341,16 @@ export default function RecipeDetailScreen() {
                             value={editForm.description}
                             onChangeText={(t) => setEditForm({ ...editForm, description: t })}
                             multiline
+                        />
+
+                        <Text style={[styles.fieldLabel, { color: themeColors.text }]}>Portions de base</Text>
+                        <TextInput
+                            style={[styles.input, { color: themeColors.text, borderColor: themeColors.icon }]}
+                            placeholder="Portions de base (1-30)"
+                            placeholderTextColor={themeColors.icon}
+                            keyboardType="number-pad"
+                            value={editForm.base_servings}
+                            onChangeText={(t) => setEditForm({ ...editForm, base_servings: t.replace(/[^0-9]/g, '') })}
                         />
                         </View>
                     ) : (
@@ -315,9 +363,45 @@ export default function RecipeDetailScreen() {
                 {/* Section Ingrédients */}
                 <View style={styles.section}>
                     <Text style={[styles.sectionTitle, { color: themeColors.tint }]}>Ingrédients</Text>
+                    {!isEditing && (
+                        <View style={styles.servingsRow}>
+                            <Text style={[styles.servingsLabel, { color: themeColors.text }]}>Portions</Text>
+                            <View style={styles.servingsControls}>
+                                <TouchableOpacity
+                                    onPress={decreaseDisplayServings}
+                                    style={[styles.servingButton, { borderColor: themeColors.icon }]}
+                                >
+                                    <MaterialCommunityIcons name="minus" size={18} color={themeColors.text} />
+                                </TouchableOpacity>
+                                <TextInput
+                                    style={[styles.servingsInput, { color: themeColors.text, borderColor: themeColors.icon }]}
+                                    keyboardType="number-pad"
+                                    value={String(displayServings)}
+                                    onChangeText={(value) => {
+                                        const parsed = parseServingsValue(value);
+                                        if (parsed) {
+                                            setDisplayServings(parsed);
+                                        }
+                                    }}
+                                />
+                                <TouchableOpacity
+                                    onPress={increaseDisplayServings}
+                                    style={[styles.servingButton, { borderColor: themeColors.icon }]}
+                                >
+                                    <MaterialCommunityIcons name="plus" size={18} color={themeColors.text} />
+                                </TouchableOpacity>
+                            </View>
+                        </View>
+                    )}
                     <View style={[styles.card, { backgroundColor: colorScheme === 'dark' ? '#1E1E1E' : '#F9F9F9' }]}>
                         {isEditing && editForm ? (
                             <View>
+                                <View style={styles.ingHeaderRow}>
+                                    <Text style={[styles.ingHeaderCell, { flex: 2, color: themeColors.icon }]}>Nom</Text>
+                                    <Text style={[styles.ingHeaderCell, { flex: 0.8, color: themeColors.icon }]}>Qte</Text>
+                                    <Text style={[styles.ingHeaderCell, { flex: 0.8, color: themeColors.icon }]}>Unite</Text>
+                                    <View style={{ width: 28 }} />
+                                </View>
                                 {editForm.ingredients.map((ing, idx) => (
                                     <View key={idx} style={styles.ingEditRow}>
                                         <TextInput
@@ -535,11 +619,29 @@ const styles = StyleSheet.create({
         marginTop: 8,
         fontSize: 15,
     },
+    fieldLabel: {
+        fontSize: 13,
+        fontWeight: "700",
+        marginTop: 2,
+        marginBottom: 2,
+        letterSpacing: 0.3,
+    },
 
     ingEditRow: {
         flexDirection: "row",
         gap: 10,
         marginBottom: 10,
+    },
+    ingHeaderRow: {
+        flexDirection: "row",
+        gap: 10,
+        marginBottom: 8,
+        paddingHorizontal: 2,
+    },
+    ingHeaderCell: {
+        fontSize: 12,
+        fontWeight: "700",
+        textTransform: "uppercase",
     },
 
     ingInput: {
@@ -547,6 +649,41 @@ const styles = StyleSheet.create({
         padding: 10,
         borderWidth: 1,
         fontSize: 14,
+    },
+
+    servingsRow: {
+        marginBottom: 12,
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: 10,
+    },
+    servingsLabel: {
+        fontSize: 14,
+        fontWeight: "600",
+    },
+    servingsControls: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 8,
+    },
+    servingButton: {
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+        borderWidth: 1,
+        justifyContent: "center",
+        alignItems: "center",
+    },
+    servingsInput: {
+        width: 62,
+        borderWidth: 1,
+        borderRadius: 10,
+        paddingVertical: 6,
+        paddingHorizontal: 10,
+        textAlign: "center",
+        fontSize: 15,
+        fontWeight: "600",
     },
 
     saveBtn: {

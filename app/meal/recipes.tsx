@@ -26,6 +26,8 @@ interface Recipe {
     title: string;
     description: string | null;
     type: string;
+    base_servings?: number;
+    display_servings?: number;
 }
 type IngredientForm = { name: string; quantity: string; unit: string };
 
@@ -46,6 +48,13 @@ export default function RecipesScreen() {
     const [selectedRecipe, setSelectedRecipe] = useState<Recipe | null>(null);
     const [formMode, setFormMode] = useState<'create' | 'edit'>('create');
     const [aiIntent, setAiIntent] = useState<'specific' | 'ideas'>('ideas');
+    const parseServingsValue = (value: string) => {
+        const parsed = Number.parseInt(value, 10);
+        if (!Number.isFinite(parsed) || parsed < 1 || parsed > 30) {
+            return null;
+        }
+        return parsed;
+    };
     useEffect(() => {
         void fetchRecipes();
     }, []);
@@ -116,6 +125,9 @@ export default function RecipesScreen() {
                             {item.type ?? "autre"}
                         </Text>
                     </View>
+                    <Text style={{ color: themeColors.icon, fontSize: 12 }}>
+                        {item.display_servings ?? item.base_servings ?? 1} portions
+                    </Text>
                 </View>
 
                 {/* Description */}
@@ -141,7 +153,9 @@ export default function RecipesScreen() {
 
     const [newRecipe, setNewRecipe] = useState({
         title: '',
+        type: 'plat principal',
         description: '',
+        base_servings: '1',
         instructions: [''],
         ingredients: [{ name: '', quantity: '', unit: 'g' } as IngredientForm],
     });
@@ -162,6 +176,10 @@ export default function RecipesScreen() {
     };
     const handleManualSubmit = async () => {
         if (!newRecipe.title.trim()) return Alert.alert('Erreur', 'Le titre de la recette est obligatoire');
+        const parsedBaseServings = parseServingsValue(newRecipe.base_servings);
+        if (!parsedBaseServings) {
+            return Alert.alert('Erreur', 'Le nombre de portions doit etre entre 1 et 30.');
+        }
 
         setSubmitting(true);
         try {
@@ -181,6 +199,8 @@ export default function RecipesScreen() {
                 ...newRecipe,
                 instructions: formattedInstructions, // On envoie le texte formaté
                 household_id: householdId,
+                type: newRecipe.type || 'plat principal',
+                base_servings: parsedBaseServings,
                 ingredients: newRecipe.ingredients.map(ing => ({
                     name: ing.name.trim(),
                     unit: ing.unit.trim() || 'unité',
@@ -327,7 +347,9 @@ export default function RecipesScreen() {
     const resetForm = () => {
         setNewRecipe({
             title: '',
+            type: 'plat principal',
             description: '',
+            base_servings: '1',
             instructions: [''],
             ingredients: [{ name: '', quantity: '', unit: 'g' }]
         });
@@ -524,6 +546,7 @@ export default function RecipesScreen() {
                         {/* MODE MANUEL */}
                         {modalMode === 'manual' && (
                             <ScrollView showsVerticalScrollIndicator={false}>
+                                <Text style={[styles.fieldLabel, { color: themeColors.text }]}>Titre</Text>
                                 <TextInput
                                     style={[styles.input, { color: themeColors.text }]}
                                     placeholder="Titre de la recette"
@@ -532,6 +555,7 @@ export default function RecipesScreen() {
                                     onChangeText={t => setNewRecipe({...newRecipe, title: t})}
                                 />
 
+                                <Text style={[styles.fieldLabel, { color: themeColors.text }]}>Description</Text>
                                 <TextInput
                                     style={[styles.input, { color: themeColors.text, minHeight: 60 }]}
                                     placeholder="Description courte (optionnel)"
@@ -541,7 +565,22 @@ export default function RecipesScreen() {
                                     multiline
                                 />
 
+                                <Text style={[styles.fieldLabel, { color: themeColors.text }]}>Portions de base</Text>
+                                <TextInput
+                                    style={[styles.input, { color: themeColors.text }]}
+                                    placeholder="Portions de base (1-30)"
+                                    placeholderTextColor={themeColors.icon}
+                                    keyboardType="number-pad"
+                                    value={newRecipe.base_servings}
+                                    onChangeText={t => setNewRecipe({ ...newRecipe, base_servings: t.replace(/[^0-9]/g, '') })}
+                                />
+
                                 <Text style={[styles.label, { color: themeColors.text }]}>Ingrédients</Text>
+                                <View style={styles.ingHeaderRow}>
+                                    <Text style={[styles.ingHeaderCell, { flex: 2, color: themeColors.icon }]}>Nom</Text>
+                                    <Text style={[styles.ingHeaderCell, { flex: 1, color: themeColors.icon }]}>Qte</Text>
+                                    <Text style={[styles.ingHeaderCell, { flex: 1, color: themeColors.icon }]}>Unite</Text>
+                                </View>
                                 {newRecipe.ingredients.map((ing, index) => (
                                     <View key={index} style={styles.ingRow}>
                                         <TextInput
@@ -675,7 +714,10 @@ const styles = StyleSheet.create({
     suggestionItem: { flexDirection: 'row', alignItems: 'center', padding: 15, borderRadius: 12, borderWidth: 1, marginBottom: 10 },
     previewTitle: { fontSize: 22, fontWeight: 'bold', marginBottom: 5 },
     input: { borderRadius: 10, padding: 12, borderWidth: 1, borderColor: '#DDD', marginBottom: 15, fontSize: 16 },
+    fieldLabel: { fontSize: 13, fontWeight: '700', marginBottom: 2, letterSpacing: 0.3 },
     label: { fontSize: 14, fontWeight: 'bold', marginBottom: 8, letterSpacing: 1 },
+    ingHeaderRow: { flexDirection: 'row', gap: 10, marginBottom: 8, paddingHorizontal: 2 },
+    ingHeaderCell: { fontSize: 12, fontWeight: '700', textTransform: 'uppercase' },
     ingRow: { flexDirection: 'row', gap: 10, marginBottom: 10 },
     addIngBtn: { padding: 10, marginBottom: 20 },
     submitBtn: { height: 55, borderRadius: 15, justifyContent: 'center', alignItems: 'center' },

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
     View,
     Text,
@@ -11,156 +11,688 @@ import {
     ActivityIndicator,
     KeyboardAvoidingView,
     Platform,
+    Share,
     useColorScheme,
 } from "react-native";
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { Colors } from "@/constants/theme";
 import * as SecureStore from "expo-secure-store";
 import { apiFetch } from "@/src/api/client";
 
-const MODULES = [
-    { id: 'meals', label: 'Repas & Courses', desc: 'Menus et liste partagée.', icon: 'food-apple-outline' },
-    { id: 'tasks', label: 'Tâches Ménagères', desc: 'Suivi des corvées.', icon: 'broom' },
-    { id: 'budget', label: 'Budget & Argent', desc: 'Argent de poche, cagnottes.', icon: 'piggy-bank-outline' },
-    { id: 'calendar', label: 'Agenda Familial', desc: 'Planning partagé.', icon: 'calendar-clock' },
+type ModuleKey = "meals" | "tasks" | "budget" | "calendar";
+type MemberRole = "parent" | "enfant";
+type TaskRecurrence = "daily" | "weekly" | "monthly";
+
+type HouseholdMember = {
+    name: string;
+    role: MemberRole;
+    email?: string;
+};
+
+type CreatedMemberCredential = {
+    id?: number;
+    name?: string;
+    generated_email?: string;
+    generated_password?: string;
+    share_text?: string;
+};
+
+type TaskTemplateInput = {
+    name: string;
+    recurrence: TaskRecurrence;
+    description: string;
+    is_rotation: boolean;
+};
+
+type DietaryTagOption = {
+    id: number;
+    type: "diet" | "allergen" | "dislike" | "restriction" | "cuisine_rule";
+    key: string;
+    label: string;
+    is_system: boolean;
+};
+type DietaryTagDetail = {
+    key: string;
+    label: string;
+    type: DietaryTagOption["type"];
+};
+
+const MODULES: { id: ModuleKey; label: string; desc: string; icon: string }[] = [
+    { id: "meals", label: "Repas & Courses", desc: "Menus et liste partagee.", icon: "food-apple-outline" },
+    { id: "tasks", label: "Taches Menageres", desc: "Suivi des corvees.", icon: "broom" },
+    { id: "budget", label: "Budget & Argent", desc: "Argent de poche par enfant.", icon: "piggy-bank-outline" },
+    { id: "calendar", label: "Agenda Familial", desc: "Planning partage.", icon: "calendar-clock" },
 ];
 
 const DAYS = [
-    { label: 'Lun', value: 'Monday' },
-    { label: 'Mar', value: 'Tuesday' },
-    { label: 'Mer', value: 'Wednesday' },
-    { label: 'Jeu', value: 'Thursday' },
-    { label: 'Ven', value: 'Friday' },
-    { label: 'Sam', value: 'Saturday' },
-    { label: 'Dim', value: 'Sunday' },
+    { label: "Lun", value: 1 },
+    { label: "Mar", value: 2 },
+    { label: "Mer", value: 3 },
+    { label: "Jeu", value: 4 },
+    { label: "Ven", value: 5 },
+    { label: "Sam", value: 6 },
+    { label: "Dim", value: 7 },
 ];
+
+const DURATION_CHOICES = [12, 24, 48];
+const DIETARY_TYPE_LABELS: Record<DietaryTagOption["type"], string> = {
+    diet: "Regimes",
+    allergen: "Allergenes",
+    dislike: "A eviter",
+    restriction: "Restrictions",
+    cuisine_rule: "Cuisine",
+};
+const ALLOWED_DIETARY_TYPES: DietaryTagOption["type"][] = ["diet", "allergen", "dislike", "restriction", "cuisine_rule"];
+const DIETARY_TYPE_ORDER: DietaryTagOption["type"][] = ["diet", "allergen", "restriction", "dislike", "cuisine_rule"];
+
+const normalizeDietaryType = (value: unknown): DietaryTagOption["type"] => {
+    const rawType = String(value ?? "");
+    return ALLOWED_DIETARY_TYPES.includes(rawType as DietaryTagOption["type"])
+        ? (rawType as DietaryTagOption["type"])
+        : "restriction";
+};
+
+const sortDietaryTags = (tags: DietaryTagOption[]): DietaryTagOption[] => {
+    return [...tags].sort((a, b) => {
+        const typeIndexDiff = DIETARY_TYPE_ORDER.indexOf(a.type) - DIETARY_TYPE_ORDER.indexOf(b.type);
+        if (typeIndexDiff !== 0) {
+            return typeIndexDiff;
+        }
+        return a.label.localeCompare(b.label, "fr", { sensitivity: "base" });
+    });
+};
+
+const parseTimeToHHMM = (value: unknown): string | null => {
+    if (typeof value !== "string") {
+        return null;
+    }
+
+    const match = value.trim().match(/^(\d{1,2}):(\d{2})(?::\d{2})?$/);
+    if (!match) {
+        return null;
+    }
+
+    const hours = Number(match[1]);
+    const minutes = Number(match[2]);
+
+    if (!Number.isInteger(hours) || !Number.isInteger(minutes) || hours < 0 || hours > 23 || minutes < 0 || minutes > 59) {
+        return null;
+    }
+
+    return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+};
+
+const buildMemberShareText = (member: CreatedMemberCredential): string => {
+    const name = String(member.name ?? "Membre").trim() || "Membre";
+    const email = String(member.generated_email ?? "").trim();
+    const password = String(member.generated_password ?? "").trim();
+
+    if (member.share_text && String(member.share_text).trim().length > 0) {
+        return String(member.share_text).trim();
+    }
+
+    return `Bonjour ${name} !\n\n`
+        + "Ton compte FamilyApp est pret.\n"
+        + `Email : ${email}\n`
+        + `Mot de passe temporaire : ${password}\n\n`
+        + "Connecte-toi puis modifie ton mot de passe des la premiere connexion.";
+};
 
 export default function SetupHousehold() {
     const router = useRouter();
+    const params = useLocalSearchParams<{ mode?: string; scope?: string }>();
+    const isEditMode = params.mode === "edit";
+    const isMealsScope = params.scope === "meals";
     const colorScheme = useColorScheme();
-    const theme = Colors[colorScheme ?? 'light'];
+    const theme = Colors[colorScheme ?? "light"];
 
-    // États de chargement et d'édition
     const [loading, setLoading] = useState(false);
     const [initialLoading, setInitialLoading] = useState(true);
-    const [isEditing, setIsEditing] = useState(false);
-    const [householdId, setHouseholdId] = useState<number | null>(null);
+    const [alreadyConfigured, setAlreadyConfigured] = useState(false);
 
-    // Champs du formulaire
     const [houseName, setHouseName] = useState("");
-    const [activeModules, setActiveModules] = useState<Record<string, boolean>>({
-        meals: true, tasks: true, budget: true, calendar: true,
+
+    const [activeModules, setActiveModules] = useState<Record<ModuleKey, boolean>>({
+        meals: true,
+        tasks: true,
+        budget: true,
+        calendar: true,
     });
-    const [pollDay, setPollDay] = useState("Friday");
+
+    const [expandedModules, setExpandedModules] = useState<Record<ModuleKey, boolean>>({
+        meals: false,
+        tasks: false,
+        budget: false,
+        calendar: false,
+    });
+
+    const [mealOptions, setMealOptions] = useState({
+        recipes: true,
+        polls: true,
+        shopping_list: true,
+    });
+    const [pollDay, setPollDay] = useState(5);
     const [pollTime, setPollTime] = useState("10:00");
     const [pollDuration, setPollDuration] = useState(24);
+    const [maxVotesPerUser, setMaxVotesPerUser] = useState("3");
+    const [defaultServings, setDefaultServings] = useState("4");
+    const [selectedMealDietaryTags, setSelectedMealDietaryTags] = useState<string[]>([]);
+    const [selectedMealDietaryTagDetails, setSelectedMealDietaryTagDetails] = useState<Record<string, DietaryTagDetail>>({});
+    const [availableDietaryTags, setAvailableDietaryTags] = useState<DietaryTagOption[]>([]);
+    const [dietaryTagsLoading, setDietaryTagsLoading] = useState(false);
+    const [dietaryTagSearch, setDietaryTagSearch] = useState("");
+    const [selectedDietaryTypeFilter, setSelectedDietaryTypeFilter] = useState<DietaryTagOption["type"]>("diet");
+    const [creatingDietaryTag, setCreatingDietaryTag] = useState(false);
+    const [mealExpandedSections, setMealExpandedSections] = useState({
+        recipes: false,
+        polls: false,
+    });
+    const [createdMembersForShare, setCreatedMembersForShare] = useState<CreatedMemberCredential[]>([]);
+    const [sendingMemberKey, setSendingMemberKey] = useState<string | null>(null);
 
-    // Gestion des enfants (création uniquement)
-    const [childName, setChildName] = useState("");
-    const [children, setChildren] = useState<string[]>([]);
+    const [tasksSettings, setTasksSettings] = useState({
+        reminders_enabled: true,
+        templates: [] as TaskTemplateInput[],
+    });
+    const [taskTemplateName, setTaskTemplateName] = useState("");
+    const [taskTemplateDescription, setTaskTemplateDescription] = useState("");
+    const [taskTemplateRecurrence, setTaskTemplateRecurrence] = useState<TaskRecurrence>("weekly");
 
-    // 1. Charger les données existantes au montage
-    useEffect(() => {
-        loadExistingData();
+    const [calendarSettings, setCalendarSettings] = useState({
+        shared_view_enabled: true,
+        absence_tracking_enabled: true,
+    });
+
+    const [budgetSettings, setBudgetSettings] = useState({
+        currency: "EUR",
+        notes: "",
+    });
+
+    const [members, setMembers] = useState<HouseholdMember[]>([]);
+    const [memberName, setMemberName] = useState("");
+    const [memberEmail, setMemberEmail] = useState("");
+    const [memberRole, setMemberRole] = useState<MemberRole>("enfant");
+    const [activeUser, setActiveUser] = useState<{ name?: string; email?: string } | null>(null);
+    const visibleModules = isMealsScope
+        ? MODULES.filter((module) => module.id === "meals")
+        : MODULES;
+
+    const toggleModule = (id: ModuleKey) => {
+        setActiveModules((prev) => {
+            const nextValue = !prev[id];
+            setExpandedModules((expandedPrev) => ({ ...expandedPrev, [id]: nextValue ? expandedPrev[id] : false }));
+            return { ...prev, [id]: nextValue };
+        });
+    };
+
+    const toggleModulePanel = (id: ModuleKey) => {
+        if (!activeModules[id]) {
+            return;
+        }
+        setExpandedModules((prev) => ({ ...prev, [id]: !prev[id] }));
+    };
+
+    const toggleMealSection = (section: "recipes" | "polls") => {
+        setMealExpandedSections((prev) => ({ ...prev, [section]: !prev[section] }));
+    };
+
+    const updateMealOption = (option: "recipes" | "polls" | "shopping_list", value: boolean) => {
+        setMealOptions((prev) => ({ ...prev, [option]: value }));
+        if (!value && (option === "recipes" || option === "polls")) {
+            setMealExpandedSections((prev) => ({ ...prev, [option]: false }));
+        }
+    };
+
+    const loadDietaryTags = useCallback(async (type: DietaryTagOption["type"]) => {
+        setDietaryTagsLoading(true);
+        try {
+            const tagsResponse = await apiFetch(`/households/dietary-tags?type=${type}`);
+            if (Array.isArray(tagsResponse)) {
+                const normalizedTags = tagsResponse
+                    .map((tag) => ({
+                        id: Number((tag as { id?: unknown })?.id ?? 0),
+                        type: normalizeDietaryType((tag as { type?: unknown })?.type),
+                        key: String((tag as { key?: unknown })?.key ?? "").trim(),
+                        label: String((tag as { label?: unknown })?.label ?? "").trim(),
+                        is_system: !!(tag as { is_system?: unknown })?.is_system,
+                    }))
+                    .filter((tag) => tag.id > 0 && tag.key.length > 0 && tag.label.length > 0);
+                setAvailableDietaryTags(sortDietaryTags(normalizedTags));
+                setSelectedMealDietaryTagDetails((prev) => {
+                    const next = { ...prev };
+                    normalizedTags.forEach((tag) => {
+                        next[tag.key] = {
+                            key: tag.key,
+                            label: tag.label,
+                            type: tag.type,
+                        };
+                    });
+                    return next;
+                });
+            } else {
+                setAvailableDietaryTags([]);
+            }
+        } catch (error) {
+            console.error("Erreur chargement dietary tags:", error);
+            setAvailableDietaryTags([]);
+        } finally {
+            setDietaryTagsLoading(false);
+        }
     }, []);
 
-    const loadExistingData = async () => {
+    const toggleMealDietaryTag = (tagKey: string) => {
+        setSelectedMealDietaryTags((prev) =>
+            prev.includes(tagKey)
+                ? prev.filter((existingTag) => existingTag !== tagKey)
+                : [...prev, tagKey]
+        );
+    };
+
+    const createDietaryTag = async () => {
+        const label = dietaryTagSearch.trim();
+        if (label.length < 2) {
+            Alert.alert("Dietary tags", "Le tag doit contenir au moins 2 caracteres.");
+            return;
+        }
+
+        setCreatingDietaryTag(true);
         try {
-            const userStr = await SecureStore.getItemAsync("user");
-            if (userStr) {
-                const user = JSON.parse(userStr);
-                if (user.household_id) {
-                    setIsEditing(true);
-                    setHouseholdId(user.household_id);
-                    await fetchHouseholdDetails(user.household_id);
+            const response = await apiFetch("/households/dietary-tags", {
+                method: "POST",
+                body: JSON.stringify({
+                    label,
+                    type: selectedDietaryTypeFilter,
+                }),
+            });
+
+            const createdTag = response?.tag;
+            if (createdTag) {
+                const normalized = {
+                    id: Number(createdTag.id ?? 0),
+                    type: normalizeDietaryType(createdTag.type),
+                    key: String(createdTag.key ?? "").trim(),
+                    label: String(createdTag.label ?? "").trim(),
+                    is_system: !!createdTag.is_system,
+                };
+
+                if (normalized.id > 0 && normalized.key) {
+                    setAvailableDietaryTags((prev) => {
+                        const withoutDuplicate = prev.filter((tag) => tag.id !== normalized.id);
+                        return sortDietaryTags([...withoutDuplicate, normalized]);
+                    });
+                    setSelectedMealDietaryTagDetails((prev) => ({
+                        ...prev,
+                        [normalized.key]: {
+                            key: normalized.key,
+                            label: normalized.label,
+                            type: normalized.type,
+                        },
+                    }));
+                    setSelectedMealDietaryTags((prev) =>
+                        prev.includes(normalized.key) ? prev : [...prev, normalized.key]
+                    );
+                    setDietaryTagSearch("");
                 }
             }
-        } catch (e) {
-            console.error("Erreur lecture user", e);
+        } catch (error: any) {
+            const closestTag = error?.data?.closest_tag;
+            if (error?.status === 409 && closestTag?.key) {
+                Alert.alert(
+                    "Tag similaire detecte",
+                    `${closestTag.label} existe deja. Je l'ai selectionne a la place.`,
+                );
+                setSelectedMealDietaryTags((prev) =>
+                    prev.includes(String(closestTag.key)) ? prev : [...prev, String(closestTag.key)]
+                );
+                setSelectedMealDietaryTagDetails((prev) => ({
+                    ...prev,
+                    [String(closestTag.key)]: {
+                        key: String(closestTag.key),
+                        label: String(closestTag.label ?? closestTag.key),
+                        type: normalizeDietaryType(closestTag.type),
+                    },
+                }));
+                setDietaryTagSearch("");
+                return;
+            }
+            Alert.alert("Dietary tags", error?.message || "Impossible d'ajouter ce tag.");
         } finally {
-            setInitialLoading(false);
+            setCreatingDietaryTag(false);
         }
     };
 
-    const fetchHouseholdDetails = async (id: number) => {
+    useEffect(() => {
+        const loadSetupState = async () => {
+            try {
+                const userStr = await SecureStore.getItemAsync("user");
+                let hasHousehold = false;
+
+                if (userStr) {
+                    const user = JSON.parse(userStr);
+                    hasHousehold = !!user.household_id || (Array.isArray(user.households) && user.households.length > 0);
+                    setAlreadyConfigured(hasHousehold);
+                    setActiveUser({
+                        name: typeof user.name === "string" ? user.name : undefined,
+                        email: typeof user.email === "string" ? user.email : undefined,
+                    });
+                }
+
+                if (isEditMode) {
+                    if (!hasHousehold) {
+                        Alert.alert("Configuration", "Aucun foyer n'est configure pour ce compte.");
+                        router.replace("/(tabs)/home");
+                        return;
+                    }
+
+                    const response = await apiFetch("/households/config");
+                    const config = response?.config;
+                    const modules = config?.modules ?? {};
+                    const meals = modules.meals ?? {};
+                    const mealsOptions = meals.options ?? {};
+                    const mealsSettings = meals.settings ?? {};
+                    const tasks = modules.tasks ?? {};
+                    const tasksSettings = tasks.settings ?? {};
+                    const calendar = modules.calendar ?? {};
+                    const budget = modules.budget ?? {};
+
+                    setHouseName(typeof config?.household_name === "string" ? config.household_name : "");
+                    setActiveModules({
+                        meals: !!meals.enabled,
+                        tasks: !!tasks.enabled,
+                        budget: !!budget.enabled,
+                        calendar: !!calendar.enabled,
+                    });
+                    setMealOptions({
+                        recipes: mealsOptions.recipes !== false,
+                        polls: mealsOptions.polls !== false,
+                        shopping_list: mealsOptions.shopping_list !== false,
+                    });
+                    setPollDay(Number.isInteger(mealsSettings.poll_day) ? mealsSettings.poll_day : 5);
+                    setPollTime(parseTimeToHHMM(mealsSettings.poll_time) ?? "10:00");
+                    setPollDuration(Number.isInteger(mealsSettings.poll_duration) ? mealsSettings.poll_duration : 24);
+                    setMaxVotesPerUser(String(
+                        Number.isInteger(mealsSettings.max_votes_per_user)
+                            ? mealsSettings.max_votes_per_user
+                            : 3
+                    ));
+                    setDefaultServings(String(
+                        Number.isInteger(mealsSettings.default_servings)
+                            ? mealsSettings.default_servings
+                            : 4
+                    ));
+                    setSelectedMealDietaryTags(
+                        Array.isArray(mealsSettings.dietary_tags)
+                            ? mealsSettings.dietary_tags
+                                .map((tag: unknown) => String(tag ?? "").trim())
+                                .filter((tag: string) => tag.length > 0)
+                            : []
+                    );
+                    if (Array.isArray(mealsSettings.dietary_tag_details)) {
+                        const detailsMap: Record<string, DietaryTagDetail> = {};
+                        mealsSettings.dietary_tag_details.forEach((tag: unknown) => {
+                            const key = String((tag as { key?: unknown })?.key ?? "").trim();
+                            if (!key) {
+                                return;
+                            }
+                            detailsMap[key] = {
+                                key,
+                                label: String((tag as { label?: unknown })?.label ?? key),
+                                type: normalizeDietaryType((tag as { type?: unknown })?.type),
+                            };
+                        });
+                        setSelectedMealDietaryTagDetails(detailsMap);
+                    }
+                    await loadDietaryTags("diet");
+                    setTasksSettings({
+                        reminders_enabled: tasksSettings.reminders_enabled !== false,
+                        templates: Array.isArray(tasksSettings.templates)
+                            ? tasksSettings.templates.map((template: any) => ({
+                                name: String(template?.name ?? "").trim(),
+                                description: String(template?.description ?? ""),
+                                recurrence: template?.recurrence === "daily" || template?.recurrence === "monthly"
+                                    ? template.recurrence
+                                    : "weekly",
+                                is_rotation: !!template?.is_rotation,
+                            })).filter((template: TaskTemplateInput) => template.name.length > 0)
+                            : [],
+                    });
+                    setCalendarSettings({
+                        shared_view_enabled: calendar?.settings?.shared_view_enabled !== false,
+                        absence_tracking_enabled: calendar?.settings?.absence_tracking_enabled !== false,
+                    });
+                    setBudgetSettings({
+                        currency: typeof budget?.settings?.currency === "string" ? budget.settings.currency : "EUR",
+                        notes: typeof budget?.settings?.notes === "string" ? budget.settings.notes : "",
+                    });
+                }
+            } catch (error) {
+                console.error("Erreur lecture user:", error);
+            } finally {
+                setInitialLoading(false);
+            }
+        };
+
+        loadSetupState();
+    }, [isEditMode, loadDietaryTags, router]);
+
+    const addMember = () => {
+        const cleanName = memberName.trim();
+        const cleanEmail = memberEmail.trim();
+
+        if (!cleanName) {
+            Alert.alert("Oups", "Le nom du membre est obligatoire.");
+            return;
+        }
+
+        const member: HouseholdMember = {
+            name: cleanName,
+            role: memberRole,
+            ...(cleanEmail ? { email: cleanEmail } : {}),
+        };
+
+        setMembers((prev) => [...prev, member]);
+        setMemberName("");
+        setMemberEmail("");
+        setMemberRole("enfant");
+    };
+
+    const shareMemberCredentials = async (member: CreatedMemberCredential, key: string) => {
+        setSendingMemberKey(key);
         try {
-            const data = await apiFetch(`/households/${id}`);
-
-            setHouseName(data.name);
-            if (data.settings) setActiveModules(data.settings);
-
-            // Pré-remplir les réglages sondage
-            if (data.poll_day) setPollDay(data.poll_day);
-            if (data.poll_time) setPollTime(data.poll_time.substring(0, 5)); // "10:00:00" -> "10:00"
-            if (data.poll_duration) setPollDuration(data.poll_duration);
-
-        } catch (error) {
-            Alert.alert("Erreur", "Impossible de charger les infos du foyer.");
+            await Share.share({
+                message: buildMemberShareText(member),
+            });
+        } catch (shareError) {
+            console.error("Erreur partage acces membre:", shareError);
+            Alert.alert("Partage", "Impossible d'ouvrir le partage pour ce membre.");
+        } finally {
+            setSendingMemberKey(null);
         }
     };
 
-    const toggleModule = (id: string) => {
-        setActiveModules(prev => ({ ...prev, [id]: !prev[id] }));
+    const removeMember = (index: number) => {
+        setMembers((prev) => prev.filter((_, i) => i !== index));
     };
 
-    const addChild = () => {
-        if (childName.trim().length > 0) {
-            setChildren([...children, childName.trim()]);
-            setChildName("");
+    const addTaskTemplate = () => {
+        const cleanName = taskTemplateName.trim();
+        if (!cleanName) {
+            Alert.alert("Taches", "Le nom du template de tache est obligatoire.");
+            return;
         }
+
+        setTasksSettings((prev) => ({
+            ...prev,
+            templates: [
+                ...prev.templates,
+                {
+                    name: cleanName,
+                    recurrence: taskTemplateRecurrence,
+                    description: taskTemplateDescription.trim(),
+                    is_rotation: false,
+                },
+            ],
+        }));
+
+        setTaskTemplateName("");
+        setTaskTemplateDescription("");
+        setTaskTemplateRecurrence("weekly");
     };
 
-    const removeChild = (index: number) => {
-        const newChildren = [...children];
-        newChildren.splice(index, 1);
-        setChildren(newChildren);
+    const removeTaskTemplate = (index: number) => {
+        setTasksSettings((prev) => ({
+            ...prev,
+            templates: prev.templates.filter((_, i) => i !== index),
+        }));
     };
 
     const handleSave = async () => {
+        if (!isEditMode && createdMembersForShare.length > 0) {
+            router.replace("/(tabs)/home");
+            return;
+        }
+
         if (!houseName.trim()) {
             Alert.alert("Oups", "Le nom du foyer est obligatoire.");
             return;
         }
 
+        if (!isEditMode && activeModules.budget) {
+            const childCount = members.filter((m) => m.role === "enfant").length;
+            if (childCount === 0) {
+                Alert.alert("Budget", "Active: ajoute au moins un membre enfant.");
+                return;
+            }
+        }
+
+        if (activeModules.tasks && tasksSettings.templates.length === 0) {
+            Alert.alert("Taches", "Ajoute au moins un template de tache.");
+            return;
+        }
+
+        const parsedDefaultServings = Number(defaultServings);
+        if (!Number.isInteger(parsedDefaultServings) || parsedDefaultServings < 1 || parsedDefaultServings > 30) {
+            Alert.alert("Repas", "Le nombre de portions par defaut doit etre entre 1 et 30.");
+            return;
+        }
+        const parsedMaxVotes = Number(maxVotesPerUser);
+        if (!Number.isInteger(parsedMaxVotes) || parsedMaxVotes < 1 || parsedMaxVotes > 20) {
+            Alert.alert("Sondages", "Le nombre max de votes doit etre entre 1 et 20.");
+            return;
+        }
+        const parsedPollTime = parseTimeToHHMM(pollTime);
+        if (!parsedPollTime) {
+            Alert.alert("Sondages", "L heure du sondage doit etre au format HH:MM.");
+            return;
+        }
+        const parsedDietaryTags = Array.from(
+            new Set(
+                selectedMealDietaryTags
+                    .map((tag) => tag.trim())
+                    .filter((tag) => tag.length > 0)
+            )
+        );
+
+        const modulesPayload = {
+            meals: {
+                enabled: activeModules.meals,
+                options: {
+                    recipes: !!mealOptions.recipes,
+                    polls: !!mealOptions.polls,
+                    shopping_list: !!mealOptions.shopping_list,
+                },
+                settings: {
+                    poll_day: pollDay,
+                    poll_time: parsedPollTime,
+                    poll_duration: pollDuration,
+                    max_votes_per_user: parsedMaxVotes,
+                    default_servings: parsedDefaultServings,
+                    dietary_tags: parsedDietaryTags,
+                },
+            },
+            tasks: {
+                enabled: activeModules.tasks,
+                settings: tasksSettings,
+            },
+            calendar: {
+                enabled: activeModules.calendar,
+                settings: calendarSettings,
+            },
+            budget: {
+                enabled: activeModules.budget,
+                settings: budgetSettings,
+            },
+        };
+
         setLoading(true);
         try {
-            const payload = {
-                name: houseName,
-                settings: activeModules,
-                poll_day: pollDay,
-                poll_time: pollTime,
-                poll_duration: pollDuration,
-                // On n'envoie les enfants qu'à la création pour éviter les conflits
-                ...( !isEditing && { children_profiles: children } )
-            };
-
-            if (isEditing && householdId) {
-                // UPDATE (PUT)
-                await apiFetch(`/households/${householdId}`, {
-                    method: 'PUT',
-                    body: JSON.stringify(payload)
+            if (isEditMode) {
+                await apiFetch("/households/config", {
+                    method: "PATCH",
+                    body: JSON.stringify({
+                        household_name: houseName.trim(),
+                        modules: modulesPayload,
+                    }),
                 });
-                Alert.alert("Succès", "Configuration mise à jour !");
+
+                Alert.alert("Succes", "Configuration du foyer mise a jour.");
             } else {
-                // CREATE (POST)
-                const response = await apiFetch(`/households`, {
-                    method: 'POST',
-                    body: JSON.stringify(payload)
+                const payload = {
+                    household_name: houseName.trim(),
+                    members: members.map((member) => {
+                        if (member.role !== "enfant") {
+                            return member;
+                        }
+
+                        const budget = {
+                            base_amount: 0,
+                            recurrence: "weekly" as const,
+                            reset_day: 1,
+                            allow_advances: false,
+                            max_advance_amount: 0,
+                        };
+
+                        return {
+                            ...member,
+                            budget,
+                        };
+                    }),
+                    modules: modulesPayload,
+                };
+
+                const response = await apiFetch("/households", {
+                    method: "POST",
+                    body: JSON.stringify(payload),
                 });
 
-                // Mettre à jour le user local
                 const userStr = await SecureStore.getItemAsync("user");
-                if (userStr) {
+                if (userStr && response?.household?.id) {
                     const userData = JSON.parse(userStr);
                     userData.household_id = response.household.id;
                     await SecureStore.setItemAsync("user", JSON.stringify(userData));
                 }
-                Alert.alert("Félicitations", "Foyer créé avec succès !");
+
+                const createdMembers: CreatedMemberCredential[] = Array.isArray(response?.created_members)
+                    ? response.created_members
+                    : [];
+                const membersWithCredentials = createdMembers.filter((member) =>
+                    typeof member?.generated_email === "string" && member.generated_email.trim().length > 0
+                    && typeof member?.generated_password === "string" && member.generated_password.trim().length > 0
+                );
+                if (membersWithCredentials.length > 0) {
+                    setCreatedMembersForShare(membersWithCredentials);
+                    setAlreadyConfigured(true);
+                    Alert.alert(
+                        "Foyer cree",
+                        "Les comptes membres sont prets. Tu peux maintenant envoyer les acces membre par membre.",
+                    );
+                    return;
+                }
+
+                Alert.alert("Felicitations", "Foyer cree et configure avec succes !");
+                router.replace("/(tabs)/home");
             }
-
-            router.replace('/(tabs)/home');
-
         } catch (error: any) {
             Alert.alert("Erreur", error.message || "Une erreur est survenue");
         } finally {
@@ -168,8 +700,120 @@ export default function SetupHousehold() {
         }
     };
 
+    const normalizedSearch = dietaryTagSearch.trim().toLowerCase();
+    const filteredDietaryTags = availableDietaryTags.filter((tag) => {
+        if (!normalizedSearch) {
+            return true;
+        }
+        return (
+            tag.label.toLowerCase().includes(normalizedSearch) ||
+            tag.key.toLowerCase().includes(normalizedSearch) ||
+            DIETARY_TYPE_LABELS[tag.type].toLowerCase().includes(normalizedSearch)
+        );
+    });
+    const selectedTagsForCurrentType = selectedMealDietaryTags
+        .map((key) => selectedMealDietaryTagDetails[key])
+        .filter((tag): tag is DietaryTagDetail => !!tag && tag.type === selectedDietaryTypeFilter);
+    const canSuggestCreateDietaryTag =
+        normalizedSearch.length >= 2 &&
+        !availableDietaryTags.some((tag) => tag.label.toLowerCase() === normalizedSearch || tag.key.toLowerCase() === normalizedSearch);
+
     if (initialLoading) {
-        return <View style={styles.centerContainer}><ActivityIndicator size="large" color={theme.tint} /></View>;
+        return (
+            <View style={styles.centerContainer}>
+                <ActivityIndicator size="large" color={theme.tint} />
+            </View>
+        );
+    }
+
+    if (alreadyConfigured && !isEditMode && createdMembersForShare.length === 0) {
+        return (
+            <View style={[styles.centerContainer, { backgroundColor: theme.background, padding: 24 }]}> 
+                <View style={[styles.lockCard, { backgroundColor: theme.card }]}> 
+                    <MaterialCommunityIcons name="home-check" size={42} color={theme.tint} />
+                    <Text style={[styles.lockTitle, { color: theme.text }]}>Foyer deja configure</Text>
+                    <Text style={[styles.lockText, { color: theme.textSecondary }]}>La configuration initiale est terminee.</Text>
+                    <TouchableOpacity
+                        onPress={() => router.replace("/(tabs)/home")}
+                        style={[styles.submitButton, { backgroundColor: theme.tint, marginTop: 16 }]}
+                    >
+                        <Text style={styles.submitButtonText}>Retour a l&apos;accueil</Text>
+                    </TouchableOpacity>
+                </View>
+            </View>
+        );
+    }
+
+    if (!isEditMode && createdMembersForShare.length > 0) {
+        return (
+            <KeyboardAvoidingView
+                behavior={Platform.OS === "ios" ? "padding" : "height"}
+                style={{ flex: 1, backgroundColor: theme.background }}
+            >
+                <View style={[styles.headerBar, { borderBottomColor: theme.icon }]}>
+                    <TouchableOpacity onPress={() => router.replace("/(tabs)/home")}>
+                        <MaterialCommunityIcons name="close" size={24} color={theme.text} />
+                    </TouchableOpacity>
+                    <Text style={[styles.headerTitle, { color: theme.text }]}>Comptes crees</Text>
+                </View>
+
+                <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
+                    <View style={styles.section}>
+                        <Text style={[styles.sectionTitle, { color: theme.text }]}>Envoyer les acces</Text>
+                        <Text style={[styles.memberMeta, { color: theme.textSecondary, marginBottom: 10 }]}>
+                            Envoie les identifiants temporaires a chaque membre.
+                        </Text>
+
+                        <View style={{ gap: 8 }}>
+                            {createdMembersForShare.map((member, index) => {
+                                const memberKey = typeof member.id === "number"
+                                    ? `member-${member.id}`
+                                    : `member-${index}-${member.generated_email ?? member.name ?? "unknown"}`;
+                                const isSending = sendingMemberKey === memberKey;
+
+                                return (
+                                    <View key={memberKey} style={[styles.memberCard, { backgroundColor: theme.card }]}>
+                                        <View style={{ flex: 1 }}>
+                                            <Text style={[styles.memberName, { color: theme.text }]}>
+                                                {member.name || "Membre"}
+                                            </Text>
+                                            <Text style={[styles.memberMeta, { color: theme.textSecondary }]}>
+                                                {member.generated_email || "Email genere"}
+                                            </Text>
+                                        </View>
+
+                                        <TouchableOpacity
+                                            onPress={() => shareMemberCredentials(member, memberKey)}
+                                            style={[styles.sendCredentialBtn, { backgroundColor: theme.tint }]}
+                                            disabled={isSending}
+                                        >
+                                            {isSending ? (
+                                                <ActivityIndicator color="white" size="small" />
+                                            ) : (
+                                                <>
+                                                    <MaterialCommunityIcons name="send" size={16} color="white" />
+                                                    <Text style={styles.sendCredentialBtnText}>Envoyer</Text>
+                                                </>
+                                            )}
+                                        </TouchableOpacity>
+                                    </View>
+                                );
+                            })}
+                        </View>
+                    </View>
+
+                    <TouchableOpacity
+                        style={[styles.submitButton, { backgroundColor: theme.tint, opacity: loading ? 0.7 : 1 }]}
+                        onPress={handleSave}
+                        disabled={loading}
+                    >
+                        <Text style={styles.submitButtonText}>Terminer</Text>
+                    </TouchableOpacity>
+
+                    <View style={{ height: 40 }} />
+                </ScrollView>
+            </KeyboardAvoidingView>
+        );
     }
 
     return (
@@ -177,137 +821,542 @@ export default function SetupHousehold() {
             behavior={Platform.OS === "ios" ? "padding" : "height"}
             style={{ flex: 1, backgroundColor: theme.background }}
         >
-            <View style={[styles.headerBar, { borderBottomColor: theme.icon }]}>
+            <View style={[styles.headerBar, { borderBottomColor: theme.icon }]}> 
                 <TouchableOpacity onPress={() => router.back()}>
                     <MaterialCommunityIcons name="arrow-left" size={24} color={theme.text} />
                 </TouchableOpacity>
                 <Text style={[styles.headerTitle, { color: theme.text }]}>
-                    {isEditing ? "Modifier mon Foyer" : "Nouveau Foyer"}
+                    {isMealsScope
+                        ? "Parametres repas"
+                        : (isEditMode ? "Modifier le foyer" : "Nouveau Foyer")}
                 </Text>
             </View>
 
             <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
-
-                <View style={styles.section}>
-                    <Text style={[styles.sectionTitle, { color: theme.text }]}>Nom du foyer</Text>
-                    <TextInput
-                        style={[styles.input, { backgroundColor: theme.card, color: theme.text }]}
-                        value={houseName}
-                        onChangeText={setHouseName}
-                        placeholder="Ex: La Tribu..."
-                        placeholderTextColor={theme.textSecondary}
-                    />
-                </View>
-
-                <View style={styles.section}>
-                    <Text style={[styles.sectionTitle, { color: theme.text }]}>Modules activés</Text>
-                    {MODULES.map((module) => (
-                        <View key={module.id} style={[styles.moduleCard, { backgroundColor: theme.card }]}>
-                            <View style={[styles.moduleIcon, { backgroundColor: theme.background }]}>
-                                <MaterialCommunityIcons name={module.icon as any} size={24} color={theme.tint} />
-                            </View>
-                            <View style={{ flex: 1 }}>
-                                <Text style={[styles.moduleLabel, { color: theme.text }]}>{module.label}</Text>
-                            </View>
-                            <Switch
-                                value={!!activeModules[module.id]}
-                                onValueChange={() => toggleModule(module.id)}
-                                trackColor={{ false: theme.icon, true: theme.tint }}
-                            />
-                        </View>
-                    ))}
-                </View>
-
-                {/* CONFIGURATION REPAS (Visible si module activé) */}
-                {activeModules['meals'] && (
+                {!isMealsScope && (
                     <View style={styles.section}>
-                        <Text style={[styles.sectionTitle, { color: theme.text }]}>
-                            📅 Configuration des Repas
-                        </Text>
-
-                        <Text style={[styles.label, { color: theme.text }]}>Jour de création du sondage :</Text>
-                        <View style={styles.daysContainer}>
-                            {DAYS.map((day) => (
-                                <TouchableOpacity
-                                    key={day.value}
-                                    onPress={() => setPollDay(day.value)}
-                                    style={[
-                                        styles.dayChip,
-                                        { backgroundColor: theme.card, borderColor: theme.icon },
-                                        pollDay === day.value && { backgroundColor: theme.tint, borderColor: theme.tint }
-                                    ]}
-                                >
-                                    <Text style={[
-                                        { color: theme.text, fontSize: 12 },
-                                        pollDay === day.value && { color: 'white', fontWeight: 'bold' }
-                                    ]}>
-                                        {day.label}
-                                    </Text>
-                                </TouchableOpacity>
-                            ))}
-                        </View>
-
-                        <View style={{ flexDirection: 'row', gap: 15, marginTop: 15 }}>
-                            <View style={{ flex: 1 }}>
-                                <Text style={[styles.label, { color: theme.text }]}>Heure (HH:MM)</Text>
-                                <TextInput
-                                    style={[styles.input, { backgroundColor: theme.card, color: theme.text, textAlign: 'center' }]}
-                                    value={pollTime}
-                                    onChangeText={setPollTime}
-                                    placeholder="10:00"
-                                    placeholderTextColor={theme.textSecondary}
-                                />
-                            </View>
-                            <View style={{ flex: 1 }}>
-                                <Text style={[styles.label, { color: theme.text }]}>Durée (Heures)</Text>
-                                <View style={{ flexDirection: 'row', gap: 5 }}>
-                                    {[12, 24, 48].map((dur) => (
-                                        <TouchableOpacity
-                                            key={dur}
-                                            onPress={() => setPollDuration(dur)}
-                                            style={[
-                                                styles.durationBtn,
-                                                { backgroundColor: theme.card },
-                                                pollDuration === dur && { backgroundColor: theme.tint }
-                                            ]}
-                                        >
-                                            <Text style={[{ color: theme.text }, pollDuration === dur && { color: 'white' }]}>{dur}h</Text>
-                                        </TouchableOpacity>
-                                    ))}
-                                </View>
-                            </View>
-                        </View>
+                        <Text style={[styles.sectionTitle, { color: theme.text }]}>Nom du foyer</Text>
+                        <TextInput
+                            style={[styles.input, { backgroundColor: theme.card, color: theme.text }]}
+                            value={houseName}
+                            onChangeText={setHouseName}
+                            placeholder="Ex: La Tribu"
+                            placeholderTextColor={theme.textSecondary}
+                        />
                     </View>
                 )}
 
-                {/* Section Enfants : Visible UNIQUEMENT si on crée un nouveau foyer */}
-                {!isEditing && (
-                    <View style={styles.section}>
-                        <Text style={[styles.sectionTitle, { color: theme.text }]}>Enfants (Profils)</Text>
-                        <View style={{ flexDirection: 'row', gap: 10, marginBottom: 10 }}>
-                            <TextInput
-                                style={[styles.input, { flex: 1, marginBottom: 0, backgroundColor: theme.card, color: theme.text }]}
-                                placeholder="Prénom"
-                                placeholderTextColor={theme.textSecondary}
-                                value={childName}
-                                onChangeText={setChildName}
-                            />
-                            <TouchableOpacity onPress={addChild} style={[styles.addBtn, { backgroundColor: theme.card }]}>
-                                <MaterialCommunityIcons name="plus" size={24} color={theme.tint} />
-                            </TouchableOpacity>
-                        </View>
-                        <View style={styles.chipsContainer}>
-                            {children.map((child, index) => (
-                                <View key={index} style={[styles.chip, { backgroundColor: theme.card, borderColor: theme.tint }]}>
-                                    <Text style={{ color: theme.text }}>{child}</Text>
-                                    <TouchableOpacity onPress={() => removeChild(index)}>
-                                        <MaterialCommunityIcons name="close-circle" size={16} color={theme.textSecondary} />
+                {!isEditMode && (
+                <View style={styles.section}>
+                    <Text style={[styles.sectionTitle, { color: theme.text }]}>Membres du foyer</Text>
+
+                    <View style={[styles.activeUserCard, { backgroundColor: theme.card }]}>
+                        <Text style={[styles.activeUserLabel, { color: theme.textSecondary }]}>
+                            Utilisateur actif (Parent)
+                        </Text>
+                        <Text style={[styles.activeUserName, { color: theme.text }]}>
+                            {activeUser?.name || "Parent"}
+                        </Text>
+                        {activeUser?.email ? (
+                            <Text style={[styles.activeUserEmail, { color: theme.textSecondary }]}>
+                                {activeUser.email}
+                            </Text>
+                        ) : null}
+                    </View>
+
+                    {members.length > 0 && (
+                        <View style={{ marginTop: 10, marginBottom: 10, gap: 8 }}>
+                            {members.map((member, index) => (
+                                <View key={`${member.name}-${index}`} style={[styles.memberCard, { backgroundColor: theme.card }]}> 
+                                    <View style={{ flex: 1 }}>
+                                        <Text style={[styles.memberName, { color: theme.text }]}>{member.name}</Text>
+                                        <Text style={[styles.memberMeta, { color: theme.textSecondary }]}> 
+                                            Role: {member.role}
+                                            {member.email ? ` | ${member.email}` : ""}
+                                        </Text>
+                                    </View>
+                                    <TouchableOpacity onPress={() => removeMember(index)}>
+                                        <MaterialCommunityIcons name="trash-can-outline" size={22} color={theme.textSecondary} />
                                     </TouchableOpacity>
                                 </View>
                             ))}
                         </View>
+                    )}
+
+                    <View style={[styles.memberEditor, { backgroundColor: theme.card }]}> 
+                        <TextInput
+                            style={[styles.input, { backgroundColor: theme.background, color: theme.text, marginBottom: 12 }]}
+                            placeholder="Nom du membre"
+                            placeholderTextColor={theme.textSecondary}
+                            value={memberName}
+                            onChangeText={setMemberName}
+                        />
+
+                        <TextInput
+                            style={[styles.input, { backgroundColor: theme.background, color: theme.text, marginBottom: 12 }]}
+                            placeholder="Email (optionnel)"
+                            placeholderTextColor={theme.textSecondary}
+                            keyboardType="email-address"
+                            autoCapitalize="none"
+                            value={memberEmail}
+                            onChangeText={setMemberEmail}
+                        />
+
+                        <View style={styles.roleRow}>
+                            <TouchableOpacity
+                                onPress={() => setMemberRole("parent")}
+                                style={[
+                                    styles.roleChip,
+                                    { borderColor: theme.icon, backgroundColor: theme.background },
+                                    memberRole === "parent" && { borderColor: theme.tint, backgroundColor: theme.tint + "20" },
+                                ]}
+                            >
+                                <Text style={[styles.roleChipText, { color: theme.text }]}>Parent</Text>
+                            </TouchableOpacity>
+
+                            <TouchableOpacity
+                                onPress={() => setMemberRole("enfant")}
+                                style={[
+                                    styles.roleChip,
+                                    { borderColor: theme.icon, backgroundColor: theme.background },
+                                    memberRole === "enfant" && { borderColor: theme.tint, backgroundColor: theme.tint + "20" },
+                                ]}
+                            >
+                                <Text style={[styles.roleChipText, { color: theme.text }]}>Enfant</Text>
+                            </TouchableOpacity>
+                        </View>
+
+                        <TouchableOpacity onPress={addMember} style={[styles.addButton, { backgroundColor: theme.background }]}> 
+                            <MaterialCommunityIcons name="plus" size={20} color={theme.tint} />
+                            <Text style={[styles.addButtonText, { color: theme.tint }]}>Ajouter ce membre</Text>
+                        </TouchableOpacity>
                     </View>
+
+                </View>
                 )}
+
+                <View style={styles.section}>
+                    <Text style={[styles.sectionTitle, { color: theme.text }]}>
+                        {isMealsScope ? "Repas & courses" : "Modules et sous-config"}
+                    </Text>
+
+                    {visibleModules.map((module) => (
+                        <View key={module.id} style={[styles.moduleContainer, { backgroundColor: theme.card }]}> 
+                            <View style={styles.moduleCard}> 
+                                <View style={[styles.moduleIcon, { backgroundColor: theme.background }]}> 
+                                    <MaterialCommunityIcons name={module.icon as any} size={24} color={theme.tint} />
+                                </View>
+                                <TouchableOpacity style={{ flex: 1 }} onPress={() => toggleModulePanel(module.id)}>
+                                    <Text style={[styles.moduleLabel, { color: theme.text }]}>{module.label}</Text>
+                                    <Text style={{ color: theme.textSecondary, fontSize: 12 }}>{module.desc}</Text>
+                                </TouchableOpacity>
+                                <Switch
+                                    value={!!activeModules[module.id]}
+                                    onValueChange={() => toggleModule(module.id)}
+                                    trackColor={{ false: theme.icon, true: theme.tint }}
+                                />
+                                <TouchableOpacity
+                                    onPress={() => toggleModulePanel(module.id)}
+                                    style={{ marginLeft: 8, padding: 4 }}
+                                    disabled={!activeModules[module.id]}
+                                >
+                                    <MaterialCommunityIcons
+                                        name={expandedModules[module.id] ? "chevron-up" : "chevron-down"}
+                                        size={22}
+                                        color={activeModules[module.id] ? theme.text : theme.icon}
+                                    />
+                                </TouchableOpacity>
+                            </View>
+
+                            {activeModules[module.id] && expandedModules[module.id] && module.id === "meals" && (
+                                <View style={styles.subConfigBox}>
+                                    <View style={styles.mealFeatureRow}>
+                                        <Text style={[styles.label, { color: theme.text, marginBottom: 0 }]}>Recettes</Text>
+                                        <View style={styles.mealFeatureControls}>
+                                            <Switch
+                                                value={mealOptions.recipes}
+                                                onValueChange={(value) => updateMealOption("recipes", value)}
+                                                trackColor={{ false: theme.icon, true: theme.tint }}
+                                            />
+                                            <TouchableOpacity
+                                                onPress={() => toggleMealSection("recipes")}
+                                                style={{ marginLeft: 8, padding: 4 }}
+                                                disabled={!mealOptions.recipes}
+                                            >
+                                                <MaterialCommunityIcons
+                                                    name={mealExpandedSections.recipes ? "chevron-up" : "chevron-down"}
+                                                    size={20}
+                                                    color={mealOptions.recipes ? theme.text : theme.icon}
+                                                />
+                                            </TouchableOpacity>
+                                        </View>
+                                    </View>
+
+                                    {mealOptions.recipes && mealExpandedSections.recipes && (
+                                        <View style={[styles.mealSectionBox, { backgroundColor: theme.background }]}>
+                                            <Text style={[styles.label, { color: theme.text, marginTop: 4 }]}>
+                                                Portions par defaut du foyer
+                                            </Text>
+                                            <TextInput
+                                                style={[styles.input, { backgroundColor: theme.card, color: theme.text, marginBottom: 0 }]}
+                                                value={defaultServings}
+                                                onChangeText={setDefaultServings}
+                                                keyboardType="numeric"
+                                                placeholder="4"
+                                                placeholderTextColor={theme.textSecondary}
+                                            />
+
+                                            <Text style={[styles.label, { color: theme.text, marginTop: 12 }]}>
+                                                Tags alimentaires
+                                            </Text>
+                                            <View style={styles.categoryFilterWrap}>
+                                                {DIETARY_TYPE_ORDER.map((type) => (
+                                                    <TouchableOpacity
+                                                        key={type}
+                                                        onPress={() => {
+                                                            if (selectedDietaryTypeFilter === type) {
+                                                                return;
+                                                            }
+                                                            setSelectedDietaryTypeFilter(type);
+                                                            setDietaryTagSearch("");
+                                                            void loadDietaryTags(type);
+                                                        }}
+                                                        style={[
+                                                            styles.categoryFilterChip,
+                                                            { borderColor: theme.icon, backgroundColor: theme.background },
+                                                            selectedDietaryTypeFilter === type && { borderColor: theme.tint, backgroundColor: theme.tint + "20" },
+                                                        ]}
+                                                    >
+                                                        <Text
+                                                            style={{
+                                                                color: selectedDietaryTypeFilter === type ? theme.tint : theme.text,
+                                                                fontSize: 12,
+                                                                fontWeight: "600",
+                                                            }}
+                                                        >
+                                                            {DIETARY_TYPE_LABELS[type]}
+                                                        </Text>
+                                                    </TouchableOpacity>
+                                                ))}
+                                            </View>
+
+                                            {selectedTagsForCurrentType.length > 0 && (
+                                                <View style={{ marginBottom: 10 }}>
+                                                    <Text style={[styles.selectedHint, { color: theme.textSecondary }]}>
+                                                        Selection dans {DIETARY_TYPE_LABELS[selectedDietaryTypeFilter]}:
+                                                    </Text>
+                                                    <Text style={[styles.selectedValues, { color: theme.text }]}>
+                                                        {selectedTagsForCurrentType.map((tag) => tag.label).join(", ")}
+                                                    </Text>
+                                                </View>
+                                            )}
+                                            <TextInput
+                                                style={[styles.input, { backgroundColor: theme.card, color: theme.text, marginBottom: 10 }]}
+                                                value={dietaryTagSearch}
+                                                onChangeText={setDietaryTagSearch}
+                                                placeholder={`Rechercher un tag (${DIETARY_TYPE_LABELS[selectedDietaryTypeFilter]})...`}
+                                                placeholderTextColor={theme.textSecondary}
+                                                autoCapitalize="none"
+                                            />
+                                            {dietaryTagsLoading ? (
+                                                <View style={styles.tagsLoadingRow}>
+                                                    <ActivityIndicator size="small" color={theme.tint} />
+                                                    <Text style={{ color: theme.textSecondary, fontSize: 12 }}>
+                                                        Chargement des tags...
+                                                    </Text>
+                                                </View>
+                                            ) : filteredDietaryTags.length === 0 ? (
+                                                <Text style={{ color: theme.textSecondary, fontSize: 12 }}>
+                                                    Aucun tag ne correspond a la recherche.
+                                                </Text>
+                                            ) : (
+                                                <View style={styles.tagsWrap}>
+                                                    {filteredDietaryTags.map((tag) => {
+                                                        const isSelected = selectedMealDietaryTags.includes(tag.key);
+                                                        return (
+                                                            <TouchableOpacity
+                                                                key={tag.id}
+                                                                onPress={() => toggleMealDietaryTag(tag.key)}
+                                                                style={[
+                                                                    styles.tagChip,
+                                                                    { borderColor: theme.icon, backgroundColor: theme.card },
+                                                                    isSelected && { borderColor: theme.tint, backgroundColor: theme.tint + "25" },
+                                                                ]}
+                                                            >
+                                                                <Text
+                                                                    style={[
+                                                                        styles.tagChipText,
+                                                                        { color: theme.text },
+                                                                        isSelected && { color: theme.tint },
+                                                                    ]}
+                                                                >
+                                                                    {tag.label}
+                                                                </Text>
+                                                                <Text style={[styles.tagChipType, { color: theme.textSecondary }]}>
+                                                                    {DIETARY_TYPE_LABELS[tag.type]}
+                                                                </Text>
+                                                            </TouchableOpacity>
+                                                        );
+                                                    })}
+                                                </View>
+                                            )}
+
+                                            {canSuggestCreateDietaryTag && (
+                                                <View style={[styles.createTagBox, { borderColor: theme.icon, backgroundColor: theme.card }]}>
+                                                    <Text style={[styles.createTagTitle, { color: theme.text }]}>
+                                                        Ajouter &quot;{dietaryTagSearch.trim()}&quot; ?
+                                                    </Text>
+                                                    <Text style={[styles.createTagTypeText, { color: theme.textSecondary }]}>
+                                                        Categorie: {DIETARY_TYPE_LABELS[selectedDietaryTypeFilter]}
+                                                    </Text>
+                                                    <TouchableOpacity
+                                                        onPress={createDietaryTag}
+                                                        disabled={creatingDietaryTag}
+                                                        style={[styles.createTagBtn, { backgroundColor: theme.tint, opacity: creatingDietaryTag ? 0.7 : 1 }]}
+                                                    >
+                                                        {creatingDietaryTag ? (
+                                                            <ActivityIndicator size="small" color="white" />
+                                                        ) : (
+                                                            <Text style={styles.createTagBtnText}>Ajouter ce tag</Text>
+                                                        )}
+                                                    </TouchableOpacity>
+                                                </View>
+                                            )}
+                                        </View>
+                                    )}
+
+                                    <View style={styles.mealFeatureRow}>
+                                        <Text style={[styles.label, { color: theme.text, marginBottom: 0 }]}>Sondages</Text>
+                                        <View style={styles.mealFeatureControls}>
+                                            <Switch
+                                                value={mealOptions.polls}
+                                                onValueChange={(value) => updateMealOption("polls", value)}
+                                                trackColor={{ false: theme.icon, true: theme.tint }}
+                                            />
+                                            <TouchableOpacity
+                                                onPress={() => toggleMealSection("polls")}
+                                                style={{ marginLeft: 8, padding: 4 }}
+                                                disabled={!mealOptions.polls}
+                                            >
+                                                <MaterialCommunityIcons
+                                                    name={mealExpandedSections.polls ? "chevron-up" : "chevron-down"}
+                                                    size={20}
+                                                    color={mealOptions.polls ? theme.text : theme.icon}
+                                                />
+                                            </TouchableOpacity>
+                                        </View>
+                                    </View>
+
+                                    {mealOptions.polls && mealExpandedSections.polls && (
+                                        <View style={[styles.mealSectionBox, { backgroundColor: theme.background }]}>
+                                            <Text style={[styles.label, { color: theme.text, marginTop: 6 }]}>Jour du sondage</Text>
+                                            <View style={styles.daysContainer}>
+                                                {DAYS.map((day) => (
+                                                    <TouchableOpacity
+                                                        key={day.value}
+                                                        onPress={() => setPollDay(day.value)}
+                                                        style={[
+                                                            styles.dayChip,
+                                                            { backgroundColor: theme.background, borderColor: theme.icon },
+                                                            pollDay === day.value && { backgroundColor: theme.tint, borderColor: theme.tint },
+                                                        ]}
+                                                    >
+                                                        <Text style={{ color: pollDay === day.value ? "white" : theme.text, fontSize: 12 }}>{day.label}</Text>
+                                                    </TouchableOpacity>
+                                                ))}
+                                            </View>
+
+                                            <View style={{ flexDirection: "row", gap: 12, marginTop: 10 }}>
+                                                <View style={{ flex: 1 }}>
+                                                    <Text style={[styles.label, { color: theme.text }]}>Heure</Text>
+                                                    <TextInput
+                                                        style={[styles.input, { backgroundColor: theme.card, color: theme.text, textAlign: "center", marginBottom: 0 }]}
+                                                        value={pollTime}
+                                                        onChangeText={setPollTime}
+                                                        placeholder="10:00"
+                                                        placeholderTextColor={theme.textSecondary}
+                                                    />
+                                                </View>
+
+                                                <View style={{ flex: 1 }}>
+                                                    <Text style={[styles.label, { color: theme.text }]}>Duree</Text>
+                                                    <View style={{ flexDirection: "row", gap: 6 }}>
+                                                        {DURATION_CHOICES.map((value) => (
+                                                            <TouchableOpacity
+                                                                key={value}
+                                                                onPress={() => setPollDuration(value)}
+                                                                style={[
+                                                                    styles.durationBtn,
+                                                                    { backgroundColor: theme.card },
+                                                                    pollDuration === value && { backgroundColor: theme.tint },
+                                                                ]}
+                                                            >
+                                                                <Text style={{ color: pollDuration === value ? "white" : theme.text }}>{value}h</Text>
+                                                            </TouchableOpacity>
+                                                        ))}
+                                                    </View>
+                                                </View>
+                                            </View>
+                                            <Text style={[styles.label, { color: theme.text, marginTop: 12 }]}>Max votes par utilisateur</Text>
+                                            <TextInput
+                                                style={[styles.input, { backgroundColor: theme.card, color: theme.text, marginBottom: 0 }]}
+                                                value={maxVotesPerUser}
+                                                onChangeText={setMaxVotesPerUser}
+                                                keyboardType="numeric"
+                                                placeholder="3"
+                                                placeholderTextColor={theme.textSecondary}
+                                            />
+                                        </View>
+                                    )}
+
+                                    <View style={styles.mealFeatureRow}>
+                                        <Text style={[styles.label, { color: theme.text, marginBottom: 0 }]}>Liste de courses</Text>
+                                        <View style={styles.mealFeatureControls}>
+                                            <Switch
+                                                value={mealOptions.shopping_list}
+                                                onValueChange={(value) => updateMealOption("shopping_list", value)}
+                                                trackColor={{ false: theme.icon, true: theme.tint }}
+                                            />
+                                            <View style={styles.mealChevronSpacer} />
+                                        </View>
+                                    </View>
+
+                                </View>
+                            )}
+
+                            {activeModules[module.id] && expandedModules[module.id] && module.id === "tasks" && (
+                                <View style={styles.subConfigBox}>
+                                    <View style={styles.switchRow}>
+                                        <Text style={[styles.label, { color: theme.text }]}>Rappels actifs</Text>
+                                        <Switch
+                                            value={tasksSettings.reminders_enabled}
+                                            onValueChange={(value) => setTasksSettings((prev) => ({ ...prev, reminders_enabled: value }))}
+                                            trackColor={{ false: theme.icon, true: theme.tint }}
+                                        />
+                                    </View>
+
+                                    <Text style={[styles.label, { color: theme.text, marginTop: 6 }]}>Templates de taches</Text>
+                                    <TextInput
+                                        style={[styles.input, { backgroundColor: theme.background, color: theme.text, marginBottom: 10 }]}
+                                        value={taskTemplateName}
+                                        onChangeText={setTaskTemplateName}
+                                        placeholder="Ex: Sortir les poubelles"
+                                        placeholderTextColor={theme.textSecondary}
+                                    />
+                                    <TextInput
+                                        style={[styles.input, { backgroundColor: theme.background, color: theme.text, marginBottom: 10, height: 44 }]}
+                                        value={taskTemplateDescription}
+                                        onChangeText={setTaskTemplateDescription}
+                                        placeholder="Description (optionnelle)"
+                                        placeholderTextColor={theme.textSecondary}
+                                    />
+                                    <View style={styles.inlineRow}>
+                                        <TouchableOpacity
+                                            onPress={() => setTaskTemplateRecurrence("daily")}
+                                            style={[
+                                                styles.smallChip,
+                                                { borderColor: theme.icon, backgroundColor: theme.background },
+                                                taskTemplateRecurrence === "daily" && { borderColor: theme.tint, backgroundColor: theme.tint + "20" },
+                                            ]}
+                                        >
+                                            <Text style={{ color: theme.text }}>Quotidien</Text>
+                                        </TouchableOpacity>
+                                        <TouchableOpacity
+                                            onPress={() => setTaskTemplateRecurrence("weekly")}
+                                            style={[
+                                                styles.smallChip,
+                                                { borderColor: theme.icon, backgroundColor: theme.background },
+                                                taskTemplateRecurrence === "weekly" && { borderColor: theme.tint, backgroundColor: theme.tint + "20" },
+                                            ]}
+                                        >
+                                            <Text style={{ color: theme.text }}>Hebdo</Text>
+                                        </TouchableOpacity>
+                                        <TouchableOpacity
+                                            onPress={() => setTaskTemplateRecurrence("monthly")}
+                                            style={[
+                                                styles.smallChip,
+                                                { borderColor: theme.icon, backgroundColor: theme.background },
+                                                taskTemplateRecurrence === "monthly" && { borderColor: theme.tint, backgroundColor: theme.tint + "20" },
+                                            ]}
+                                        >
+                                            <Text style={{ color: theme.text }}>Mensuel</Text>
+                                        </TouchableOpacity>
+                                    </View>
+
+                                    <TouchableOpacity onPress={addTaskTemplate} style={[styles.addButton, { backgroundColor: theme.background }]}>
+                                        <MaterialCommunityIcons name="plus" size={20} color={theme.tint} />
+                                        <Text style={[styles.addButtonText, { color: theme.tint }]}>Ajouter ce template</Text>
+                                    </TouchableOpacity>
+
+                                    {tasksSettings.templates.length > 0 && (
+                                        <View style={{ marginTop: 10, gap: 8 }}>
+                                            {tasksSettings.templates.map((template, index) => (
+                                                <View key={`${template.name}-${index}`} style={[styles.templateCard, { backgroundColor: theme.background }]}>
+                                                    <View style={{ flex: 1 }}>
+                                                        <Text style={[styles.templateName, { color: theme.text }]}>{template.name}</Text>
+                                                        <Text style={[styles.memberMeta, { color: theme.textSecondary }]}>
+                                                            Recurrence: {template.recurrence}
+                                                        </Text>
+                                                        {template.description ? (
+                                                            <Text style={[styles.memberMeta, { color: theme.textSecondary }]}>
+                                                                {template.description}
+                                                            </Text>
+                                                        ) : null}
+                                                    </View>
+                                                    <TouchableOpacity onPress={() => removeTaskTemplate(index)}>
+                                                        <MaterialCommunityIcons name="trash-can-outline" size={22} color={theme.textSecondary} />
+                                                    </TouchableOpacity>
+                                                </View>
+                                            ))}
+                                        </View>
+                                    )}
+                                </View>
+                            )}
+
+                            {activeModules[module.id] && expandedModules[module.id] && module.id === "calendar" && (
+                                <View style={styles.subConfigBox}>
+                                    <View style={styles.switchRow}>
+                                        <Text style={[styles.label, { color: theme.text }]}>Vue partagee</Text>
+                                        <Switch
+                                            value={calendarSettings.shared_view_enabled}
+                                            onValueChange={(value) => setCalendarSettings((prev) => ({ ...prev, shared_view_enabled: value }))}
+                                            trackColor={{ false: theme.icon, true: theme.tint }}
+                                        />
+                                    </View>
+                                    <View style={styles.switchRow}>
+                                        <Text style={[styles.label, { color: theme.text }]}>Suivi des absences</Text>
+                                        <Switch
+                                            value={calendarSettings.absence_tracking_enabled}
+                                            onValueChange={(value) => setCalendarSettings((prev) => ({ ...prev, absence_tracking_enabled: value }))}
+                                            trackColor={{ false: theme.icon, true: theme.tint }}
+                                        />
+                                    </View>
+                                </View>
+                            )}
+
+                            {activeModules[module.id] && expandedModules[module.id] && module.id === "budget" && (
+                                <View style={styles.subConfigBox}>
+                                    <Text style={[styles.label, { color: theme.text }]}>Devise</Text>
+                                    <TextInput
+                                        style={[styles.input, { backgroundColor: theme.background, color: theme.text, marginBottom: 8 }]}
+                                        value={budgetSettings.currency}
+                                        onChangeText={(value) => setBudgetSettings((prev) => ({ ...prev, currency: value }))}
+                                        placeholder="EUR"
+                                        placeholderTextColor={theme.textSecondary}
+                                    />
+                                    <Text style={[styles.label, { color: theme.text }]}>Note budget (optionnel)</Text>
+                                    <TextInput
+                                        style={[styles.input, { backgroundColor: theme.background, color: theme.text }]}
+                                        value={budgetSettings.notes}
+                                        onChangeText={(value) => setBudgetSettings((prev) => ({ ...prev, notes: value }))}
+                                        placeholder="Ex: Argent de poche le dimanche"
+                                        placeholderTextColor={theme.textSecondary}
+                                    />
+                                </View>
+                            )}
+                        </View>
+                    ))}
+                </View>
 
                 <TouchableOpacity
                     style={[styles.submitButton, { backgroundColor: theme.tint, opacity: loading ? 0.7 : 1 }]}
@@ -318,7 +1367,7 @@ export default function SetupHousehold() {
                         <ActivityIndicator color="white" />
                     ) : (
                         <Text style={styles.submitButtonText}>
-                            {isEditing ? "Sauvegarder les modifications" : "Créer le foyer"}
+                            {isEditMode ? "Enregistrer la configuration" : "Creer le foyer"}
                         </Text>
                     )}
                 </TouchableOpacity>
@@ -330,23 +1379,242 @@ export default function SetupHousehold() {
 }
 
 const styles = StyleSheet.create({
-    centerContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-    headerBar: { height: 60, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, marginTop: Platform.OS === 'android' ? 30 : 0 },
-    headerTitle: { fontSize: 18, fontWeight: '700', marginLeft: 16 },
+    centerContainer: { flex: 1, justifyContent: "center", alignItems: "center" },
+    lockCard: { width: "100%", borderRadius: 16, padding: 20, alignItems: "center" },
+    lockTitle: { fontSize: 20, fontWeight: "700", marginTop: 10 },
+    lockText: { fontSize: 14, marginTop: 6 },
+    headerBar: {
+        height: 60,
+        flexDirection: "row",
+        alignItems: "center",
+        paddingHorizontal: 20,
+        marginTop: Platform.OS === "android" ? 30 : 0,
+    },
+    headerTitle: { fontSize: 18, fontWeight: "700", marginLeft: 16 },
     container: { padding: 20 },
     section: { marginBottom: 24 },
-    sectionTitle: { fontSize: 16, fontWeight: '700', marginBottom: 12 },
+    sectionTitle: { fontSize: 16, fontWeight: "700", marginBottom: 12 },
+    label: { fontSize: 14, fontWeight: "600", marginBottom: 8 },
     input: { height: 50, borderRadius: 12, paddingHorizontal: 16, fontSize: 16, marginBottom: 16 },
-    moduleCard: { flexDirection: 'row', alignItems: 'center', padding: 12, borderRadius: 12, marginBottom: 8 },
-    moduleIcon: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', marginRight: 12 },
-    moduleLabel: { fontSize: 15, fontWeight: '600' },
-    label: { fontSize: 14, fontWeight: '600', marginBottom: 8 },
-    daysContainer: { flexDirection: 'row', justifyContent: 'space-between' },
-    dayChip: { width: 40, height: 40, borderRadius: 20, justifyContent: 'center', alignItems: 'center', borderWidth: 1 },
-    durationBtn: { flex: 1, height: 50, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
-    addBtn: { width: 50, height: 50, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
-    chipsContainer: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-    chip: { flexDirection: 'row', alignItems: 'center', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 20, borderWidth: 1, gap: 6 },
-    submitButton: { height: 56, borderRadius: 16, alignItems: 'center', justifyContent: 'center', marginTop: 10 },
-    submitButtonText: { color: 'white', fontSize: 18, fontWeight: 'bold' }
+
+    activeUserCard: {
+        borderRadius: 12,
+        padding: 12,
+        marginBottom: 10,
+    },
+    activeUserLabel: { fontSize: 12, fontWeight: "600" },
+    activeUserName: { fontSize: 15, fontWeight: "700", marginTop: 2 },
+    activeUserEmail: { fontSize: 12, marginTop: 2 },
+
+    memberEditor: { borderRadius: 12, padding: 12 },
+    roleRow: { flexDirection: "row", gap: 8, marginBottom: 6 },
+    roleChip: {
+        borderWidth: 1,
+        borderRadius: 10,
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+    },
+    roleChipText: { fontSize: 13, fontWeight: "600" },
+
+    inlineRow: { flexDirection: "row", gap: 8, marginBottom: 10 },
+    smallChip: {
+        flex: 1,
+        height: 40,
+        borderRadius: 10,
+        borderWidth: 1,
+        alignItems: "center",
+        justifyContent: "center",
+    },
+    tagsLoadingRow: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 8,
+        marginTop: 4,
+    },
+    categoryFilterWrap: {
+        flexDirection: "row",
+        flexWrap: "wrap",
+        gap: 8,
+        marginBottom: 10,
+    },
+    categoryFilterChip: {
+        borderWidth: 1,
+        borderRadius: 10,
+        paddingHorizontal: 10,
+        paddingVertical: 7,
+    },
+    selectedHint: {
+        fontSize: 12,
+    },
+    selectedValues: {
+        fontSize: 13,
+        fontWeight: "600",
+        marginTop: 2,
+    },
+    tagsWrap: {
+        flexDirection: "row",
+        flexWrap: "wrap",
+        gap: 8,
+    },
+    tagChip: {
+        borderWidth: 1,
+        borderRadius: 10,
+        paddingHorizontal: 10,
+        paddingVertical: 8,
+        minWidth: 120,
+    },
+    tagChipText: {
+        fontSize: 13,
+        fontWeight: "700",
+    },
+    tagChipType: {
+        fontSize: 11,
+        marginTop: 2,
+    },
+    createTagBox: {
+        borderWidth: 1,
+        borderRadius: 12,
+        padding: 10,
+        marginTop: 12,
+    },
+    createTagTitle: {
+        fontSize: 13,
+        fontWeight: "700",
+        marginBottom: 4,
+    },
+    createTagTypeText: {
+        fontSize: 12,
+        marginBottom: 10,
+    },
+    createTagBtn: {
+        height: 40,
+        borderRadius: 10,
+        alignItems: "center",
+        justifyContent: "center",
+    },
+    createTagBtnText: {
+        color: "white",
+        fontSize: 14,
+        fontWeight: "700",
+    },
+
+    addButton: {
+        height: 44,
+        borderRadius: 10,
+        alignItems: "center",
+        justifyContent: "center",
+        flexDirection: "row",
+        gap: 8,
+        marginTop: 4,
+    },
+    addButtonText: { fontSize: 14, fontWeight: "700" },
+    sendCredentialBtn: {
+        minWidth: 104,
+        height: 38,
+        borderRadius: 10,
+        paddingHorizontal: 10,
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 6,
+    },
+    sendCredentialBtnText: {
+        color: "white",
+        fontSize: 13,
+        fontWeight: "700",
+    },
+
+    memberCard: {
+        borderRadius: 12,
+        padding: 12,
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 10,
+    },
+    memberName: { fontSize: 15, fontWeight: "700" },
+    memberMeta: { fontSize: 12, marginTop: 2 },
+    templateCard: {
+        borderRadius: 12,
+        padding: 10,
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 10,
+    },
+    templateName: { fontSize: 14, fontWeight: "700" },
+
+    moduleContainer: {
+        borderRadius: 12,
+        marginBottom: 10,
+        overflow: "hidden",
+    },
+    moduleCard: {
+        flexDirection: "row",
+        alignItems: "center",
+        padding: 12,
+    },
+    moduleIcon: {
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+        alignItems: "center",
+        justifyContent: "center",
+        marginRight: 12,
+    },
+    moduleLabel: { fontSize: 15, fontWeight: "600" },
+
+    subConfigBox: {
+        paddingHorizontal: 12,
+        paddingBottom: 12,
+        paddingTop: 2,
+    },
+    mealFeatureRow: {
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "space-between",
+        marginBottom: 10,
+    },
+    mealFeatureControls: {
+        flexDirection: "row",
+        alignItems: "center",
+    },
+    mealChevronSpacer: {
+        width: 28,
+        marginLeft: 8,
+    },
+    mealSectionBox: {
+        borderRadius: 12,
+        padding: 10,
+        marginBottom: 12,
+    },
+    switchRow: {
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "space-between",
+        marginBottom: 8,
+    },
+    daysContainer: { flexDirection: "row", justifyContent: "space-between", marginBottom: 8 },
+    dayChip: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        justifyContent: "center",
+        alignItems: "center",
+        borderWidth: 1,
+    },
+    durationBtn: {
+        flex: 1,
+        height: 42,
+        borderRadius: 10,
+        justifyContent: "center",
+        alignItems: "center",
+    },
+
+    submitButton: {
+        height: 56,
+        borderRadius: 16,
+        alignItems: "center",
+        justifyContent: "center",
+        marginTop: 10,
+    },
+    submitButtonText: { color: "white", fontSize: 18, fontWeight: "bold" },
 });
