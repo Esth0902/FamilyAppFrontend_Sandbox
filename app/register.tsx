@@ -15,18 +15,30 @@ import {
 import { useRouter } from "expo-router";
 import * as SecureStore from "expo-secure-store";
 import { API_BASE_URL } from "@/src/api/client";
-import { Colors } from "@/constants/theme"; // Ton thème
+import { Colors } from "@/constants/theme";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
+
+const parseJsonSafe = async (response: Response) => {
+    const text = await response.text();
+    if (!text) return null;
+    try {
+        return JSON.parse(text);
+    } catch {
+        return null;
+    }
+};
 
 export default function Register() {
     const router = useRouter();
     const colorScheme = useColorScheme();
-    const theme = Colors[colorScheme ?? 'light'];
+    const theme = Colors[colorScheme ?? "light"];
 
-    const [name, setName] = useState("Parent Test");
-    const [email, setEmail] = useState("parent@example.com");
-    const [password, setPassword] = useState("password123");
-    const [passwordConfirm, setPasswordConfirm] = useState("password123");
+    const [name, setName] = useState("");
+    const [email, setEmail] = useState("");
+    const [password, setPassword] = useState("");
+    const [passwordConfirm, setPasswordConfirm] = useState("");
+    const [showPassword, setShowPassword] = useState(false);
+    const [showPasswordConfirm, setShowPasswordConfirm] = useState(false);
     const [loading, setLoading] = useState(false);
     const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
@@ -40,6 +52,11 @@ export default function Register() {
 
         try {
             setLoading(true);
+
+            if (!API_BASE_URL) {
+                Alert.alert("Erreur", "EXPO_PUBLIC_API_URL est manquant.");
+                return;
+            }
 
             const response = await fetch(`${API_BASE_URL}/register`, {
                 method: "POST",
@@ -55,31 +72,30 @@ export default function Register() {
                 }),
             });
 
-            const data= await response.json();
+            const data = await parseJsonSafe(response);
 
             if (!response.ok) {
-                if (data.errors) {
-                    const errors: any = {};
-                    Object.keys(data.errors).forEach(key => {
+                if (data?.errors) {
+                    const errors: Record<string, string> = {};
+                    Object.keys(data.errors).forEach((key) => {
                         errors[key] = data.errors[key][0];
                     });
                     setFieldErrors(errors);
                 } else {
-                    Alert.alert("Erreur", data.message || "Erreur inconnue");
+                    Alert.alert("Erreur", data?.message || "Erreur inconnue");
                 }
                 return;
             }
 
-            if (data.token) {
+            if (data?.token) {
                 await SecureStore.setItemAsync("authToken", data.token);
             }
-            if (data.user) {
+            if (data?.user) {
                 await SecureStore.setItemAsync("user", JSON.stringify(data.user));
             }
 
             Alert.alert("Bienvenue !", "Votre compte a été créé avec succès.");
             router.replace("/(tabs)/home");
-
         } catch (error: unknown) {
             console.error(error);
             Alert.alert("Erreur", "Impossible de contacter le serveur.");
@@ -94,8 +110,6 @@ export default function Register() {
             style={{ flex: 1, backgroundColor: theme.background }}
         >
             <ScrollView contentContainerStyle={styles.scrollContainer}>
-
-                {/* BOUTON RETOUR */}
                 <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
                     <MaterialCommunityIcons name="arrow-left" size={24} color={theme.textSecondary} />
                 </TouchableOpacity>
@@ -107,13 +121,11 @@ export default function Register() {
                     </Text>
                 </View>
 
-                {/* FORMULAIRE */}
                 <View style={styles.form}>
-
                     <Text style={[styles.label, { color: theme.text }]}>Nom complet</Text>
                     <TextInput
                         style={[styles.input, { backgroundColor: theme.card, color: theme.text, borderColor: theme.icon }]}
-                        placeholder="Ex: Sophie Martin"
+                        placeholder="Ex: Sophie"
                         placeholderTextColor={theme.textSecondary}
                         value={name}
                         onChangeText={setName}
@@ -129,33 +141,56 @@ export default function Register() {
                         value={email}
                         onChangeText={setEmail}
                     />
-                    {fieldErrors.email && (
-                        <Text style={styles.errorText}>{fieldErrors.email}</Text>
-                    )}
+                    {fieldErrors.email && <Text style={styles.errorText}>{fieldErrors.email}</Text>}
 
                     <Text style={[styles.label, { color: theme.text }]}>Mot de passe</Text>
-                    <TextInput
-                        style={[styles.input, { backgroundColor: theme.card, color: theme.text, borderColor: theme.icon }]}
-                        placeholder="Min 8 caractères"
-                        placeholderTextColor={theme.textSecondary}
-                        secureTextEntry
-                        value={password}
-                        onChangeText={setPassword}
-                    />
+                    <View style={styles.passwordFieldContainer}>
+                        <TextInput
+                            style={[styles.input, styles.passwordInput, { backgroundColor: theme.card, color: theme.text, borderColor: theme.icon }]}
+                            placeholder="Min 8 caractères"
+                            placeholderTextColor={theme.textSecondary}
+                            secureTextEntry={!showPassword}
+                            value={password}
+                            onChangeText={setPassword}
+                        />
+                        <TouchableOpacity
+                            style={styles.eyeButton}
+                            onPress={() => setShowPassword((prev) => !prev)}
+                            accessibilityLabel={showPassword ? "Masquer le mot de passe" : "Afficher le mot de passe"}
+                        >
+                            <MaterialCommunityIcons
+                                name={showPassword ? "eye-off-outline" : "eye-outline"}
+                                size={20}
+                                color={theme.textSecondary}
+                            />
+                        </TouchableOpacity>
+                    </View>
 
                     <Text style={[styles.label, { color: theme.text }]}>Confirmation</Text>
-                    <TextInput
-                        style={[styles.input, { backgroundColor: theme.card, color: theme.text, borderColor: theme.icon }]}
-                        placeholder="Répétez le mot de passe"
-                        placeholderTextColor={theme.textSecondary}
-                        secureTextEntry
-                        value={passwordConfirm}
-                        onChangeText={setPasswordConfirm}
-                    />
+                    <View style={styles.passwordFieldContainer}>
+                        <TextInput
+                            style={[styles.input, styles.passwordInput, { backgroundColor: theme.card, color: theme.text, borderColor: theme.icon }]}
+                            placeholder="Repetez le mot de passe"
+                            placeholderTextColor={theme.textSecondary}
+                            secureTextEntry={!showPasswordConfirm}
+                            value={passwordConfirm}
+                            onChangeText={setPasswordConfirm}
+                        />
+                        <TouchableOpacity
+                            style={styles.eyeButton}
+                            onPress={() => setShowPasswordConfirm((prev) => !prev)}
+                            accessibilityLabel={showPasswordConfirm ? "Masquer le mot de passe de confirmation" : "Afficher le mot de passe de confirmation"}
+                        >
+                            <MaterialCommunityIcons
+                                name={showPasswordConfirm ? "eye-off-outline" : "eye-outline"}
+                                size={20}
+                                color={theme.textSecondary}
+                            />
+                        </TouchableOpacity>
+                    </View>
 
                     <View style={{ height: 20 }} />
 
-                    {/* ACTION PRINCIPALE */}
                     {loading ? (
                         <ActivityIndicator size="large" color={theme.tint} />
                     ) : (
@@ -168,14 +203,12 @@ export default function Register() {
                         </TouchableOpacity>
                     )}
 
-                    {/* LIEN LOGIN */}
                     <View style={styles.footerLink}>
                         <Text style={{ color: theme.textSecondary }}>Déjà un compte ? </Text>
                         <TouchableOpacity onPress={() => router.push("/login")}>
-                            <Text style={{ color: theme.accentCool, fontWeight: 'bold' }}>Se connecter</Text>
+                            <Text style={{ color: theme.accentCool, fontWeight: "bold" }}>Se connecter</Text>
                         </TouchableOpacity>
                     </View>
-
                 </View>
             </ScrollView>
         </KeyboardAvoidingView>
@@ -189,7 +222,7 @@ const styles = StyleSheet.create({
         paddingTop: 60,
     },
     backButton: {
-        position: 'absolute',
+        position: "absolute",
         top: 60,
         left: 24,
         zIndex: 10,
@@ -209,16 +242,16 @@ const styles = StyleSheet.create({
         fontSize: 16,
     },
     form: {
-        width: '100%',
+        width: "100%",
     },
     label: {
         fontSize: 14,
-        fontWeight: '600',
+        fontWeight: "600",
         marginBottom: 8,
         marginLeft: 4,
     },
     input: {
-        width: '100%',
+        width: "100%",
         height: 50,
         borderWidth: 1,
         borderRadius: 12,
@@ -226,12 +259,28 @@ const styles = StyleSheet.create({
         marginBottom: 16,
         fontSize: 16,
     },
+    passwordFieldContainer: {
+        position: "relative",
+        marginBottom: 16,
+    },
+    passwordInput: {
+        marginBottom: 0,
+        paddingRight: 48,
+    },
+    eyeButton: {
+        position: "absolute",
+        right: 12,
+        top: 0,
+        bottom: 0,
+        justifyContent: "center",
+        alignItems: "center",
+    },
     primaryButton: {
-        width: '100%',
+        width: "100%",
         height: 54,
         borderRadius: 12,
-        alignItems: 'center',
-        justifyContent: 'center',
+        alignItems: "center",
+        justifyContent: "center",
         shadowColor: "#000",
         shadowOffset: { width: 0, height: 4 },
         shadowOpacity: 0.2,
@@ -239,18 +288,18 @@ const styles = StyleSheet.create({
         elevation: 4,
     },
     primaryButtonText: {
-        color: '#FFFFFF',
+        color: "#FFFFFF",
         fontSize: 18,
-        fontWeight: 'bold',
+        fontWeight: "bold",
     },
     footerLink: {
-        flexDirection: 'row',
-        justifyContent: 'center',
+        flexDirection: "row",
+        justifyContent: "center",
         marginTop: 24,
         marginBottom: 40,
     },
     errorText: {
-        color: 'red',
+        color: "red",
         fontSize: 12,
         marginTop: -12,
         marginBottom: 10,

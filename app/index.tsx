@@ -28,7 +28,7 @@ export default function PublicHome() {
                 </Text>
 
                 <Text style={[styles.subtitle, { color: theme.textSecondary }]}>
-                    Centralise la gestion de ton foyer : repas, tâches, budget et garde alternée.
+                    Centralise la gestion de ton foyer : repas, tâches, budget, calendrier et garde alternée.
                 </Text>
             </View>
 

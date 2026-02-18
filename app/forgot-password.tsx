@@ -12,7 +12,6 @@ import {
     useColorScheme,
 } from "react-native";
 import { useRouter } from "expo-router";
-import * as SecureStore from "expo-secure-store";
 import { API_BASE_URL } from "@/src/api/client";
 import { Colors } from "@/constants/theme";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
@@ -27,62 +26,50 @@ const parseJsonSafe = async (response: Response) => {
     }
 };
 
-export default function Login() {
+export default function ForgotPasswordScreen() {
     const router = useRouter();
     const colorScheme = useColorScheme();
-    const theme = Colors[colorScheme ?? 'light'];
+    const theme = Colors[colorScheme ?? "light"];
 
     const [email, setEmail] = useState("");
-    const [password, setPassword] = useState("");
-    const [showPassword, setShowPassword] = useState(false);
     const [loading, setLoading] = useState(false);
 
-    const onLogin = async () => {
-        if (!email || !password) {
-            Alert.alert("Oups", "Merci de remplir tous les champs.");
+    const onSubmit = async () => {
+        if (!email.trim()) {
+            Alert.alert("Réinitialisation", "Merci de renseigner un email.");
             return;
         }
 
+        if (!API_BASE_URL) {
+            Alert.alert("Erreur", "EXPO_PUBLIC_API_URL est manquant.");
+            return;
+        }
+
+        setLoading(true);
         try {
-            setLoading(true);
-
-            if (!API_BASE_URL) {
-                Alert.alert("Erreur", "EXPO_PUBLIC_API_URL est manquant.");
-                return;
-            }
-
-            const response = await fetch(`${API_BASE_URL}/login`, {
+            const response = await fetch(`${API_BASE_URL}/auth/forgot-password`, {
                 method: "POST",
                 headers: {
                     Accept: "application/json",
                     "Content-Type": "application/json",
                 },
-                body: JSON.stringify({ email, password }),
+                body: JSON.stringify({ email: email.trim() }),
             });
 
             const data = await parseJsonSafe(response);
 
             if (!response.ok) {
-                Alert.alert("Erreur", data?.message || "Identifiants incorrects");
+                Alert.alert("Erreur", data?.message || "Impossible d'envoyer la demande.");
                 return;
             }
 
-            if (data?.token) {
-                await SecureStore.setItemAsync("authToken", data.token);
-            }
-
-            if (data?.user) {
-                await SecureStore.setItemAsync("user", JSON.stringify(data.user));
-            }
-
-            if (data?.user?.must_change_password) {
-                router.replace("/change-credentials");
-            } else {
-                router.replace("/(tabs)/home");
-            }
-
+            Alert.alert(
+                "Réinitialisation",
+                data?.message || "Si un compte existe, un email de réinitialisation a été envoyé."
+            );
+            router.replace("/login");
         } catch (error) {
-            console.error(error);
+            console.error("Erreur forgot password:", error);
             Alert.alert("Erreur réseau", "Impossible de contacter le serveur.");
         } finally {
             setLoading(false);
@@ -95,15 +82,14 @@ export default function Login() {
             style={[styles.container, { backgroundColor: theme.background }]}
         >
             <View style={styles.content}>
-
                 <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
                     <MaterialCommunityIcons name="arrow-left" size={24} color={theme.textSecondary} />
                 </TouchableOpacity>
 
                 <View style={styles.header}>
-                    <Text style={[styles.title, { color: theme.text }]}>Bon retour !</Text>
+                    <Text style={[styles.title, { color: theme.text }]}>Mot de passe oublié</Text>
                     <Text style={[styles.subtitle, { color: theme.textSecondary }]}>
-                        Connecte-toi pour accéder à ton foyer.
+                        Saisis ton email pour recevoir un lien de réinitialisation.
                     </Text>
                 </View>
 
@@ -119,47 +105,15 @@ export default function Login() {
                         onChangeText={setEmail}
                     />
 
-                    <Text style={[styles.label, { color: theme.text }]}>Mot de passe</Text>
-                    <TextInput
-                        style={[styles.input, { backgroundColor: theme.card, color: theme.text, borderColor: theme.icon }]}
-                        placeholder="••••••••"
-                        placeholderTextColor={theme.textSecondary}
-                        secureTextEntry={!showPassword}
-                        value={password}
-                        onChangeText={setPassword}
-
-                        
-                    />
-
-                    <TouchableOpacity
-                        onPress={() => setShowPassword((prev) => !prev)}
-                        style={styles.eyeToggle}
-                    >
-                        <MaterialCommunityIcons
-                            name={showPassword ? "eye-off-outline" : "eye-outline"}
-                            size={18}
-                            color={theme.textSecondary}
-                        />
-                    </TouchableOpacity>
-
-                    <TouchableOpacity
-                        style={{ alignSelf: 'flex-end', marginBottom: 24 }}
-                        onPress={() => router.push("/forgot-password")}
-                    >
-                        <Text style={{ color: theme.accentCool, fontSize: 14 }}>
-                            Mot de passe oublié ?
-                        </Text>
-                    </TouchableOpacity>
-
                     {loading ? (
                         <ActivityIndicator size="large" color={theme.tint} />
                     ) : (
                         <TouchableOpacity
-                            style={[styles.loginButton, { backgroundColor: theme.tint }]}
-                            onPress={onLogin}
+                            style={[styles.primaryButton, { backgroundColor: theme.tint }]}
+                            onPress={onSubmit}
                             activeOpacity={0.8}
                         >
-                            <Text style={styles.loginButtonText}>Se connecter</Text>
+                            <Text style={styles.primaryButtonText}>Envoyer le lien</Text>
                         </TouchableOpacity>
                     )}
                 </View>
@@ -178,7 +132,7 @@ const styles = StyleSheet.create({
         justifyContent: "center",
     },
     backButton: {
-        position: 'absolute',
+        position: "absolute",
         top: 60,
         left: 24,
         zIndex: 10,
@@ -186,7 +140,7 @@ const styles = StyleSheet.create({
     },
     header: {
         marginBottom: 32,
-        alignItems: 'flex-start',
+        alignItems: "flex-start",
     },
     title: {
         fontSize: 32,
@@ -197,44 +151,34 @@ const styles = StyleSheet.create({
         fontSize: 16,
     },
     form: {
-        width: '100%',
+        width: "100%",
     },
     label: {
         fontSize: 14,
-        fontWeight: '600',
+        fontWeight: "600",
         marginBottom: 8,
         marginLeft: 4,
     },
     input: {
-        width: '100%',
+        width: "100%",
         height: 50,
         borderWidth: 1,
         borderRadius: 12,
         paddingHorizontal: 16,
-        marginBottom: 16,
+        marginBottom: 20,
         fontSize: 16,
     },
-    eyeToggle: {
-        alignSelf: "flex-end",
-        marginTop: -8,
-        marginBottom: 8,
-        padding: 4,
-    },
-    loginButton: {
-        width: '100%',
+    primaryButton: {
+        width: "100%",
         height: 54,
         borderRadius: 12,
-        alignItems: 'center',
-        justifyContent: 'center',
-        shadowColor: "#000",
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.2,
-        shadowRadius: 5,
-        elevation: 4,
+        alignItems: "center",
+        justifyContent: "center",
     },
-    loginButtonText: {
-        color: 'white',
+    primaryButtonText: {
+        color: "white",
         fontSize: 18,
-        fontWeight: 'bold',
-    }
+        fontWeight: "bold",
+    },
 });
+

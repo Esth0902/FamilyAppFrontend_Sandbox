@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import {
     View,
     Text,
@@ -11,8 +11,7 @@ import {
     Platform,
     useColorScheme,
 } from "react-native";
-import { useRouter } from "expo-router";
-import * as SecureStore from "expo-secure-store";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { API_BASE_URL } from "@/src/api/client";
 import { Colors } from "@/constants/theme";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
@@ -27,63 +26,78 @@ const parseJsonSafe = async (response: Response) => {
     }
 };
 
-export default function Login() {
+const toSingleParam = (value: string | string[] | undefined): string => {
+    if (Array.isArray(value)) {
+        return value[0] ?? "";
+    }
+    return value ?? "";
+};
+
+export default function PasswordResetScreen() {
     const router = useRouter();
     const colorScheme = useColorScheme();
-    const theme = Colors[colorScheme ?? 'light'];
+    const theme = Colors[colorScheme ?? "light"];
+    const params = useLocalSearchParams<{ token?: string | string[]; email?: string | string[] }>();
 
-    const [email, setEmail] = useState("");
+    const token = useMemo(() => toSingleParam(params.token), [params.token]);
+    const initialEmail = useMemo(() => toSingleParam(params.email), [params.email]);
+
+    const [email, setEmail] = useState(initialEmail);
     const [password, setPassword] = useState("");
+    const [passwordConfirmation, setPasswordConfirmation] = useState("");
     const [showPassword, setShowPassword] = useState(false);
+    const [showPasswordConfirmation, setShowPasswordConfirmation] = useState(false);
     const [loading, setLoading] = useState(false);
 
-    const onLogin = async () => {
-        if (!email || !password) {
-            Alert.alert("Oups", "Merci de remplir tous les champs.");
+    const onSubmit = async () => {
+        if (!token) {
+            Alert.alert("Reinitialisation", "Le token de reinitialisation est manquant.");
             return;
         }
 
+        if (!email.trim() || !password || !passwordConfirmation) {
+            Alert.alert("Reinitialisation", "Merci de remplir tous les champs.");
+            return;
+        }
+
+        if (password !== passwordConfirmation) {
+            Alert.alert("Reinitialisation", "La confirmation du mot de passe est invalide.");
+            return;
+        }
+
+        if (!API_BASE_URL) {
+            Alert.alert("Erreur", "EXPO_PUBLIC_API_URL est manquant.");
+            return;
+        }
+
+        setLoading(true);
         try {
-            setLoading(true);
-
-            if (!API_BASE_URL) {
-                Alert.alert("Erreur", "EXPO_PUBLIC_API_URL est manquant.");
-                return;
-            }
-
-            const response = await fetch(`${API_BASE_URL}/login`, {
+            const response = await fetch(`${API_BASE_URL}/auth/reset-password`, {
                 method: "POST",
                 headers: {
                     Accept: "application/json",
                     "Content-Type": "application/json",
                 },
-                body: JSON.stringify({ email, password }),
+                body: JSON.stringify({
+                    token,
+                    email: email.trim(),
+                    password,
+                    password_confirmation: passwordConfirmation,
+                }),
             });
 
             const data = await parseJsonSafe(response);
 
             if (!response.ok) {
-                Alert.alert("Erreur", data?.message || "Identifiants incorrects");
+                Alert.alert("Erreur", data?.message || "Impossible de reinitialiser le mot de passe.");
                 return;
             }
 
-            if (data?.token) {
-                await SecureStore.setItemAsync("authToken", data.token);
-            }
-
-            if (data?.user) {
-                await SecureStore.setItemAsync("user", JSON.stringify(data.user));
-            }
-
-            if (data?.user?.must_change_password) {
-                router.replace("/change-credentials");
-            } else {
-                router.replace("/(tabs)/home");
-            }
-
+            Alert.alert("Reinitialisation", data?.message || "Mot de passe reinitialise.");
+            router.replace("/login");
         } catch (error) {
-            console.error(error);
-            Alert.alert("Erreur réseau", "Impossible de contacter le serveur.");
+            console.error("Erreur reset password:", error);
+            Alert.alert("Erreur reseau", "Impossible de contacter le serveur.");
         } finally {
             setLoading(false);
         }
@@ -95,15 +109,14 @@ export default function Login() {
             style={[styles.container, { backgroundColor: theme.background }]}
         >
             <View style={styles.content}>
-
-                <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+                <TouchableOpacity onPress={() => router.replace("/login")} style={styles.backButton}>
                     <MaterialCommunityIcons name="arrow-left" size={24} color={theme.textSecondary} />
                 </TouchableOpacity>
 
                 <View style={styles.header}>
-                    <Text style={[styles.title, { color: theme.text }]}>Bon retour !</Text>
+                    <Text style={[styles.title, { color: theme.text }]}>Nouveau mot de passe</Text>
                     <Text style={[styles.subtitle, { color: theme.textSecondary }]}>
-                        Connecte-toi pour accéder à ton foyer.
+                        Definis un nouveau mot de passe pour ton compte.
                     </Text>
                 </View>
 
@@ -119,16 +132,14 @@ export default function Login() {
                         onChangeText={setEmail}
                     />
 
-                    <Text style={[styles.label, { color: theme.text }]}>Mot de passe</Text>
+                    <Text style={[styles.label, { color: theme.text }]}>Nouveau mot de passe</Text>
                     <TextInput
                         style={[styles.input, { backgroundColor: theme.card, color: theme.text, borderColor: theme.icon }]}
-                        placeholder="••••••••"
+                        placeholder="Minimum 8 caracteres"
                         placeholderTextColor={theme.textSecondary}
                         secureTextEntry={!showPassword}
                         value={password}
                         onChangeText={setPassword}
-
-                        
                     />
 
                     <TouchableOpacity
@@ -142,24 +153,36 @@ export default function Login() {
                         />
                     </TouchableOpacity>
 
+                    <Text style={[styles.label, { color: theme.text }]}>Confirmation</Text>
+                    <TextInput
+                        style={[styles.input, { backgroundColor: theme.card, color: theme.text, borderColor: theme.icon }]}
+                        placeholder="Retape le mot de passe"
+                        placeholderTextColor={theme.textSecondary}
+                        secureTextEntry={!showPasswordConfirmation}
+                        value={passwordConfirmation}
+                        onChangeText={setPasswordConfirmation}
+                    />
+
                     <TouchableOpacity
-                        style={{ alignSelf: 'flex-end', marginBottom: 24 }}
-                        onPress={() => router.push("/forgot-password")}
+                        onPress={() => setShowPasswordConfirmation((prev) => !prev)}
+                        style={styles.eyeToggle}
                     >
-                        <Text style={{ color: theme.accentCool, fontSize: 14 }}>
-                            Mot de passe oublié ?
-                        </Text>
+                        <MaterialCommunityIcons
+                            name={showPasswordConfirmation ? "eye-off-outline" : "eye-outline"}
+                            size={18}
+                            color={theme.textSecondary}
+                        />
                     </TouchableOpacity>
 
                     {loading ? (
                         <ActivityIndicator size="large" color={theme.tint} />
                     ) : (
                         <TouchableOpacity
-                            style={[styles.loginButton, { backgroundColor: theme.tint }]}
-                            onPress={onLogin}
+                            style={[styles.primaryButton, { backgroundColor: theme.tint }]}
+                            onPress={onSubmit}
                             activeOpacity={0.8}
                         >
-                            <Text style={styles.loginButtonText}>Se connecter</Text>
+                            <Text style={styles.primaryButtonText}>Reinitialiser le mot de passe</Text>
                         </TouchableOpacity>
                     )}
                 </View>
@@ -178,7 +201,7 @@ const styles = StyleSheet.create({
         justifyContent: "center",
     },
     backButton: {
-        position: 'absolute',
+        position: "absolute",
         top: 60,
         left: 24,
         zIndex: 10,
@@ -186,7 +209,7 @@ const styles = StyleSheet.create({
     },
     header: {
         marginBottom: 32,
-        alignItems: 'flex-start',
+        alignItems: "flex-start",
     },
     title: {
         fontSize: 32,
@@ -197,16 +220,16 @@ const styles = StyleSheet.create({
         fontSize: 16,
     },
     form: {
-        width: '100%',
+        width: "100%",
     },
     label: {
         fontSize: 14,
-        fontWeight: '600',
+        fontWeight: "600",
         marginBottom: 8,
         marginLeft: 4,
     },
     input: {
-        width: '100%',
+        width: "100%",
         height: 50,
         borderWidth: 1,
         borderRadius: 12,
@@ -220,21 +243,18 @@ const styles = StyleSheet.create({
         marginBottom: 8,
         padding: 4,
     },
-    loginButton: {
-        width: '100%',
+    primaryButton: {
+        width: "100%",
         height: 54,
         borderRadius: 12,
-        alignItems: 'center',
-        justifyContent: 'center',
-        shadowColor: "#000",
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.2,
-        shadowRadius: 5,
-        elevation: 4,
+        alignItems: "center",
+        justifyContent: "center",
+        marginTop: 8,
     },
-    loginButtonText: {
-        color: 'white',
-        fontSize: 18,
-        fontWeight: 'bold',
-    }
+    primaryButtonText: {
+        color: "white",
+        fontSize: 16,
+        fontWeight: "bold",
+        textAlign: "center",
+    },
 });
