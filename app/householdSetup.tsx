@@ -22,7 +22,7 @@ import { apiFetch } from "@/src/api/client";
 
 type ModuleKey = "meals" | "tasks" | "budget" | "calendar";
 type MemberRole = "parent" | "enfant";
-type TaskRecurrence = "daily" | "weekly" | "monthly";
+type TaskRecurrence = "daily" | "weekly" | "monthly" | "once";
 
 type HouseholdMember = {
     name: string;
@@ -39,10 +39,14 @@ type CreatedMemberCredential = {
 };
 
 type TaskTemplateInput = {
+    id?: number;
     name: string;
     recurrence: TaskRecurrence;
     description: string;
+    recurrence_days: number[];
     is_rotation: boolean;
+    rotation_cycle_weeks: 1 | 2;
+    fixed_user_id?: number | null;
 };
 
 type DietaryTagOption = {
@@ -123,6 +127,23 @@ const parseTimeToHHMM = (value: unknown): string | null => {
     return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
 };
 
+const isoWeekDayFromDate = (date: Date): number => {
+    const day = date.getDay();
+    return day === 0 ? 7 : day;
+};
+
+const normalizeTaskRecurrenceDays = (value: unknown): number[] => {
+    if (!Array.isArray(value)) {
+        return [];
+    }
+
+    const days = value
+        .map((day) => Number(day))
+        .filter((day) => Number.isInteger(day) && day >= 1 && day <= 7);
+
+    return Array.from(new Set(days)).sort((a, b) => a - b);
+};
+
 const buildMemberShareText = (member: CreatedMemberCredential): string => {
     const name = String(member.name ?? "Membre").trim() || "Membre";
     const email = String(member.generated_email ?? "").trim();
@@ -144,6 +165,8 @@ export default function SetupHousehold() {
     const params = useLocalSearchParams<{ mode?: string; scope?: string }>();
     const isEditMode = params.mode === "edit";
     const isMealsScope = params.scope === "meals";
+    const isTasksScope = params.scope === "tasks";
+    const isCalendarScope = params.scope === "calendar";
     const colorScheme = useColorScheme();
     const theme = Colors[colorScheme ?? "light"];
 
@@ -161,10 +184,10 @@ export default function SetupHousehold() {
     });
 
     const [expandedModules, setExpandedModules] = useState<Record<ModuleKey, boolean>>({
-        meals: false,
-        tasks: false,
+        meals: isMealsScope,
+        tasks: isTasksScope,
         budget: false,
-        calendar: false,
+        calendar: isCalendarScope,
     });
 
     const [mealOptions, setMealOptions] = useState({
@@ -198,6 +221,9 @@ export default function SetupHousehold() {
     const [taskTemplateName, setTaskTemplateName] = useState("");
     const [taskTemplateDescription, setTaskTemplateDescription] = useState("");
     const [taskTemplateRecurrence, setTaskTemplateRecurrence] = useState<TaskRecurrence>("weekly");
+    const [taskTemplateRecurrenceDays, setTaskTemplateRecurrenceDays] = useState<number[]>([isoWeekDayFromDate(new Date())]);
+    const [taskTemplateRotation, setTaskTemplateRotation] = useState(false);
+    const [taskTemplateRotationCycleWeeks, setTaskTemplateRotationCycleWeeks] = useState<1 | 2>(1);
 
     const [calendarSettings, setCalendarSettings] = useState({
         shared_view_enabled: true,
@@ -216,7 +242,11 @@ export default function SetupHousehold() {
     const [activeUser, setActiveUser] = useState<{ name?: string; email?: string } | null>(null);
     const visibleModules = isMealsScope
         ? MODULES.filter((module) => module.id === "meals")
-        : MODULES;
+        : isTasksScope
+            ? MODULES.filter((module) => module.id === "tasks")
+            : isCalendarScope
+                ? MODULES.filter((module) => module.id === "calendar")
+            : MODULES;
 
     const toggleModule = (id: ModuleKey) => {
         setActiveModules((prev) => {
@@ -242,6 +272,30 @@ export default function SetupHousehold() {
         if (!value && (option === "recipes" || option === "polls")) {
             setMealExpandedSections((prev) => ({ ...prev, [option]: false }));
         }
+    };
+
+    const applyTaskRecurrence = (recurrence: TaskRecurrence) => {
+        setTaskTemplateRecurrence(recurrence);
+        if (recurrence === "daily" && taskTemplateRecurrenceDays.length === 0) {
+            setTaskTemplateRecurrenceDays([1, 2, 3, 4, 5, 6, 7]);
+            return;
+        }
+        if (recurrence === "weekly" && taskTemplateRecurrenceDays.length === 0) {
+            setTaskTemplateRecurrenceDays([isoWeekDayFromDate(new Date())]);
+            return;
+        }
+        if (recurrence === "monthly" || recurrence === "once") {
+            setTaskTemplateRecurrenceDays([]);
+        }
+    };
+
+    const toggleTaskRecurrenceDay = (value: number) => {
+        setTaskTemplateRecurrenceDays((prev) => {
+            if (prev.includes(value)) {
+                return prev.filter((day) => day !== value);
+            }
+            return [...prev, value].sort((left, right) => left - right);
+        });
     };
 
     const loadDietaryTags = useCallback(async (type: DietaryTagOption["type"]) => {
@@ -443,17 +497,23 @@ export default function SetupHousehold() {
                         });
                         setSelectedMealDietaryTagDetails(detailsMap);
                     }
-                    await loadDietaryTags("diet");
+                    if (!isTasksScope) {
+                        await loadDietaryTags("diet");
+                    }
                     setTasksSettings({
                         reminders_enabled: tasksSettings.reminders_enabled !== false,
                         templates: Array.isArray(tasksSettings.templates)
                             ? tasksSettings.templates.map((template: any) => ({
+                                id: Number.isInteger(template?.id) ? Number(template.id) : undefined,
                                 name: String(template?.name ?? "").trim(),
                                 description: String(template?.description ?? ""),
-                                recurrence: template?.recurrence === "daily" || template?.recurrence === "monthly"
+                                recurrence: template?.recurrence === "daily" || template?.recurrence === "monthly" || template?.recurrence === "once"
                                     ? template.recurrence
                                     : "weekly",
+                                recurrence_days: normalizeTaskRecurrenceDays(template?.recurrence_days),
                                 is_rotation: !!template?.is_rotation,
+                                rotation_cycle_weeks: template?.rotation_cycle_weeks === 2 ? 2 : 1,
+                                fixed_user_id: Number.isInteger(template?.fixed_user_id) ? Number(template.fixed_user_id) : null,
                             })).filter((template: TaskTemplateInput) => template.name.length > 0)
                             : [],
                     });
@@ -474,7 +534,7 @@ export default function SetupHousehold() {
         };
 
         loadSetupState();
-    }, [isEditMode, loadDietaryTags, router]);
+    }, [isEditMode, isTasksScope, loadDietaryTags, router]);
 
     const addMember = () => {
         const cleanName = memberName.trim();
@@ -522,6 +582,12 @@ export default function SetupHousehold() {
             return;
         }
 
+        const normalizedDays = normalizeTaskRecurrenceDays(taskTemplateRecurrenceDays);
+        if ((taskTemplateRecurrence === "daily" || taskTemplateRecurrence === "weekly") && normalizedDays.length === 0) {
+            Alert.alert("Taches", "Choisis au moins un jour pour cette recurrence.");
+            return;
+        }
+
         setTasksSettings((prev) => ({
             ...prev,
             templates: [
@@ -530,7 +596,12 @@ export default function SetupHousehold() {
                     name: cleanName,
                     recurrence: taskTemplateRecurrence,
                     description: taskTemplateDescription.trim(),
-                    is_rotation: false,
+                    recurrence_days: taskTemplateRecurrence === "daily" || taskTemplateRecurrence === "weekly"
+                        ? normalizedDays
+                        : [],
+                    is_rotation: taskTemplateRotation,
+                    rotation_cycle_weeks: taskTemplateRotation ? taskTemplateRotationCycleWeeks : 1,
+                    fixed_user_id: null,
                 },
             ],
         }));
@@ -538,6 +609,9 @@ export default function SetupHousehold() {
         setTaskTemplateName("");
         setTaskTemplateDescription("");
         setTaskTemplateRecurrence("weekly");
+        setTaskTemplateRecurrenceDays([isoWeekDayFromDate(new Date())]);
+        setTaskTemplateRotation(false);
+        setTaskTemplateRotationCycleWeeks(1);
     };
 
     const removeTaskTemplate = (index: number) => {
@@ -564,11 +638,6 @@ export default function SetupHousehold() {
                 Alert.alert("Budget", "Active: ajoute au moins un membre enfant.");
                 return;
             }
-        }
-
-        if (activeModules.tasks && tasksSettings.templates.length === 0) {
-            Alert.alert("Taches", "Ajoute au moins un template de tache.");
-            return;
         }
 
         const parsedDefaultServings = Number(defaultServings);
@@ -828,12 +897,16 @@ export default function SetupHousehold() {
                 <Text style={[styles.headerTitle, { color: theme.text }]}>
                     {isMealsScope
                         ? "Parametres repas"
+                        : isTasksScope
+                            ? "Parametres taches"
+                            : isCalendarScope
+                                ? "Parametres calendrier"
                         : (isEditMode ? "Modifier le foyer" : "Nouveau Foyer")}
                 </Text>
             </View>
 
             <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
-                {!isMealsScope && (
+                {!isMealsScope && !isTasksScope && !isCalendarScope && (
                     <View style={styles.section}>
                         <Text style={[styles.sectionTitle, { color: theme.text }]}>Nom du foyer</Text>
                         <TextInput
@@ -846,7 +919,7 @@ export default function SetupHousehold() {
                     </View>
                 )}
 
-                {!isEditMode && (
+                {!isEditMode && !isCalendarScope && (
                 <View style={styles.section}>
                     <Text style={[styles.sectionTitle, { color: theme.text }]}>Membres du foyer</Text>
 
@@ -937,7 +1010,13 @@ export default function SetupHousehold() {
 
                 <View style={styles.section}>
                     <Text style={[styles.sectionTitle, { color: theme.text }]}>
-                        {isMealsScope ? "Repas & courses" : "Modules et sous-config"}
+                        {isMealsScope
+                            ? "Repas & courses"
+                            : isTasksScope
+                                ? "Taches menageres"
+                                : isCalendarScope
+                                    ? "Calendrier"
+                                : "Modules et sous-config"}
                     </Text>
 
                     {visibleModules.map((module) => (
@@ -1252,7 +1331,7 @@ export default function SetupHousehold() {
                                     />
                                     <View style={styles.inlineRow}>
                                         <TouchableOpacity
-                                            onPress={() => setTaskTemplateRecurrence("daily")}
+                                            onPress={() => applyTaskRecurrence("daily")}
                                             style={[
                                                 styles.smallChip,
                                                 { borderColor: theme.icon, backgroundColor: theme.background },
@@ -1262,7 +1341,7 @@ export default function SetupHousehold() {
                                             <Text style={{ color: theme.text }}>Quotidien</Text>
                                         </TouchableOpacity>
                                         <TouchableOpacity
-                                            onPress={() => setTaskTemplateRecurrence("weekly")}
+                                            onPress={() => applyTaskRecurrence("weekly")}
                                             style={[
                                                 styles.smallChip,
                                                 { borderColor: theme.icon, backgroundColor: theme.background },
@@ -1272,7 +1351,7 @@ export default function SetupHousehold() {
                                             <Text style={{ color: theme.text }}>Hebdo</Text>
                                         </TouchableOpacity>
                                         <TouchableOpacity
-                                            onPress={() => setTaskTemplateRecurrence("monthly")}
+                                            onPress={() => applyTaskRecurrence("monthly")}
                                             style={[
                                                 styles.smallChip,
                                                 { borderColor: theme.icon, backgroundColor: theme.background },
@@ -1282,6 +1361,64 @@ export default function SetupHousehold() {
                                             <Text style={{ color: theme.text }}>Mensuel</Text>
                                         </TouchableOpacity>
                                     </View>
+
+                                    {(taskTemplateRecurrence === "daily" || taskTemplateRecurrence === "weekly") && (
+                                        <>
+                                            <Text style={[styles.label, { color: theme.text }]}>Jours d&apos;execution</Text>
+                                            <View style={[styles.inlineRow, { flexWrap: "wrap" }]}>
+                                                {DAYS.map((day) => {
+                                                    const selected = taskTemplateRecurrenceDays.includes(day.value);
+                                                    return (
+                                                        <TouchableOpacity
+                                                            key={`task-day-${day.value}`}
+                                                            onPress={() => toggleTaskRecurrenceDay(day.value)}
+                                                            style={[
+                                                                styles.smallChip,
+                                                                { borderColor: theme.icon, backgroundColor: theme.background },
+                                                                selected && { borderColor: theme.tint, backgroundColor: theme.tint + "20" },
+                                                            ]}
+                                                        >
+                                                            <Text style={{ color: theme.text }}>{day.label}</Text>
+                                                        </TouchableOpacity>
+                                                    );
+                                                })}
+                                            </View>
+                                        </>
+                                    )}
+
+                                    <View style={styles.switchRow}>
+                                        <Text style={[styles.label, { color: theme.text, marginBottom: 0 }]}>Tache tournante</Text>
+                                        <Switch
+                                            value={taskTemplateRotation}
+                                            onValueChange={setTaskTemplateRotation}
+                                            trackColor={{ false: theme.icon, true: theme.tint }}
+                                        />
+                                    </View>
+
+                                    {taskTemplateRotation && (
+                                        <View style={styles.inlineRow}>
+                                            <TouchableOpacity
+                                                onPress={() => setTaskTemplateRotationCycleWeeks(1)}
+                                                style={[
+                                                    styles.smallChip,
+                                                    { borderColor: theme.icon, backgroundColor: theme.background },
+                                                    taskTemplateRotationCycleWeeks === 1 && { borderColor: theme.tint, backgroundColor: theme.tint + "20" },
+                                                ]}
+                                            >
+                                                <Text style={{ color: theme.text }}>Chaque semaine</Text>
+                                            </TouchableOpacity>
+                                            <TouchableOpacity
+                                                onPress={() => setTaskTemplateRotationCycleWeeks(2)}
+                                                style={[
+                                                    styles.smallChip,
+                                                    { borderColor: theme.icon, backgroundColor: theme.background },
+                                                    taskTemplateRotationCycleWeeks === 2 && { borderColor: theme.tint, backgroundColor: theme.tint + "20" },
+                                                ]}
+                                            >
+                                                <Text style={{ color: theme.text }}>Toutes les 2 semaines</Text>
+                                            </TouchableOpacity>
+                                        </View>
+                                    )}
 
                                     <TouchableOpacity onPress={addTaskTemplate} style={[styles.addButton, { backgroundColor: theme.background }]}>
                                         <MaterialCommunityIcons name="plus" size={20} color={theme.tint} />
@@ -1296,7 +1433,18 @@ export default function SetupHousehold() {
                                                         <Text style={[styles.templateName, { color: theme.text }]}>{template.name}</Text>
                                                         <Text style={[styles.memberMeta, { color: theme.textSecondary }]}>
                                                             Recurrence: {template.recurrence}
+                                                            {template.is_rotation
+                                                                ? ` | Rotation ${template.rotation_cycle_weeks === 2 ? "bihebdo" : "hebdo"}`
+                                                                : ""}
                                                         </Text>
+                                                        {(template.recurrence === "daily" || template.recurrence === "weekly") && (
+                                                            <Text style={[styles.memberMeta, { color: theme.textSecondary }]}>
+                                                                Jours: {normalizeTaskRecurrenceDays(template.recurrence_days)
+                                                                    .map((day) => DAYS.find((item) => item.value === day)?.label ?? "")
+                                                                    .filter((label) => label.length > 0)
+                                                                    .join(", ") || "n/a"}
+                                                            </Text>
+                                                        )}
                                                         {template.description ? (
                                                             <Text style={[styles.memberMeta, { color: theme.textSecondary }]}>
                                                                 {template.description}
