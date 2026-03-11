@@ -133,7 +133,7 @@ export default function ConnectedHome() {
                     <TouchableOpacity
                         onPress={() => router.push("/settings")}
                         style={[styles.userSettingsButton, { borderColor: theme.icon }]}
-                        accessibilityLabel="Ouvrir les parametres utilisateur"
+                        accessibilityLabel="Ouvrir les paramètres utilisateur"
                     >
                         <MaterialCommunityIcons name="account-cog-outline" size={20} color={theme.tint} />
                     </TouchableOpacity>
@@ -162,7 +162,7 @@ export default function ConnectedHome() {
                             </View>
 
                             <Text style={[styles.cardText, { color: theme.textSecondary }]}>
-                                Ton espace est configure. Accede au planning, aux repas et au budget.
+                                Ton espace est configuré. Accède au planning, aux repas et au budget.
                             </Text>
 
                             <TouchableOpacity
@@ -177,9 +177,9 @@ export default function ConnectedHome() {
                         </>
                     ) : (
                         <>
-                            <Text style={[styles.cardTitle, { color: theme.text }]}>Creons ton cocon</Text>
+                            <Text style={[styles.cardTitle, { color: theme.text }]}>Créons ton cocon</Text>
                             <Text style={[styles.cardText, { color: theme.textSecondary }]}>
-                                Ajoute les membres de ton foyer, definis les rôles et prépare ton calendrier partagé.
+                                Ajoute les membres de ton foyer, définis les rôles et prépare ton calendrier partagé.
                             </Text>
 
                             <TouchableOpacity

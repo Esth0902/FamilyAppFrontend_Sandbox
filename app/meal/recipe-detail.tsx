@@ -9,6 +9,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { apiFetch } from '@/src/api/client';
+import { getStoredUser } from '@/src/session/user-cache';
 
 interface Ingredient {
     id: number;
@@ -30,6 +31,8 @@ interface Recipe {
     ingredients: Ingredient[];
     base_servings?: number;
     display_servings?: number;
+    is_global?: boolean;
+    is_owned_by_household?: boolean;
 }
 
 export default function RecipeDetailScreen() {
@@ -42,6 +45,7 @@ export default function RecipeDetailScreen() {
     const [recipe, setRecipe] = useState<Recipe | null>(null);
     const [loading, setLoading] = useState(true);
     const [displayServings, setDisplayServings] = useState(1);
+    const [canManageRecipe, setCanManageRecipe] = useState(false);
 
     const [isEditing, setIsEditing] = useState(false);
     type IngredientForm = { id?: number; name: string; quantity: string; unit: string; category: string };
@@ -91,9 +95,15 @@ export default function RecipeDetailScreen() {
     }
     const fetchRecipeDetails = useCallback(async () => {
         try {
+            const user = await getStoredUser();
+            const role = user?.households?.[0]?.pivot?.role ?? user?.role;
+
             const data = await apiFetch(`/recipes/${id}`);
             setRecipe(data);
             setDisplayServings(Number(data.display_servings ?? data.base_servings ?? 1));
+
+            const canManage = role === 'parent' && data?.is_owned_by_household !== false;
+            setCanManageRecipe(canManage);
 
             let parsedInstructions = splitInstructions(data.instructions);
 
@@ -112,8 +122,10 @@ export default function RecipeDetailScreen() {
                 })),
             });
 
-            if (autoEdit === 'true') {
+            if (autoEdit === 'true' && canManage) {
                 setIsEditing(true);
+            } else if (!canManage) {
+                setIsEditing(false);
             }
         } catch (error: any) {
             console.error("Erreur:", error.message);
@@ -220,9 +232,10 @@ export default function RecipeDetailScreen() {
 
     const saveRecipe = async () => {
         if (!recipe || !editForm) return;
+        if (!canManageRecipe) return;
         const parsedBaseServings = parseServingsValue(editForm.base_servings);
         if (!parsedBaseServings) {
-            return Alert.alert("Erreur", "Le nombre de portions doit etre entre 1 et 30.");
+            return Alert.alert("Erreur", "Le nombre de portions doit être entre 1 et 30.");
         }
 
         const formattedInstructions = editForm.instructions
@@ -288,15 +301,17 @@ export default function RecipeDetailScreen() {
                 <Text style={[styles.headerTitle, { color: themeColors.text }]} numberOfLines={1}>
                     {recipe.title}
                 </Text>
-                <TouchableOpacity
-                    onPress={() => {
-                        if (!editForm) return;
-                        setIsEditing(prev => !prev);
-                    }}
-                    style={{ padding: 6 }}
-                >
-                    <MaterialCommunityIcons name={isEditing ? "close" : "pencil"} size={22} color={themeColors.text} />
-                </TouchableOpacity>
+                {canManageRecipe ? (
+                    <TouchableOpacity
+                        onPress={() => {
+                            if (!editForm) return;
+                            setIsEditing(prev => !prev);
+                        }}
+                        style={{ padding: 6 }}
+                    >
+                        <MaterialCommunityIcons name={isEditing ? "close" : "pencil"} size={22} color={themeColors.text} />
+                    </TouchableOpacity>
+                ) : null}
             </View>
 
             <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 20 }}>

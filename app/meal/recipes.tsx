@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import {
     View,
     Text,
@@ -17,9 +17,20 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { apiFetch } from '@/src/api/client';
+import { filterRecipesByTitleQuery } from "@/src/features/recipes/recipe-search";
+import {
+    addIngredientsToShoppingList,
+    buildShoppingIngredientsFromRecipeSelections,
+    createShoppingList,
+    defaultShoppingListTitle,
+    loadShoppingLists,
+    resolvePreferredShoppingListId,
+    type ShoppingListSummary,
+} from "@/src/features/shopping-list/list-utils";
+import { ShoppingListPickerModal } from "@/src/features/shopping-list/shopping-list-picker-modal";
+import { getStoredHouseholdId, getStoredUser } from "@/src/session/user-cache";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router, Stack } from "expo-router";
-import * as SecureStore from "expo-secure-store";
 
 interface Recipe {
     id: number;
@@ -28,6 +39,9 @@ interface Recipe {
     type: string;
     base_servings?: number;
     display_servings?: number;
+    is_global?: boolean;
+    is_owned_by_household?: boolean;
+    is_in_my_recipes?: boolean;
 }
 type IngredientForm = { name: string; quantity: string; unit: string };
 
@@ -39,6 +53,8 @@ export default function RecipesScreen() {
     const [recipes, setRecipes] = useState<Recipe[]>([]);
     const [loading, setLoading] = useState(true);
     const [search, setSearch] = useState('');
+    const [selectedTab, setSelectedTab] = useState<'mine' | 'all'>('mine');
+    const [selectedTypeFilter, setSelectedTypeFilter] = useState<string>('all');
     const [isModalVisible, setIsModalVisible] = useState(false);
     const [modalMode, setModalMode] = useState<'choice' | 'manual' | 'ai' | 'preview'>('choice');
     const [aiPrompt, setAiPrompt] = useState('');
@@ -48,6 +64,13 @@ export default function RecipesScreen() {
     const [selectedRecipe, setSelectedRecipe] = useState<Recipe | null>(null);
     const [formMode, setFormMode] = useState<'create' | 'edit'>('create');
     const [aiIntent, setAiIntent] = useState<'specific' | 'ideas'>('ideas');
+    const [isParent, setIsParent] = useState(false);
+    const [shoppingPickerVisible, setShoppingPickerVisible] = useState(false);
+    const [shoppingLists, setShoppingLists] = useState<ShoppingListSummary[]>([]);
+    const [selectedShoppingListId, setSelectedShoppingListId] = useState<number | null>(null);
+    const [useNewShoppingList, setUseNewShoppingList] = useState(false);
+    const [newShoppingListTitle, setNewShoppingListTitle] = useState(defaultShoppingListTitle());
+    const [pendingRecipeForShopping, setPendingRecipeForShopping] = useState<Recipe | null>(null);
     const parseServingsValue = (value: string) => {
         const parsed = Number.parseInt(value, 10);
         if (!Number.isFinite(parsed) || parsed < 1 || parsed > 30) {
@@ -59,10 +82,28 @@ export default function RecipesScreen() {
         void fetchRecipes();
     }, []);
 
+    useEffect(() => {
+        let mounted = true;
+
+        const loadRole = async () => {
+            const user = await getStoredUser();
+            if (!mounted) return;
+
+            const role = user?.households?.[0]?.pivot?.role ?? user?.role;
+            setIsParent(role === 'parent');
+        };
+
+        void loadRole();
+
+        return () => {
+            mounted = false;
+        };
+    }, []);
+
     const fetchRecipes = async () => {
         try {
-            const data = await apiFetch('/recipes');
-            setRecipes(data);
+            const data = await apiFetch('/recipes?scope=all');
+            setRecipes(Array.isArray(data) ? data : []);
         } catch (error: any) {
             console.error("Erreur chargement recettes:", error.message);
         } finally {
@@ -70,11 +111,151 @@ export default function RecipesScreen() {
         }
     };
 
-    const filteredRecipes = recipes.filter(r =>
-        r.title.toLowerCase().includes(search.toLowerCase())
-    );
+    const filteredRecipes = useMemo(() => {
+        let filtered = filterRecipesByTitleQuery(recipes, search);
+
+        if (selectedTypeFilter !== 'all') {
+            filtered = filtered.filter((recipe) => (recipe.type ?? 'autre') === selectedTypeFilter);
+        }
+
+        if (selectedTab === 'mine') {
+            return filtered.filter((recipe) => {
+                const isOwned = recipe.is_owned_by_household !== false;
+                const isInMine = recipe.is_in_my_recipes ?? isOwned;
+                return isInMine;
+            });
+        }
+
+        return filtered;
+    }, [recipes, search, selectedTab, selectedTypeFilter]);
+
+    const recipeTypeFilters = [
+        { label: 'Toutes', value: 'all', icon: 'shape-outline' },
+        { label: 'Petit-déjeuner', value: 'petit-déjeuner', icon: 'coffee-outline' },
+        { label: 'Entrée', value: 'entrée', icon: 'food-apple-outline' },
+        { label: 'Plat', value: 'plat principal', icon: 'silverware-fork-knife' },
+        { label: 'Dessert', value: 'dessert', icon: 'cupcake' },
+        { label: 'Collation', value: 'collation', icon: 'food-croissant' },
+        { label: 'Boisson', value: 'boisson', icon: 'cup-water' },
+        { label: 'Autre', value: 'autre', icon: 'dots-horizontal-circle-outline' },
+    ] as const;
+
+    const openRecipeShoppingListPicker = async (recipe: Recipe) => {
+        if (!isParent || submitting) return;
+
+        setSubmitting(true);
+        try {
+            const payload = await loadShoppingLists();
+            if (!payload.can_manage) {
+                Alert.alert('Liste de courses', "Seul un parent peut ajouter des ingrédients à la liste de courses.");
+                return;
+            }
+
+            const availableLists = payload.lists;
+            setShoppingLists(availableLists);
+            setSelectedShoppingListId(resolvePreferredShoppingListId(availableLists));
+            setUseNewShoppingList(availableLists.length === 0);
+            setNewShoppingListTitle(defaultShoppingListTitle());
+            setPendingRecipeForShopping(recipe);
+            setShoppingPickerVisible(true);
+        } catch (error: any) {
+            Alert.alert('Liste de courses', error?.message || "Impossible de charger les listes de courses.");
+        } finally {
+            setSubmitting(false);
+        }
+    };
+
+    const closeRecipeShoppingListPicker = () => {
+        if (submitting) return;
+        setShoppingPickerVisible(false);
+        setPendingRecipeForShopping(null);
+    };
+
+    const toggleGlobalRecipeInMine = async (recipe: Recipe) => {
+        if (!(recipe.is_global ?? false) || submitting) {
+            return;
+        }
+
+        const currentlyInMine = recipe.is_in_my_recipes === true;
+        setSubmitting(true);
+        try {
+            const response = await apiFetch(`/recipes/${recipe.id}/save`, {
+                method: currentlyInMine ? 'DELETE' : 'POST',
+            });
+
+            const updatedRecipe = response?.recipe;
+            if (updatedRecipe?.id) {
+                setRecipes((prev) =>
+                    prev.map((item) => (item.id === recipe.id ? { ...item, ...updatedRecipe } : item))
+                );
+            } else {
+                await fetchRecipes();
+            }
+        } catch (error: any) {
+            Alert.alert('Recettes', error?.message || "Impossible de mettre à jour cette recette.");
+        } finally {
+            setSubmitting(false);
+        }
+    };
+
+    const confirmRecipeShoppingListSelection = async () => {
+        if (!pendingRecipeForShopping) return;
+
+        setSubmitting(true);
+        try {
+            let targetListId = selectedShoppingListId;
+            let targetListTitle = shoppingLists.find((list) => list.id === selectedShoppingListId)?.title ?? "";
+
+            if (useNewShoppingList) {
+                const created = await createShoppingList(newShoppingListTitle);
+                if (!created?.id) {
+                    Alert.alert('Liste de courses', "Impossible de créer la nouvelle liste.");
+                    return;
+                }
+                targetListId = created.id;
+                targetListTitle = created.title;
+            }
+
+            if (!targetListId) {
+                Alert.alert('Liste de courses', "Choisis une liste existante ou crée-en une nouvelle.");
+                return;
+            }
+
+            const servings = Math.max(1, Number(pendingRecipeForShopping.display_servings ?? pendingRecipeForShopping.base_servings ?? 1));
+            const ingredients = await buildShoppingIngredientsFromRecipeSelections([
+                { recipeId: pendingRecipeForShopping.id, servings },
+            ]);
+
+            if (ingredients.length === 0) {
+                Alert.alert('Liste de courses', "Cette recette ne contient aucun ingrédient exploitable.");
+                return;
+            }
+
+            const addedCount = await addIngredientsToShoppingList(targetListId, ingredients);
+            setShoppingPickerVisible(false);
+            setPendingRecipeForShopping(null);
+
+            Alert.alert(
+                'Liste de courses',
+                `${addedCount} ingrédient(s) de "${pendingRecipeForShopping.title}" ajouté(s) ? "${targetListTitle}".`,
+                [
+                    { text: 'Fermer', style: 'cancel' },
+                    {
+                        text: 'Voir la liste',
+                        onPress: () => router.push(`/meal/shopping-list/${targetListId}`),
+                    },
+                ]
+            );
+        } catch (error: any) {
+            Alert.alert('Liste de courses', error?.message || "Impossible d'ajouter les ingrédients de la recette.");
+        } finally {
+            setSubmitting(false);
+        }
+    };
 
     const openRecipeActions = (recipe: Recipe) => {
+        if (!isParent || !recipe.is_owned_by_household) return;
+
         Alert.alert(
             recipe.title,
             "Que veux-tu faire ?",
@@ -96,61 +277,110 @@ export default function RecipesScreen() {
         );
     };
 
-    const renderRecipeItem = ({ item }: { item: Recipe }) => (
-        <TouchableOpacity
-            style={[styles.recipeCard, { backgroundColor: colorScheme === 'dark' ? '#1E1E1E' : '#FFF' }]}
-            onPress={() => router.push({ pathname: "/meal/recipe-detail", params: { id: item.id } })}
-            activeOpacity={0.85}
-        >
-            <View style={styles.recipeInfo}>
-                {/* Ligne titre + badge */}
-                <View style={{ gap: 6 }}>
-                    <Text
-                        style={[styles.recipeTitle, { color: themeColors.text }]}
-                        numberOfLines={1}
-                    >
-                        {item.title}
-                    </Text>
+    const renderRecipeItem = ({ item }: { item: Recipe }) => {
+        const isOwned = item.is_owned_by_household !== false;
+        const isGlobal = item.is_global === true;
+        const isInMine = item.is_in_my_recipes ?? isOwned;
+        const canManageRecipe = isParent && isOwned;
+        const showHeart = selectedTab === 'all' && (isGlobal || isOwned);
 
-                    <View
-                        style={{
-                            alignSelf: "flex-start",
-                            paddingHorizontal: 10,
-                            paddingVertical: 4,
-                            borderRadius: 999,
-                            backgroundColor: colorScheme === "dark" ? "#2A2A2A" : "#EEE",
-                        }}
-                    >
-                        <Text style={{ color: themeColors.icon, fontSize: 12, fontWeight: "600" }}>
-                            {item.type ?? "autre"}
+        return (
+            <TouchableOpacity
+                style={[styles.recipeCard, { backgroundColor: colorScheme === 'dark' ? '#1E1E1E' : '#FFF' }]}
+                onPress={() => router.push({ pathname: "/meal/recipe-detail", params: { id: item.id } })}
+                activeOpacity={0.85}
+            >
+                <View style={styles.recipeInfo}>
+                    <View style={{ gap: 6 }}>
+                        <Text
+                            style={[styles.recipeTitle, { color: themeColors.text }]}
+                        >
+                            {item.title}
+                        </Text>
+
+                        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                            <View
+                                style={{
+                                    alignSelf: "flex-start",
+                                    paddingHorizontal: 10,
+                                    paddingVertical: 4,
+                                    borderRadius: 999,
+                                    backgroundColor: colorScheme === "dark" ? "#2A2A2A" : "#EEE",
+                                }}
+                            >
+                                <Text style={{ color: themeColors.icon, fontSize: 12, fontWeight: "600" }}>
+                                    {item.type ?? "autre"}
+                                </Text>
+                            </View>
+
+                            <View
+                                style={{
+                                    alignSelf: "flex-start",
+                                    paddingHorizontal: 8,
+                                    paddingVertical: 3,
+                                    borderRadius: 999,
+                                    borderWidth: 1,
+                                    borderColor: isGlobal ? themeColors.tint : themeColors.icon,
+                                }}
+                            >
+                                <Text style={{ color: isGlobal ? themeColors.tint : themeColors.icon, fontSize: 11, fontWeight: "700" }}>
+                                    {isGlobal ? "Globale" : "Perso"}
+                                </Text>
+                            </View>
+                        </View>
+
+                        <Text style={{ color: themeColors.icon, fontSize: 12 }}>
+                            {item.display_servings ?? item.base_servings ?? 1} portions
                         </Text>
                     </View>
-                    <Text style={{ color: themeColors.icon, fontSize: 12 }}>
-                        {item.display_servings ?? item.base_servings ?? 1} portions
+
+                    <Text style={[styles.recipeDesc, { color: themeColors.icon }]} numberOfLines={2}>
+                        {item.description || "Aucune description"}
                     </Text>
                 </View>
 
-                {/* Description */}
-                <Text style={[styles.recipeDesc, { color: themeColors.icon }]} numberOfLines={2}>
-                    {item.description || "Aucune description"}
-                </Text>
-            </View>
+                <View style={{ flexDirection: "row", alignItems: "center", alignSelf: "center", gap: 6 }}>
+                    {showHeart ? (
+                        <TouchableOpacity
+                            onPress={() => void toggleGlobalRecipeInMine(item)}
+                            style={{ padding: 6, opacity: submitting ? 0.6 : 1 }}
+                            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                            disabled={submitting || isOwned}
+                        >
+                            <MaterialCommunityIcons
+                                name={isInMine ? "heart" : "heart-outline"}
+                                size={22}
+                                color={isInMine ? "#E94A61" : themeColors.icon}
+                            />
+                        </TouchableOpacity>
+                    ) : null}
 
-            {/* Actions à droite */}
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                <TouchableOpacity
-                    onPress={() => openRecipeActions(item)}
-                    style={{ padding: 6 }}
-                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                >
-                    <MaterialCommunityIcons name="dots-vertical" size={22} color={themeColors.icon} />
-                </TouchableOpacity>
+                    {isParent ? (
+                        <TouchableOpacity
+                            onPress={() => void openRecipeShoppingListPicker(item)}
+                            style={{ padding: 6, opacity: submitting ? 0.6 : 1 }}
+                            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                            disabled={submitting}
+                        >
+                            <MaterialCommunityIcons name="cart-plus" size={22} color={themeColors.icon} />
+                        </TouchableOpacity>
+                    ) : null}
 
-                <MaterialCommunityIcons name="chevron-right" size={24} color={themeColors.icon} />
-            </View>
-        </TouchableOpacity>
-    );
+                    {canManageRecipe ? (
+                        <TouchableOpacity
+                            onPress={() => openRecipeActions(item)}
+                            style={{ padding: 6 }}
+                            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                        >
+                            <MaterialCommunityIcons name="dots-vertical" size={22} color={themeColors.icon} />
+                        </TouchableOpacity>
+                    ) : null}
 
+                    <MaterialCommunityIcons name="chevron-right" size={24} color={themeColors.icon} />
+                </View>
+            </TouchableOpacity>
+        );
+    };
     const [newRecipe, setNewRecipe] = useState({
         title: '',
         type: 'plat principal',
@@ -178,14 +408,12 @@ export default function RecipesScreen() {
         if (!newRecipe.title.trim()) return Alert.alert('Erreur', 'Le titre de la recette est obligatoire');
         const parsedBaseServings = parseServingsValue(newRecipe.base_servings);
         if (!parsedBaseServings) {
-            return Alert.alert('Erreur', 'Le nombre de portions doit etre entre 1 et 30.');
+            return Alert.alert('Erreur', 'Le nombre de portions doit être entre 1 et 30.');
         }
 
         setSubmitting(true);
         try {
-            const userStr = await SecureStore.getItemAsync("user");
-            const userData = JSON.parse(userStr || '{}');
-            const householdId = userData.household_id || (userData.households && userData.households[0]?.id);
+            const householdId = await getStoredHouseholdId();
 
             const stepsArray = Array.isArray(newRecipe.instructions) ? newRecipe.instructions : [newRecipe.instructions];
 
@@ -215,11 +443,18 @@ export default function RecipesScreen() {
                 body: JSON.stringify(payload),
             });
 
+            const normalizedRecipe = {
+                ...response,
+                is_global: false,
+                is_owned_by_household: true,
+                is_in_my_recipes: true,
+            };
+
             if (isEdit) {
-                setRecipes(prev => prev.map(r => (r.id === response.id ? response : r)));
+                setRecipes(prev => prev.map(r => (r.id === response.id ? { ...r, ...normalizedRecipe } : r)));
                 Alert.alert("Succès", "Recette modifiée !");
             } else {
-                setRecipes(prev => [response, ...prev]);
+                setRecipes(prev => [normalizedRecipe, ...prev]);
                 Alert.alert("Succès", "Recette ajoutée !");
             }
 
@@ -246,6 +481,8 @@ export default function RecipesScreen() {
     };
 
     const handleDelete = async (id: number) => {
+        if (!isParent) return;
+
         setSubmitting(true);
         try {
             await apiFetch(`/recipes/${id}`, { method: "DELETE" });
@@ -306,9 +543,7 @@ export default function RecipesScreen() {
         if (!previewRecipe) return;
         setSubmitting(true);
         try {
-            const userStr = await SecureStore.getItemAsync("user");
-            const userData = JSON.parse(userStr || '{}');
-            const hId = userData.household_id || userData.households?.[0]?.id;
+            const hId = await getStoredHouseholdId();
 
             const response = await apiFetch('/recipes/ai-store', {
                 method: 'POST',
@@ -318,7 +553,15 @@ export default function RecipesScreen() {
                 })
             });
 
-            setRecipes(prev => [response, ...prev]);
+            setRecipes(prev => [
+                {
+                    ...response,
+                    is_global: false,
+                    is_owned_by_household: true,
+                    is_in_my_recipes: true,
+                },
+                ...prev,
+            ]);
             closeAndResetModal();
             Alert.alert("Succès", "Recette ajoutée !");
         } catch {
@@ -384,6 +627,96 @@ export default function RecipesScreen() {
                     value={search}
                     onChangeText={setSearch}
                 />
+            </View>
+
+            <View style={styles.tabsRow}>
+                <TouchableOpacity
+                    onPress={() => setSelectedTab('mine')}
+                    style={[
+                        styles.tabButton,
+                        {
+                            borderColor: selectedTab === 'mine' ? themeColors.tint : themeColors.icon,
+                            backgroundColor: selectedTab === 'mine' ? `${themeColors.tint}22` : 'transparent',
+                        },
+                    ]}
+                >
+                    <Text style={{ color: selectedTab === 'mine' ? themeColors.tint : themeColors.text, fontWeight: '700' }}>
+                        Mes recettes
+                    </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                    onPress={() => setSelectedTab('all')}
+                    style={[
+                        styles.tabButton,
+                        {
+                            borderColor: selectedTab === 'all' ? themeColors.tint : themeColors.icon,
+                            backgroundColor: selectedTab === 'all' ? `${themeColors.tint}22` : 'transparent',
+                        },
+                    ]}
+                >
+                    <Text style={{ color: selectedTab === 'all' ? themeColors.tint : themeColors.text, fontWeight: '700' }}>
+                        Toutes les recettes
+                    </Text>
+                </TouchableOpacity>
+            </View>
+
+            <View
+                style={[
+                    styles.typeFilterPanel,
+                    {
+                        backgroundColor: colorScheme === 'dark' ? '#171717' : '#F4F6F8',
+                        borderColor: colorScheme === 'dark' ? '#2A2A2A' : '#DCE1E8',
+                    },
+                ]}
+            >
+                <View style={styles.typeFilterHeader}>
+                    <View style={styles.typeFilterHeaderLeft}>
+                        <MaterialCommunityIcons name="tune-variant" size={18} color={themeColors.icon} />
+                        <Text style={{ color: themeColors.text, fontWeight: '700' }}>Filtrer par type</Text>
+                    </View>
+
+                    {selectedTypeFilter !== 'all' ? (
+                        <TouchableOpacity onPress={() => setSelectedTypeFilter('all')}>
+                            <Text style={{ color: themeColors.tint, fontWeight: '600' }}>Réinitialiser</Text>
+                        </TouchableOpacity>
+                    ) : null}
+                </View>
+
+                <View style={styles.typeFiltersWrap}>
+                    {recipeTypeFilters.map((filter) => {
+                        const selected = selectedTypeFilter === filter.value;
+
+                        return (
+                            <TouchableOpacity
+                                key={filter.value}
+                                onPress={() => setSelectedTypeFilter(filter.value)}
+                                style={[
+                                    styles.typeFilterChip,
+                                    {
+                                        borderColor: selected ? themeColors.tint : themeColors.icon,
+                                        backgroundColor: selected ? `${themeColors.tint}22` : 'transparent',
+                                    },
+                                ]}
+                            >
+                                <MaterialCommunityIcons
+                                    name={filter.icon as any}
+                                    size={15}
+                                    color={selected ? themeColors.tint : themeColors.icon}
+                                />
+                                <Text
+                                    style={{
+                                        color: selected ? themeColors.tint : themeColors.text,
+                                        fontWeight: selected ? '700' : '600',
+                                        fontSize: 13,
+                                    }}
+                                >
+                                    {filter.label}
+                                </Text>
+                            </TouchableOpacity>
+                        );
+                    })}
+                </View>
             </View>
 
             <FlatList
@@ -524,7 +857,7 @@ export default function RecipesScreen() {
                                     <Text style={[styles.label, {color: themeColors.tint}]}>INGRÉDIENTS</Text>
                                     {previewRecipe.ingredients.map((ing: any, i: number) => (
                                         <Text key={i} style={{color: themeColors.text, marginBottom: 3}}>
-                                            • {ing.quantity > 0 ? `${ing.quantity} ` : ''}{ing.unit} {ing.name}
+                                            - {ing.quantity > 0 ? `${ing.quantity} ` : ''}{ing.unit} {ing.name}
                                         </Text>
                                     ))}
 
@@ -652,7 +985,7 @@ export default function RecipesScreen() {
 
                                 <TouchableOpacity onPress={addInstructionStep} style={{flexDirection:'row', alignItems:'center', marginTop: 5, marginBottom: 30}}>
                                     <MaterialCommunityIcons name="plus-circle" size={20} color={themeColors.tint} />
-                                    <Text style={{color: themeColors.tint, fontWeight: 'bold', marginLeft: 5}}>Ajouter une étape</Text>
+                                    <Text style={{color: themeColors.tint, fontWeight: 'bold', marginLeft: 5}}>Ajouter une Étape</Text>
                                 </TouchableOpacity>
 
                                 <TouchableOpacity
@@ -672,20 +1005,39 @@ export default function RecipesScreen() {
                 </KeyboardAvoidingView>
             </Modal>
 
-            <TouchableOpacity
-                activeOpacity={0.8}
-                style={[
-                    styles.fab,
-                    { backgroundColor: themeColors.tint, bottom: insets.bottom > 0 ? insets.bottom + 15 : 25 }
-                ]}
-                onPress={() => {
-                    setFormMode('create');
-                    setSelectedRecipe(null);
-                    setIsModalVisible(true);
-                }}
-            >
-                <MaterialCommunityIcons name="plus" size={30} color="white" />
-            </TouchableOpacity>
+            <ShoppingListPickerModal
+                visible={shoppingPickerVisible}
+                title={pendingRecipeForShopping ? `Ajouter "${pendingRecipeForShopping.title}"` : "Ajouter à la liste de courses"}
+                confirmLabel="Ajouter les ingrédients"
+                theme={themeColors}
+                saving={submitting}
+                lists={shoppingLists}
+                selectedListId={selectedShoppingListId}
+                useNewList={useNewShoppingList}
+                newListTitle={newShoppingListTitle}
+                onClose={closeRecipeShoppingListPicker}
+                onSelectList={setSelectedShoppingListId}
+                onToggleUseNewList={setUseNewShoppingList}
+                onChangeNewListTitle={setNewShoppingListTitle}
+                onConfirm={() => void confirmRecipeShoppingListSelection()}
+            />
+
+            {isParent ? (
+                <TouchableOpacity
+                    activeOpacity={0.8}
+                    style={[
+                        styles.fab,
+                        { backgroundColor: themeColors.tint, bottom: insets.bottom > 0 ? insets.bottom + 15 : 25 }
+                    ]}
+                    onPress={() => {
+                        setFormMode('create');
+                        setSelectedRecipe(null);
+                        setIsModalVisible(true);
+                    }}
+                >
+                    <MaterialCommunityIcons name="plus" size={30} color="white" />
+                </TouchableOpacity>
+            ) : null}
 
         </View>
     );
@@ -698,10 +1050,17 @@ const styles = StyleSheet.create({
     headerTitle: { fontSize: 18, fontWeight: '700' },
     searchContainer: { flexDirection: 'row', alignItems: 'center', marginHorizontal: 15, marginVertical: 10, paddingHorizontal: 15, borderRadius: 12, height: 50, elevation: 2, shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 3 },
     searchInput: { flex: 1, marginLeft: 10, fontSize: 16 },
+    tabsRow: { flexDirection: 'row', gap: 10, paddingHorizontal: 15, marginBottom: 8 },
+    tabButton: { flex: 1, borderWidth: 1, borderRadius: 12, paddingVertical: 10, alignItems: 'center' },
+    typeFilterPanel: { marginHorizontal: 15, marginBottom: 10, borderRadius: 14, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 10, gap: 10 },
+    typeFilterHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+    typeFilterHeaderLeft: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+    typeFiltersWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+    typeFilterChip: { flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1, borderRadius: 999, paddingHorizontal: 11, paddingVertical: 7 },
     listContent: { paddingHorizontal: 15, paddingTop: 5 },
-    recipeCard: { flexDirection: 'row', alignItems: 'center', padding: 16, borderRadius: 15, marginBottom: 12, elevation: 2, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 8 },
+    recipeCard: { flexDirection: 'row', alignItems: 'flex-start', padding: 16, borderRadius: 15, marginBottom: 12, elevation: 2, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 8 },
     recipeInfo: { flex: 1 },
-    recipeTitle: { fontSize: 18, fontWeight: 'bold', marginBottom: 4 },
+    recipeTitle: { fontSize: 18, fontWeight: 'bold', lineHeight: 24 },
     recipeDesc: { fontSize: 14, lineHeight: 20 },
     fab: { position: 'absolute', right: 20, width: 64, height: 64, borderRadius: 32, justifyContent: 'center', alignItems: 'center', elevation: 8, shadowColor: '#000', shadowOpacity: 0.3, shadowRadius: 5 },
     modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
@@ -723,3 +1082,4 @@ const styles = StyleSheet.create({
     submitBtn: { height: 55, borderRadius: 15, justifyContent: 'center', alignItems: 'center' },
     submitBtnText: { color: 'white', fontSize: 16, fontWeight: 'bold' }
 });
+

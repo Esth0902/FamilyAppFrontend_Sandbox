@@ -46,6 +46,13 @@ export const apiFetch = async (endpoint: string, options: RequestInit = {}) => {
     const data = await parseJsonSafe(response);
 
     if (!response.ok) {
+        if (response.status === 401) {
+            await Promise.all([
+                SecureStore.deleteItemAsync("authToken"),
+                SecureStore.deleteItemAsync("user"),
+            ]);
+        }
+
         throw {
             status: response.status,
             message: data?.message || `Erreur HTTP ${response.status}`,

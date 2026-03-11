@@ -160,6 +160,14 @@ export default function RootLayout() {
                     }
                 }
 
+                if (token && !user) {
+                    await SecureStore.deleteItemAsync("authToken");
+                    await SecureStore.deleteItemAsync("user");
+                }
+
+                const refreshedToken = await SecureStore.getItemAsync('authToken');
+                const hasToken = !!refreshedToken;
+
                 const isPublicRoute = segments.length === 0
                     || segments[0] === 'login'
                     || segments[0] === 'register'
@@ -167,9 +175,9 @@ export default function RootLayout() {
                     || segments[0] === 'password-reset';
                 const isChangeCredentialsRoute = segments[0] === 'change-credentials';
 
-                console.log("🔍 Check Auth -> Token:", !!token, "| Segment:", segments[0]);
+                console.log("Check Auth -> Token:", hasToken, "| Segment:", segments[0]);
 
-                if (token) {
+                if (hasToken) {
                     const mustChangePassword = !!user?.must_change_password;
                     if (mustChangePassword) {
                         if (!isChangeCredentialsRoute) {
@@ -220,3 +228,4 @@ export default function RootLayout() {
         </GestureHandlerRootView>
     );
 }
+

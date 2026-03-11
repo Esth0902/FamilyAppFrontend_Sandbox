@@ -2,12 +2,12 @@ import React, { useCallback, useMemo, useState } from "react";
 import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { Stack, useFocusEffect, useRouter } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
-import * as SecureStore from "expo-secure-store";
 
 import { Colors } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import { apiFetch } from "@/src/api/client";
 import { subscribeToHouseholdRealtime } from "@/src/realtime/client";
+import { getStoredHouseholdId } from "@/src/session/user-cache";
 
 type ShoppingListSummary = {
   id: number;
@@ -22,26 +22,11 @@ type ShoppingListHomePayload = {
   lists: ShoppingListSummary[];
 };
 
-type StoredHousehold = { id: number };
-type StoredUser = { household_id?: number; households?: StoredHousehold[] };
-
 const formatCreatedAt = (iso?: string | null) => {
   if (!iso) return "-";
   const parsed = new Date(iso);
   if (Number.isNaN(parsed.getTime())) return "-";
   return parsed.toLocaleDateString("fr-BE", { day: "2-digit", month: "2-digit", year: "numeric" });
-};
-
-const resolveStoredHouseholdId = async () => {
-  const rawUser = await SecureStore.getItemAsync("user");
-  if (!rawUser) return null;
-
-  try {
-    const user = JSON.parse(rawUser) as StoredUser;
-    return Number(user?.household_id ?? user?.households?.[0]?.id ?? 0) || null;
-  } catch {
-    return null;
-  }
 };
 
 export default function ShoppingListsHomeScreen() {
@@ -86,7 +71,7 @@ export default function ShoppingListsHomeScreen() {
 
         if (!active) return;
 
-        const householdId = await resolveStoredHouseholdId();
+        const householdId = await getStoredHouseholdId();
         if (!householdId || !active) return;
 
         unsubscribeRealtime = await subscribeToHouseholdRealtime(householdId, (message) => {
@@ -140,7 +125,7 @@ export default function ShoppingListsHomeScreen() {
         await loadLists();
       }
     } catch (error: any) {
-      Alert.alert("Listes de courses", error?.message || "Impossible de creer la liste.");
+      Alert.alert("Listes de courses", error?.message || "Impossible de créer la liste.");
     } finally {
       setSaving(false);
     }

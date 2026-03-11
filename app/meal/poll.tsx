@@ -15,12 +15,24 @@ import {
 import { Stack, useFocusEffect, useRouter } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { Swipeable } from "react-native-gesture-handler";
-import * as SecureStore from "expo-secure-store";
 
 import { Colors } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import { apiFetch } from "@/src/api/client";
+import { filterRecipesByTitleQuery } from "@/src/features/recipes/recipe-search";
+import {
+  addIngredientsToShoppingList,
+  buildShoppingIngredientsFromRecipeSelections,
+  createShoppingList,
+  defaultShoppingListTitle,
+  loadShoppingLists,
+  resolvePreferredShoppingListId,
+  type ShoppingListSummary,
+} from "@/src/features/shopping-list/list-utils";
+import { ShoppingListPickerModal } from "@/src/features/shopping-list/shopping-list-picker-modal";
 import { subscribeToHouseholdRealtime } from "@/src/realtime/client";
+import { getStoredUser } from "@/src/session/user-cache";
+import { addDaysFromIso, addDaysIso, parseOptionalIsoDate, toIsoDate, todayIso } from "@/src/utils/date";
 
 type Recipe = {
   id: number;
@@ -63,9 +75,6 @@ type MealPlanAssignment = {
   servings: number;
 };
 
-type StoredHousehold = { id: number; pivot?: { role?: string } };
-type StoredUser = { household_id?: number; role?: string; households?: StoredHousehold[] };
-
 const MEAL_TYPES: { label: string; value: MealType }[] = [
   { label: "Matin", value: "matin" },
   { label: "Midi", value: "midi" },
@@ -81,48 +90,6 @@ const MEAL_TYPE_SORT: Record<MealType, number> = {
 const PLANNING_WEEKDAYS = ["Lu", "Ma", "Me", "Je", "Ve", "Sa", "Di"];
 
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
-
-const pad2 = (value: number) => String(value).padStart(2, "0");
-
-const toIsoDate = (date: Date) => `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
-
-const todayIso = () => toIsoDate(new Date());
-
-const addDaysIso = (offset: number) => {
-  const date = new Date();
-  date.setDate(date.getDate() + offset);
-  return toIsoDate(date);
-};
-
-const parseIsoDate = (value?: string | null) => {
-  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
-  const [yearRaw, monthRaw, dayRaw] = value.split("-");
-  const year = Number(yearRaw);
-  const month = Number(monthRaw);
-  const day = Number(dayRaw);
-  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) return null;
-
-  const date = new Date(year, month - 1, day);
-  if (
-    date.getFullYear() !== year ||
-    date.getMonth() !== month - 1 ||
-    date.getDate() !== day
-  ) {
-    return null;
-  }
-
-  return date;
-};
-
-const addDaysFromIso = (baseIso: string, offset: number) => {
-  const baseDate = parseIsoDate(baseIso);
-  if (!baseDate) {
-    return addDaysIso(offset);
-  }
-  const date = new Date(baseDate);
-  date.setDate(date.getDate() + offset);
-  return toIsoDate(date);
-};
 
 const monthLabel = (date: Date) =>
   date.toLocaleDateString("fr-BE", { month: "long", year: "numeric" });
@@ -169,8 +136,8 @@ const buildWeekSlots = (startIso?: string | null, endIso?: string | null) => {
   const fallbackStart = todayIso();
   const fallbackEnd = addDaysIso(6);
 
-  const parsedStart = parseIsoDate(startIso);
-  const parsedEnd = parseIsoDate(endIso);
+  const parsedStart = parseOptionalIsoDate(startIso);
+  const parsedEnd = parseOptionalIsoDate(endIso);
 
   let start = parsedStart ? new Date(parsedStart) : new Date(`${fallbackStart}T00:00:00`);
   let end = parsedEnd ? new Date(parsedEnd) : new Date(`${fallbackEnd}T00:00:00`);
@@ -248,6 +215,7 @@ export default function MealPollScreen() {
   const [mealPlanAssignments, setMealPlanAssignments] = useState<Record<string, MealPlanAssignment>>({});
   const [validationSearchRecipe, setValidationSearchRecipe] = useState("");
   const [validationManualTitle, setValidationManualTitle] = useState("");
+  const [showPollBuilder, setShowPollBuilder] = useState(false);
 
   const [plannerVisible, setPlannerVisible] = useState(false);
   const [plannerRecipeId, setPlannerRecipeId] = useState<number | null>(null);
@@ -255,6 +223,12 @@ export default function MealPollScreen() {
   const [plannerMealType, setPlannerMealType] = useState<MealType>("soir");
   const [defaultServings, setDefaultServings] = useState(4);
   const [plannerServings, setPlannerServings] = useState(4);
+  const [shoppingPickerVisible, setShoppingPickerVisible] = useState(false);
+  const [shoppingLists, setShoppingLists] = useState<ShoppingListSummary[]>([]);
+  const [selectedShoppingListId, setSelectedShoppingListId] = useState<number | null>(null);
+  const [useNewShoppingList, setUseNewShoppingList] = useState(false);
+  const [newShoppingListTitle, setNewShoppingListTitle] = useState(defaultShoppingListTitle());
+  const [selectedAssignmentKeysForShopping, setSelectedAssignmentKeysForShopping] = useState<string[]>([]);
 
   const recipesById = useMemo(() => {
     const map = new Map<number, Recipe>();
@@ -263,15 +237,12 @@ export default function MealPollScreen() {
   }, [recipes]);
 
   const filteredCreationRecipes = useMemo(() => {
-    const query = searchRecipe.trim().toLowerCase();
-    if (!query) return [];
-    return recipes.filter((recipe) => recipe.title.toLowerCase().includes(query));
+    if (searchRecipe.trim().length === 0) return [];
+    return filterRecipesByTitleQuery(recipes, searchRecipe);
   }, [recipes, searchRecipe]);
 
   const filteredValidationRecipes = useMemo(() => {
-    const query = validationSearchRecipe.trim().toLowerCase();
-    if (!query) return recipes;
-    return recipes.filter((recipe) => recipe.title.toLowerCase().includes(query));
+    return filterRecipesByTitleQuery(recipes, validationSearchRecipe);
   }, [recipes, validationSearchRecipe]);
 
   const selectedCreationRecipes = useMemo(
@@ -305,8 +276,7 @@ export default function MealPollScreen() {
     }
 
     try {
-      const userRaw = await SecureStore.getItemAsync("user");
-      const user: StoredUser | null = userRaw ? JSON.parse(userRaw) : null;
+      const user = await getStoredUser();
 
       const hid = user?.household_id ?? user?.households?.[0]?.id ?? null;
       const role = user?.households?.[0]?.pivot?.role ?? user?.role;
@@ -490,7 +460,7 @@ export default function MealPollScreen() {
 
   const openPlanningPicker = (target: "start" | "end") => {
     const sourceIso = target === "start" ? planningStartDate : planningEndDate;
-    const sourceDate = parseIsoDate(sourceIso) ?? new Date();
+    const sourceDate = parseOptionalIsoDate(sourceIso) ?? new Date();
     setPlanningPickerTarget(target);
     setPlanningPickerMonth(new Date(sourceDate.getFullYear(), sourceDate.getMonth(), 1));
     setPlanningPickerVisible(true);
@@ -504,13 +474,13 @@ export default function MealPollScreen() {
     const iso = toIsoDate(date);
     if (planningPickerTarget === "start") {
       setPlanningStartDate(iso);
-      const endDate = parseIsoDate(planningEndDate);
+      const endDate = parseOptionalIsoDate(planningEndDate);
       if (endDate && endDate < date) {
         setPlanningEndDate(iso);
       }
     } else {
       setPlanningEndDate(iso);
-      const startDate = parseIsoDate(planningStartDate);
+      const startDate = parseOptionalIsoDate(planningStartDate);
       if (startDate && startDate > date) {
         setPlanningStartDate(iso);
       }
@@ -518,7 +488,28 @@ export default function MealPollScreen() {
     setPlanningPickerVisible(false);
   };
 
-  const openPoll = async () => {
+  const openPollBuilderForEdit = useCallback((poll: Poll) => {
+    const recipeIds = poll.options.map((option) => option.recipe_id);
+    const startsAt = poll.starts_at ? new Date(poll.starts_at) : null;
+    const endsAt = poll.ends_at ? new Date(poll.ends_at) : null;
+    const hasValidDates = startsAt && endsAt && !Number.isNaN(startsAt.getTime()) && !Number.isNaN(endsAt.getTime());
+    const durationFromDates = hasValidDates
+      ? clamp(Math.round(((endsAt as Date).getTime() - (startsAt as Date).getTime()) / (1000 * 60 * 60)), 1, 168)
+      : 24;
+
+    setPollTitle(poll.title ?? "");
+    setDurationHours(durationFromDates);
+    setMaxVotesPerUser(clamp(Number(poll.max_votes_per_user || 3), 1, 20));
+    setPlanningStartDate(poll.planning_start_date || todayIso());
+    setPlanningEndDate(poll.planning_end_date || addDaysIso(6));
+    setSelectedRecipeIdsForCreation(recipeIds);
+    setSearchRecipe("");
+    setManualTitle("");
+    setAiPreview(null);
+    setShowPollBuilder(true);
+  }, []);
+
+  const savePoll = async () => {
     if (selectedRecipeIdsForCreation.length < 2) {
       Alert.alert("Sondage", "Sélectionne au moins 2 plats.");
       return;
@@ -533,8 +524,8 @@ export default function MealPollScreen() {
 
     const startDate = planningStartDate.trim();
     const endDate = planningEndDate.trim();
-    const parsedStartDate = parseIsoDate(startDate);
-    const parsedEndDate = parseIsoDate(endDate);
+    const parsedStartDate = parseOptionalIsoDate(startDate);
+    const parsedEndDate = parseOptionalIsoDate(endDate);
 
     if (!parsedStartDate || !parsedEndDate) {
       Alert.alert("Sondage", "Renseigne une date de début et de fin valides (YYYY-MM-DD).");
@@ -548,6 +539,7 @@ export default function MealPollScreen() {
 
     setSaving(true);
     try {
+      const isEditingOpenPoll = Boolean(showPollBuilder && activePoll && activePoll.status === "open");
       const payload = {
         title: pollTitle.trim() || null,
         recipe_ids: selectedRecipeIdsForCreation,
@@ -557,24 +549,28 @@ export default function MealPollScreen() {
         max_votes_per_user: clampedMaxVotesPerUser,
       };
 
-      const response = await apiFetch("/meal-polls", {
-        method: "POST",
+      const response = await apiFetch(isEditingOpenPoll ? `/meal-polls/${activePoll?.id}` : "/meal-polls", {
+        method: isEditingOpenPoll ? "PATCH" : "POST",
         body: JSON.stringify(payload),
       });
 
       const poll: Poll | null = response?.poll ?? null;
       setActivePoll(poll);
-      setSelectedRecipeIdsForCreation([]);
-      setSearchRecipe("");
-      setPollTitle("");
 
       if (poll?.status === "open") {
-        setDraftVoteOptionIds([]);
+        const mineFromPayload = Array.isArray(poll.my_voted_option_ids)
+          ? poll.my_voted_option_ids
+          : poll.options.filter((option) => option.is_voted_by_me).map((option) => option.id);
+        setDraftVoteOptionIds(mineFromPayload);
       }
+      setShowPollBuilder(false);
+      setSearchRecipe("");
+      setManualTitle("");
+      setAiPreview(null);
 
-      Alert.alert("Sondage", "Sondage ouvert.");
+      Alert.alert("Sondage", isEditingOpenPoll ? "Sondage modifié." : "Sondage ouvert.");
     } catch (error: any) {
-      Alert.alert("Sondage", error?.message || "Impossible d'ouvrir le sondage.");
+      Alert.alert("Sondage", error?.message || "Impossible d'enregistrer ce sondage.");
     } finally {
       setSaving(false);
     }
@@ -740,11 +736,46 @@ export default function MealPollScreen() {
     }
   };
 
+  const confirmClosePoll = () => {
+    if (!activePoll) {
+      return;
+    }
+
+    const totalVotes = activePoll.options.reduce((sum, option) => sum + Number(option.votes_count || 0), 0);
+    if (totalVotes > 0) {
+      void closePoll();
+      return;
+    }
+
+    Alert.alert(
+      "Clôturer le sondage",
+      "Il n'y a aucun vote pour ce sondage, clôturer ?",
+      [
+        { text: "Annuler", style: "cancel" },
+        { text: "Confirmer", style: "destructive", onPress: () => void closePoll() },
+      ]
+    );
+  };
+
+  const handleBackArrow = () => {
+    if (!isParent) {
+      router.replace("/(tabs)/meal");
+      return;
+    }
+
+    if (activePoll?.status === "open" && showPollBuilder) {
+      setShowPollBuilder(false);
+      return;
+    }
+
+    router.replace("/(tabs)/meal");
+  };
+
   const openPlanner = (recipeId: number) => {
     setPlannerRecipeId(recipeId);
-    const plannerStartDate = activePoll?.planning_start_date && parseIsoDate(activePoll.planning_start_date)
+    const plannerStartDate = activePoll?.planning_start_date && parseOptionalIsoDate(activePoll.planning_start_date)
       ? activePoll.planning_start_date
-      : (parseIsoDate(planningStartDate) ? planningStartDate : todayIso());
+      : (parseOptionalIsoDate(planningStartDate) ? planningStartDate : todayIso());
     setPlannerDate(plannerStartDate);
     setPlannerMealType("soir");
     setPlannerServings(defaultServings);
@@ -780,6 +811,107 @@ export default function MealPollScreen() {
       delete next[slotKey];
       return next;
     });
+  };
+
+  const openPollShoppingListPicker = async () => {
+    if (!isParent || saving) {
+      return;
+    }
+
+    if (sortedAssignments.length === 0) {
+      Alert.alert("Liste de courses", "Planifie au moins un repas avant d'ajouter des ingrédients.");
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const payload = await loadShoppingLists();
+      if (!payload.can_manage) {
+        Alert.alert("Liste de courses", "Seul un parent peut modifier la liste de courses.");
+        return;
+      }
+
+      setShoppingLists(payload.lists);
+      setSelectedShoppingListId(resolvePreferredShoppingListId(payload.lists));
+      setUseNewShoppingList(payload.lists.length === 0);
+      setNewShoppingListTitle(defaultShoppingListTitle());
+      setSelectedAssignmentKeysForShopping(sortedAssignments.map((assignment) => assignment.slotKey));
+      setShoppingPickerVisible(true);
+    } catch (error: any) {
+      Alert.alert("Liste de courses", error?.message || "Impossible de charger les listes de courses.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const closePollShoppingListPicker = () => {
+    if (saving) return;
+    setShoppingPickerVisible(false);
+  };
+
+  const toggleAssignmentForShopping = (slotKey: string) => {
+    setSelectedAssignmentKeysForShopping((prev) =>
+      prev.includes(slotKey) ? prev.filter((key) => key !== slotKey) : [...prev, slotKey]
+    );
+  };
+
+  const confirmPollShoppingListSelection = async () => {
+    const selectedAssignments = sortedAssignments.filter((assignment) =>
+      selectedAssignmentKeysForShopping.includes(assignment.slotKey)
+    );
+
+    if (selectedAssignments.length === 0) {
+      Alert.alert("Liste de courses", "Sélectionne au moins un repas planifié.");
+      return;
+    }
+
+    setSaving(true);
+    try {
+      let targetListId = selectedShoppingListId;
+      let targetListTitle = shoppingLists.find((list) => list.id === selectedShoppingListId)?.title ?? "";
+
+      if (useNewShoppingList) {
+        const created = await createShoppingList(newShoppingListTitle);
+        if (!created?.id) {
+          Alert.alert("Liste de courses", "Impossible de créer la nouvelle liste.");
+          return;
+        }
+        targetListId = created.id;
+        targetListTitle = created.title;
+      }
+
+      if (!targetListId) {
+        Alert.alert("Liste de courses", "Choisis une liste existante ou crée-en une nouvelle.");
+        return;
+      }
+
+      const recipeSelections = selectedAssignments.map((assignment) => ({
+        recipeId: assignment.recipe_id,
+        servings: clamp(Number(assignment.servings) || 1, 1, 30),
+      }));
+      const ingredients = await buildShoppingIngredientsFromRecipeSelections(recipeSelections);
+
+      if (ingredients.length === 0) {
+        Alert.alert("Liste de courses", "Aucun ingrédient exploitable à ajouter.");
+        return;
+      }
+
+      const addedCount = await addIngredientsToShoppingList(targetListId, ingredients);
+      setShoppingPickerVisible(false);
+
+      Alert.alert(
+        "Liste de courses",
+        `${addedCount} ingrédient(s) ajouté(s) à "${targetListTitle}".`,
+        [
+          { text: "Fermer", style: "cancel" },
+          { text: "Voir la liste", onPress: () => router.push(`/meal/shopping-list/${targetListId}`) },
+        ]
+      );
+    } catch (error: any) {
+      Alert.alert("Liste de courses", error?.message || "Impossible d'ajouter les ingrédients sélectionnés.");
+    } finally {
+      setSaving(false);
+    }
   };
 
   const addExistingRecipeToValidation = (recipeId: number) => {
@@ -870,9 +1002,18 @@ export default function MealPollScreen() {
   };
 
   const renderCreateView = () => {
+    const isEditingOpenPoll = Boolean(isParent && activePoll?.status === "open" && showPollBuilder);
+
     return (
       <View style={[styles.card, { backgroundColor: theme.card }]}> 
-        <Text style={[styles.cardTitle, { color: theme.text }]}>Créer le sondage de la semaine</Text>
+        <Text style={[styles.cardTitle, { color: theme.text }]}>
+          {isEditingOpenPoll ? "Modifier le sondage ouvert" : "Créer le sondage de la semaine"}
+        </Text>
+        {isEditingOpenPoll ? (
+          <Text style={[styles.helperText, { color: theme.textSecondary }]}>
+            Corrige les paramètres puis enregistre les modifications.
+          </Text>
+        ) : null}
 
         <TextInput
           style={[styles.input, { backgroundColor: theme.background, color: theme.text, marginTop: 12 }]}
@@ -1070,12 +1211,27 @@ export default function MealPollScreen() {
         <Text style={[styles.helperText, { color: theme.textSecondary }]}>Astuce: glisse une puce vers la gauche pour retirer un plat.</Text>
 
         <TouchableOpacity
-          onPress={openPoll}
+          onPress={savePoll}
           style={[styles.primaryBtn, { backgroundColor: theme.tint, opacity: saving ? 0.7 : 1 }]}
           disabled={saving}
         >
-          {saving ? <ActivityIndicator size="small" color="white" /> : <Text style={styles.primaryBtnText}>Ouvrir le sondage</Text>}
+          {saving ? (
+            <ActivityIndicator size="small" color="white" />
+          ) : (
+            <Text style={styles.primaryBtnText}>
+              {isEditingOpenPoll ? "Enregistrer les modifications" : "Ouvrir le sondage"}
+            </Text>
+          )}
         </TouchableOpacity>
+        {isEditingOpenPoll ? (
+          <TouchableOpacity
+            onPress={() => setShowPollBuilder(false)}
+            style={[styles.secondaryBtn, { borderColor: theme.icon, backgroundColor: theme.background }]}
+            disabled={saving}
+          >
+            <Text style={{ color: theme.text, fontWeight: "700" }}>Retour au vote</Text>
+          </TouchableOpacity>
+        ) : null}
       </View>
     );
   };
@@ -1158,13 +1314,22 @@ export default function MealPollScreen() {
         </View>
 
         {isParent ? (
-          <TouchableOpacity
-            onPress={closePoll}
-            style={[styles.secondaryBtn, { borderColor: theme.icon, backgroundColor: theme.background, opacity: saving ? 0.6 : 1 }]}
-            disabled={saving}
-          >
-            <Text style={{ color: theme.text, fontWeight: "700" }}>Clôturer le sondage</Text>
-          </TouchableOpacity>
+          <>
+            <TouchableOpacity
+              onPress={() => openPollBuilderForEdit(activePoll)}
+              style={[styles.secondaryBtn, { borderColor: theme.icon, backgroundColor: theme.background, opacity: saving ? 0.6 : 1 }]}
+              disabled={saving}
+            >
+              <Text style={{ color: theme.text, fontWeight: "700" }}>Modifier le sondage</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={confirmClosePoll}
+              style={[styles.secondaryBtn, { borderColor: theme.icon, backgroundColor: theme.background, opacity: saving ? 0.6 : 1 }]}
+              disabled={saving}
+            >
+              <Text style={{ color: theme.text, fontWeight: "700" }}>Clôturer le sondage</Text>
+            </TouchableOpacity>
+          </>
         ) : null}
 
         <Animated.View
@@ -1301,6 +1466,16 @@ export default function MealPollScreen() {
                 <Text style={{ color: theme.textSecondary }}>Aucun repas planifié pour l&apos;instant.</Text>
               )}
             </View>
+            <TouchableOpacity
+              onPress={() => void openPollShoppingListPicker()}
+              style={[
+                styles.secondaryBtn,
+                { borderColor: theme.icon, backgroundColor: theme.background, opacity: saving || sortedAssignments.length === 0 ? 0.5 : 1 },
+              ]}
+              disabled={saving || sortedAssignments.length === 0}
+            >
+              <Text style={{ color: theme.text, fontWeight: "700" }}>Ajouter à la liste de courses</Text>
+            </TouchableOpacity>
 
             <TouchableOpacity
               onPress={validatePoll}
@@ -1358,6 +1533,16 @@ export default function MealPollScreen() {
             })}
           </View>
         ) : null}
+
+        {isParent && sortedAssignments.length > 0 ? (
+          <TouchableOpacity
+            onPress={() => void openPollShoppingListPicker()}
+            style={[styles.secondaryBtn, { borderColor: theme.icon, backgroundColor: theme.background }]}
+            disabled={saving}
+          >
+            <Text style={{ color: theme.text, fontWeight: "700" }}>Ajouter à la liste de courses</Text>
+          </TouchableOpacity>
+        ) : null}
       </View>
     );
   };
@@ -1382,23 +1567,21 @@ export default function MealPollScreen() {
       <Stack.Screen options={{ headerShown: false }} />
 
       <View style={[styles.header, { borderBottomColor: theme.icon }]}> 
-        <TouchableOpacity onPress={() => router.replace("/(tabs)/meal")}> 
+        <TouchableOpacity onPress={handleBackArrow}> 
           <MaterialCommunityIcons name="arrow-left" size={24} color={theme.text} />
         </TouchableOpacity>
         <Text style={[styles.title, { color: theme.text }]}>Sondage repas</Text>
       </View>
 
       <ScrollView contentContainerStyle={styles.content}>
-        {!activePoll ? (
-          isParent ? (
-            renderCreateView()
-          ) : (
-            <View style={[styles.card, { backgroundColor: theme.card, alignItems: "center" }]}> 
-              <MaterialCommunityIcons name="vote-outline" size={44} color={theme.tint} />
-              <Text style={[styles.cardTitle, { color: theme.text, textAlign: "center", marginTop: 10 }]}>Aucun sondage actif</Text>
-              <Text style={[styles.cardText, { color: theme.textSecondary, textAlign: "center" }]}>Un parent doit ouvrir un sondage pour démarrer les votes.</Text>
-            </View>
-          )
+        {(isParent && !activePoll) || (isParent && activePoll?.status === "open" && showPollBuilder) ? (
+          renderCreateView()
+        ) : !activePoll ? (
+          <View style={[styles.card, { backgroundColor: theme.card, alignItems: "center" }]}> 
+            <MaterialCommunityIcons name="vote-outline" size={44} color={theme.tint} />
+            <Text style={[styles.cardTitle, { color: theme.text, textAlign: "center", marginTop: 10 }]}>Aucun sondage actif</Text>
+            <Text style={[styles.cardText, { color: theme.textSecondary, textAlign: "center" }]}>Un parent doit ouvrir un sondage pour démarrer les votes.</Text>
+          </View>
         ) : activePoll.status === "open" ? (
           renderVotingView()
         ) : activePoll.status === "closed" ? (
@@ -1540,6 +1723,60 @@ export default function MealPollScreen() {
           </View>
         </View>
       </Modal>
+
+      <ShoppingListPickerModal
+        visible={shoppingPickerVisible}
+        title="Ajouter le meal plan à la liste de courses"
+        confirmLabel="Ajouter les ingrédients"
+        theme={theme}
+        saving={saving}
+        lists={shoppingLists}
+        selectedListId={selectedShoppingListId}
+        useNewList={useNewShoppingList}
+        newListTitle={newShoppingListTitle}
+        onClose={closePollShoppingListPicker}
+        onSelectList={setSelectedShoppingListId}
+        onToggleUseNewList={setUseNewShoppingList}
+        onChangeNewListTitle={setNewShoppingListTitle}
+        onConfirm={() => void confirmPollShoppingListSelection()}
+        extraContent={
+          <View>
+            <Text style={[styles.label, { color: theme.text }]}>Repas planifiés à inclure</Text>
+            <View style={{ gap: 8 }}>
+              {sortedAssignments.map((assignment) => {
+                const recipe = recipesById.get(assignment.recipe_id);
+                const selected = selectedAssignmentKeysForShopping.includes(assignment.slotKey);
+
+                return (
+                  <TouchableOpacity
+                    key={`shopping-assignment-${assignment.slotKey}`}
+                    onPress={() => toggleAssignmentForShopping(assignment.slotKey)}
+                    style={[
+                      styles.assignmentRow,
+                      { borderColor: theme.icon, backgroundColor: theme.background },
+                      selected && { borderColor: theme.tint, backgroundColor: `${theme.tint}18` },
+                    ]}
+                  >
+                    <MaterialCommunityIcons
+                      name={selected ? "checkbox-marked" : "checkbox-blank-outline"}
+                      size={20}
+                      color={selected ? theme.tint : theme.textSecondary}
+                    />
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ color: theme.text, fontWeight: "700" }} numberOfLines={1}>
+                        {recipe?.title || `Recette ${assignment.recipe_id}`}
+                      </Text>
+                      <Text style={{ color: theme.textSecondary, marginTop: 2, fontSize: 12 }}>
+                        {formatMealPlanDate(assignment.date)} - {assignment.meal_type} - {assignment.servings} portions
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </View>
+        }
+      />
     </View>
   );
 }
@@ -1978,3 +2215,4 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
 });
+

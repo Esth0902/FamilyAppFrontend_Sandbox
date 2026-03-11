@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
     View,
     Text,
@@ -16,13 +16,13 @@ import {
 } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Colors } from "@/constants/theme";
 import * as SecureStore from "expo-secure-store";
 import { apiFetch } from "@/src/api/client";
 
 type ModuleKey = "meals" | "tasks" | "budget" | "calendar";
 type MemberRole = "parent" | "enfant";
-type TaskRecurrence = "daily" | "weekly" | "monthly" | "once";
 
 type HouseholdMember = {
     name: string;
@@ -38,15 +38,11 @@ type CreatedMemberCredential = {
     share_text?: string;
 };
 
-type TaskTemplateInput = {
-    id?: number;
-    name: string;
-    recurrence: TaskRecurrence;
-    description: string;
-    recurrence_days: number[];
-    is_rotation: boolean;
-    rotation_cycle_weeks: 1 | 2;
-    fixed_user_id?: number | null;
+type TaskSettingsInput = {
+    reminders_enabled: boolean;
+    alternating_custody_enabled: boolean;
+    custody_change_day: number;
+    custody_home_week_start: string;
 };
 
 type DietaryTagOption = {
@@ -63,10 +59,10 @@ type DietaryTagDetail = {
 };
 
 const MODULES: { id: ModuleKey; label: string; desc: string; icon: string }[] = [
-    { id: "meals", label: "Repas & Courses", desc: "Menus et liste partagee.", icon: "food-apple-outline" },
-    { id: "tasks", label: "Taches Menageres", desc: "Suivi des corvees.", icon: "broom" },
+    { id: "meals", label: "Repas & Courses", desc: "Menus et liste partagée.", icon: "food-apple-outline" },
+    { id: "tasks", label: "Tâches Ménagères", desc: "Suivi des corvées.", icon: "broom" },
     { id: "budget", label: "Budget & Argent", desc: "Argent de poche par enfant.", icon: "piggy-bank-outline" },
-    { id: "calendar", label: "Agenda Familial", desc: "Planning partage.", icon: "calendar-clock" },
+    { id: "calendar", label: "Agenda Familial", desc: "Planning partagé.", icon: "calendar-clock" },
 ];
 
 const DAYS = [
@@ -80,10 +76,16 @@ const DAYS = [
 ];
 
 const DURATION_CHOICES = [12, 24, 48];
+const MONTH_LABELS = ["jan", "fév", "mars", "avr", "mai", "juin", "juil", "août", "sept", "oct", "nov", "dec"];
+const WEEK_DAY_SHORT = ["di", "lu", "ma", "me", "je", "ve", "sa"] as const;
+const WHEEL_ITEM_HEIGHT = 40;
+const WHEEL_VISIBLE_ROWS = 5;
+const WHEEL_CONTAINER_HEIGHT = WHEEL_ITEM_HEIGHT * WHEEL_VISIBLE_ROWS;
+const WHEEL_VERTICAL_PADDING = (WHEEL_CONTAINER_HEIGHT - WHEEL_ITEM_HEIGHT) / 2;
 const DIETARY_TYPE_LABELS: Record<DietaryTagOption["type"], string> = {
-    diet: "Regimes",
-    allergen: "Allergenes",
-    dislike: "A eviter",
+    diet: "Régimes",
+    allergen: "Allergènes",
+    dislike: "À éviter",
     restriction: "Restrictions",
     cuisine_rule: "Cuisine",
 };
@@ -126,22 +128,42 @@ const parseTimeToHHMM = (value: unknown): string | null => {
 
     return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
 };
-
-const isoWeekDayFromDate = (date: Date): number => {
-    const day = date.getDay();
-    return day === 0 ? 7 : day;
+const pad2 = (value: number): string => String(value).padStart(2, "0");
+const toIsoDate = (date: Date): string => `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
+const parseIsoDate = (value: string): Date => new Date(`${value}T00:00:00`);
+const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
+const wheelIndexFromOffset = (offsetY: number, size: number): number =>
+    clamp(Math.round(offsetY / WHEEL_ITEM_HEIGHT), 0, Math.max(0, size - 1));
+const weekDayShortLabel = (year: number, month: number, day: number): string => {
+    const date = new Date(year, month - 1, day);
+    return WEEK_DAY_SHORT[date.getDay()] ?? "";
 };
-
-const normalizeTaskRecurrenceDays = (value: unknown): number[] => {
-    if (!Array.isArray(value)) {
-        return [];
+const startOfCustomWeek = (date: Date, startDayIso: number): Date => {
+    const normalized = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+    const jsStartDay = startDayIso % 7;
+    const delta = (normalized.getDay() - jsStartDay + 7) % 7;
+    normalized.setDate(normalized.getDate() - delta);
+    return normalized;
+};
+const normalizeCustodyWeekStartDate = (isoDate: string, changeDay: number): string => {
+    const safeDay = Number.isInteger(changeDay) && changeDay >= 1 && changeDay <= 7 ? changeDay : 5;
+    const source = isValidIsoDate(isoDate) ? parseIsoDate(isoDate) : new Date();
+    return toIsoDate(startOfCustomWeek(source, safeDay));
+};
+const isValidIsoDate = (value: string): boolean => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+        return false;
     }
 
-    const days = value
-        .map((day) => Number(day))
-        .filter((day) => Number.isInteger(day) && day >= 1 && day <= 7);
+    const [yearRaw, monthRaw, dayRaw] = value.split("-");
+    const year = Number(yearRaw);
+    const month = Number(monthRaw);
+    const day = Number(dayRaw);
+    const date = new Date(Date.UTC(year, month - 1, day));
 
-    return Array.from(new Set(days)).sort((a, b) => a - b);
+    return date.getUTCFullYear() === year
+        && date.getUTCMonth() === month - 1
+        && date.getUTCDate() === day;
 };
 
 const buildMemberShareText = (member: CreatedMemberCredential): string => {
@@ -154,14 +176,15 @@ const buildMemberShareText = (member: CreatedMemberCredential): string => {
     }
 
     return `Bonjour ${name} !\n\n`
-        + "Ton compte FamilyApp est pret.\n"
+        + "Ton compte FamilyApp est prêt.\n"
         + `Email : ${email}\n`
         + `Mot de passe temporaire : ${password}\n\n`
-        + "Connecte-toi puis modifie ton mot de passe des la premiere connexion.";
+        + "Connecte-toi puis modifie ton mot de passe dès la première connexion.";
 };
 
 export default function SetupHousehold() {
     const router = useRouter();
+    const insets = useSafeAreaInsets();
     const params = useLocalSearchParams<{ mode?: string; scope?: string }>();
     const isEditMode = params.mode === "edit";
     const isMealsScope = params.scope === "meals";
@@ -214,16 +237,31 @@ export default function SetupHousehold() {
     const [createdMembersForShare, setCreatedMembersForShare] = useState<CreatedMemberCredential[]>([]);
     const [sendingMemberKey, setSendingMemberKey] = useState<string | null>(null);
 
-    const [tasksSettings, setTasksSettings] = useState({
+    const [tasksSettings, setTasksSettings] = useState<TaskSettingsInput>({
         reminders_enabled: true,
-        templates: [] as TaskTemplateInput[],
+        alternating_custody_enabled: false,
+        custody_change_day: 5,
+        custody_home_week_start: normalizeCustodyWeekStartDate(toIsoDate(new Date()), 5),
     });
-    const [taskTemplateName, setTaskTemplateName] = useState("");
-    const [taskTemplateDescription, setTaskTemplateDescription] = useState("");
-    const [taskTemplateRecurrence, setTaskTemplateRecurrence] = useState<TaskRecurrence>("weekly");
-    const [taskTemplateRecurrenceDays, setTaskTemplateRecurrenceDays] = useState<number[]>([isoWeekDayFromDate(new Date())]);
-    const [taskTemplateRotation, setTaskTemplateRotation] = useState(false);
-    const [taskTemplateRotationCycleWeeks, setTaskTemplateRotationCycleWeeks] = useState<1 | 2>(1);
+    const [custodyDateWheelVisible, setCustodyDateWheelVisible] = useState(false);
+    const [custodyDateWheelYear, setCustodyDateWheelYear] = useState(new Date().getFullYear());
+    const [custodyDateWheelMonth, setCustodyDateWheelMonth] = useState(new Date().getMonth() + 1);
+    const [custodyDateWheelDay, setCustodyDateWheelDay] = useState(new Date().getDate());
+    const custodyDayWheelRef = useRef<ScrollView | null>(null);
+    const custodyMonthWheelRef = useRef<ScrollView | null>(null);
+    const custodyYearWheelRef = useRef<ScrollView | null>(null);
+    const custodyDateDayIndexRef = useRef(Math.max(0, custodyDateWheelDay - 1));
+    const custodyDateMonthIndexRef = useRef(Math.max(0, custodyDateWheelMonth - 1));
+    const custodyDateYearIndexRef = useRef(0);
+    const custodyYearOptions = useMemo(() => {
+        const currentYear = new Date().getFullYear();
+        return Array.from({ length: 11 }, (_, index) => currentYear - 5 + index);
+    }, []);
+    const custodyMonthOptions = useMemo(() => Array.from({ length: 12 }, (_, index) => index + 1), []);
+    const custodyDayOptions = useMemo(() => {
+        const maxDay = new Date(custodyDateWheelYear, custodyDateWheelMonth, 0).getDate();
+        return Array.from({ length: maxDay }, (_, index) => index + 1);
+    }, [custodyDateWheelMonth, custodyDateWheelYear]);
 
     const [calendarSettings, setCalendarSettings] = useState({
         shared_view_enabled: true,
@@ -274,29 +312,81 @@ export default function SetupHousehold() {
         }
     };
 
-    const applyTaskRecurrence = (recurrence: TaskRecurrence) => {
-        setTaskTemplateRecurrence(recurrence);
-        if (recurrence === "daily" && taskTemplateRecurrenceDays.length === 0) {
-            setTaskTemplateRecurrenceDays([1, 2, 3, 4, 5, 6, 7]);
+    useEffect(() => {
+        if (!tasksSettings.alternating_custody_enabled) {
+            setCustodyDateWheelVisible(false);
             return;
         }
-        if (recurrence === "weekly" && taskTemplateRecurrenceDays.length === 0) {
-            setTaskTemplateRecurrenceDays([isoWeekDayFromDate(new Date())]);
-            return;
-        }
-        if (recurrence === "monthly" || recurrence === "once") {
-            setTaskTemplateRecurrenceDays([]);
-        }
-    };
 
-    const toggleTaskRecurrenceDay = (value: number) => {
-        setTaskTemplateRecurrenceDays((prev) => {
-            if (prev.includes(value)) {
-                return prev.filter((day) => day !== value);
+        setTasksSettings((prev) => {
+            const normalized = normalizeCustodyWeekStartDate(prev.custody_home_week_start, prev.custody_change_day);
+            if (normalized === prev.custody_home_week_start) {
+                return prev;
             }
-            return [...prev, value].sort((left, right) => left - right);
+            return { ...prev, custody_home_week_start: normalized };
+        });
+    }, [tasksSettings.alternating_custody_enabled, tasksSettings.custody_change_day]);
+
+    const openCustodyDateWheel = () => {
+        if (custodyDateWheelVisible) {
+            setCustodyDateWheelVisible(false);
+            return;
+        }
+
+        const normalizedDate = normalizeCustodyWeekStartDate(
+            tasksSettings.custody_home_week_start,
+            tasksSettings.custody_change_day
+        );
+        const sourceDate = parseIsoDate(normalizedDate);
+        const year = sourceDate.getFullYear();
+        const month = sourceDate.getMonth() + 1;
+        const day = sourceDate.getDate();
+        const yearIndex = Math.max(0, custodyYearOptions.indexOf(year));
+        const monthIndex = Math.max(0, custodyMonthOptions.indexOf(month));
+        const dayIndex = Math.max(0, day - 1);
+
+        setCustodyDateWheelYear(year);
+        setCustodyDateWheelMonth(month);
+        setCustodyDateWheelDay(day);
+        custodyDateYearIndexRef.current = yearIndex;
+        custodyDateMonthIndexRef.current = monthIndex;
+        custodyDateDayIndexRef.current = dayIndex;
+        setCustodyDateWheelVisible(true);
+
+        requestAnimationFrame(() => {
+            custodyYearWheelRef.current?.scrollTo({ y: yearIndex * WHEEL_ITEM_HEIGHT, animated: false });
+            custodyMonthWheelRef.current?.scrollTo({ y: monthIndex * WHEEL_ITEM_HEIGHT, animated: false });
+            custodyDayWheelRef.current?.scrollTo({ y: dayIndex * WHEEL_ITEM_HEIGHT, animated: false });
         });
     };
+
+    useEffect(() => {
+        const maxDay = custodyDayOptions.length;
+        setCustodyDateWheelDay((prev) => clamp(prev, 1, maxDay));
+    }, [custodyDayOptions.length]);
+
+    useEffect(() => {
+        if (!custodyDateWheelVisible) {
+            return;
+        }
+
+        const maxDay = new Date(custodyDateWheelYear, custodyDateWheelMonth, 0).getDate();
+        const normalizedDay = clamp(custodyDateWheelDay, 1, maxDay);
+        if (normalizedDay !== custodyDateWheelDay) {
+            setCustodyDateWheelDay(normalizedDay);
+            return;
+        }
+
+        const rawSelectedDate = `${custodyDateWheelYear}-${pad2(custodyDateWheelMonth)}-${pad2(normalizedDay)}`;
+        const alignedWeekDate = normalizeCustodyWeekStartDate(rawSelectedDate, tasksSettings.custody_change_day);
+        setTasksSettings((prev) => ({ ...prev, custody_home_week_start: alignedWeekDate }));
+    }, [
+        custodyDateWheelVisible,
+        custodyDateWheelYear,
+        custodyDateWheelMonth,
+        custodyDateWheelDay,
+        tasksSettings.custody_change_day,
+    ]);
 
     const loadDietaryTags = useCallback(async (type: DietaryTagOption["type"]) => {
         setDietaryTagsLoading(true);
@@ -394,7 +484,7 @@ export default function SetupHousehold() {
             if (error?.status === 409 && closestTag?.key) {
                 Alert.alert(
                     "Tag similaire detecte",
-                    `${closestTag.label} existe deja. Je l'ai selectionne a la place.`,
+                    `${closestTag.label} existe déjà. Je l'ai sélectionné à la place.`,
                 );
                 setSelectedMealDietaryTags((prev) =>
                     prev.includes(String(closestTag.key)) ? prev : [...prev, String(closestTag.key)]
@@ -434,7 +524,7 @@ export default function SetupHousehold() {
 
                 if (isEditMode) {
                     if (!hasHousehold) {
-                        Alert.alert("Configuration", "Aucun foyer n'est configure pour ce compte.");
+                        Alert.alert("Configuration", "Aucun foyer n'est configuré pour ce compte.");
                         router.replace("/(tabs)/home");
                         return;
                     }
@@ -500,22 +590,22 @@ export default function SetupHousehold() {
                     if (!isTasksScope) {
                         await loadDietaryTags("diet");
                     }
+                    const parsedCustodyChangeDay =
+                        Number.isInteger(tasksSettings.custody_change_day) && tasksSettings.custody_change_day >= 1 && tasksSettings.custody_change_day <= 7
+                            ? tasksSettings.custody_change_day
+                            : 5;
+                    const parsedCustodyWeekStartRaw =
+                        typeof tasksSettings.custody_home_week_start === "string"
+                            ? tasksSettings.custody_home_week_start
+                            : toIsoDate(new Date());
                     setTasksSettings({
                         reminders_enabled: tasksSettings.reminders_enabled !== false,
-                        templates: Array.isArray(tasksSettings.templates)
-                            ? tasksSettings.templates.map((template: any) => ({
-                                id: Number.isInteger(template?.id) ? Number(template.id) : undefined,
-                                name: String(template?.name ?? "").trim(),
-                                description: String(template?.description ?? ""),
-                                recurrence: template?.recurrence === "daily" || template?.recurrence === "monthly" || template?.recurrence === "once"
-                                    ? template.recurrence
-                                    : "weekly",
-                                recurrence_days: normalizeTaskRecurrenceDays(template?.recurrence_days),
-                                is_rotation: !!template?.is_rotation,
-                                rotation_cycle_weeks: template?.rotation_cycle_weeks === 2 ? 2 : 1,
-                                fixed_user_id: Number.isInteger(template?.fixed_user_id) ? Number(template.fixed_user_id) : null,
-                            })).filter((template: TaskTemplateInput) => template.name.length > 0)
-                            : [],
+                        alternating_custody_enabled: tasksSettings.alternating_custody_enabled === true,
+                        custody_change_day: parsedCustodyChangeDay,
+                        custody_home_week_start: normalizeCustodyWeekStartDate(
+                            parsedCustodyWeekStartRaw,
+                            parsedCustodyChangeDay
+                        ),
                     });
                     setCalendarSettings({
                         shared_view_enabled: calendar?.settings?.shared_view_enabled !== false,
@@ -564,7 +654,7 @@ export default function SetupHousehold() {
                 message: buildMemberShareText(member),
             });
         } catch (shareError) {
-            console.error("Erreur partage acces membre:", shareError);
+            console.error("Erreur partage accès membre:", shareError);
             Alert.alert("Partage", "Impossible d'ouvrir le partage pour ce membre.");
         } finally {
             setSendingMemberKey(null);
@@ -574,53 +664,6 @@ export default function SetupHousehold() {
     const removeMember = (index: number) => {
         setMembers((prev) => prev.filter((_, i) => i !== index));
     };
-
-    const addTaskTemplate = () => {
-        const cleanName = taskTemplateName.trim();
-        if (!cleanName) {
-            Alert.alert("Taches", "Le nom du template de tache est obligatoire.");
-            return;
-        }
-
-        const normalizedDays = normalizeTaskRecurrenceDays(taskTemplateRecurrenceDays);
-        if ((taskTemplateRecurrence === "daily" || taskTemplateRecurrence === "weekly") && normalizedDays.length === 0) {
-            Alert.alert("Taches", "Choisis au moins un jour pour cette recurrence.");
-            return;
-        }
-
-        setTasksSettings((prev) => ({
-            ...prev,
-            templates: [
-                ...prev.templates,
-                {
-                    name: cleanName,
-                    recurrence: taskTemplateRecurrence,
-                    description: taskTemplateDescription.trim(),
-                    recurrence_days: taskTemplateRecurrence === "daily" || taskTemplateRecurrence === "weekly"
-                        ? normalizedDays
-                        : [],
-                    is_rotation: taskTemplateRotation,
-                    rotation_cycle_weeks: taskTemplateRotation ? taskTemplateRotationCycleWeeks : 1,
-                    fixed_user_id: null,
-                },
-            ],
-        }));
-
-        setTaskTemplateName("");
-        setTaskTemplateDescription("");
-        setTaskTemplateRecurrence("weekly");
-        setTaskTemplateRecurrenceDays([isoWeekDayFromDate(new Date())]);
-        setTaskTemplateRotation(false);
-        setTaskTemplateRotationCycleWeeks(1);
-    };
-
-    const removeTaskTemplate = (index: number) => {
-        setTasksSettings((prev) => ({
-            ...prev,
-            templates: prev.templates.filter((_, i) => i !== index),
-        }));
-    };
-
     const handleSave = async () => {
         if (!isEditMode && createdMembersForShare.length > 0) {
             router.replace("/(tabs)/home");
@@ -642,17 +685,17 @@ export default function SetupHousehold() {
 
         const parsedDefaultServings = Number(defaultServings);
         if (!Number.isInteger(parsedDefaultServings) || parsedDefaultServings < 1 || parsedDefaultServings > 30) {
-            Alert.alert("Repas", "Le nombre de portions par defaut doit etre entre 1 et 30.");
+            Alert.alert("Repas", "Le nombre de portions par défaut doit être entre 1 et 30.");
             return;
         }
         const parsedMaxVotes = Number(maxVotesPerUser);
         if (!Number.isInteger(parsedMaxVotes) || parsedMaxVotes < 1 || parsedMaxVotes > 20) {
-            Alert.alert("Sondages", "Le nombre max de votes doit etre entre 1 et 20.");
+            Alert.alert("Sondages", "Le nombre max de votes doit être entre 1 et 20.");
             return;
         }
         const parsedPollTime = parseTimeToHHMM(pollTime);
         if (!parsedPollTime) {
-            Alert.alert("Sondages", "L heure du sondage doit etre au format HH:MM.");
+            Alert.alert("Sondages", "L'heure du sondage doit être au format HH:MM.");
             return;
         }
         const parsedDietaryTags = Array.from(
@@ -662,6 +705,17 @@ export default function SetupHousehold() {
                     .filter((tag) => tag.length > 0)
             )
         );
+
+        if (tasksSettings.alternating_custody_enabled) {
+            if (!isValidIsoDate(tasksSettings.custody_home_week_start)) {
+                Alert.alert("Tâches", "La date de début de semaine à la maison doit être au format YYYY-MM-DD.");
+                return;
+            }
+            if (!Number.isInteger(tasksSettings.custody_change_day) || tasksSettings.custody_change_day < 1 || tasksSettings.custody_change_day > 7) {
+                Alert.alert("Tâches", "Le jour de bascule doit être compris entre 1 et 7.");
+                return;
+            }
+        }
 
         const modulesPayload = {
             meals: {
@@ -682,7 +736,20 @@ export default function SetupHousehold() {
             },
             tasks: {
                 enabled: activeModules.tasks,
-                settings: tasksSettings,
+                settings: {
+                    reminders_enabled: tasksSettings.reminders_enabled,
+                    alternating_custody_enabled: tasksSettings.alternating_custody_enabled,
+                    custody_change_day:
+                        Number.isInteger(tasksSettings.custody_change_day) && tasksSettings.custody_change_day >= 1 && tasksSettings.custody_change_day <= 7
+                            ? tasksSettings.custody_change_day
+                            : 5,
+                    custody_home_week_start: normalizeCustodyWeekStartDate(
+                        tasksSettings.custody_home_week_start,
+                        Number.isInteger(tasksSettings.custody_change_day) && tasksSettings.custody_change_day >= 1 && tasksSettings.custody_change_day <= 7
+                            ? tasksSettings.custody_change_day
+                            : 5
+                    ),
+                },
             },
             calendar: {
                 enabled: activeModules.calendar,
@@ -705,7 +772,7 @@ export default function SetupHousehold() {
                     }),
                 });
 
-                Alert.alert("Succes", "Configuration du foyer mise a jour.");
+                Alert.alert("Succès", "Configuration du foyer mise à jour.");
             } else {
                 const payload = {
                     household_name: houseName.trim(),
@@ -753,13 +820,13 @@ export default function SetupHousehold() {
                     setCreatedMembersForShare(membersWithCredentials);
                     setAlreadyConfigured(true);
                     Alert.alert(
-                        "Foyer cree",
-                        "Les comptes membres sont prets. Tu peux maintenant envoyer les acces membre par membre.",
+                        "Foyer créé",
+                        "Les comptes membres sont prêts. Tu peux maintenant envoyer les accès membre par membre.",
                     );
                     return;
                 }
 
-                Alert.alert("Felicitations", "Foyer cree et configure avec succes !");
+                Alert.alert("Félicitations", "Foyer créé et configuré avec succès !");
                 router.replace("/(tabs)/home");
             }
         } catch (error: any) {
@@ -800,13 +867,13 @@ export default function SetupHousehold() {
             <View style={[styles.centerContainer, { backgroundColor: theme.background, padding: 24 }]}> 
                 <View style={[styles.lockCard, { backgroundColor: theme.card }]}> 
                     <MaterialCommunityIcons name="home-check" size={42} color={theme.tint} />
-                    <Text style={[styles.lockTitle, { color: theme.text }]}>Foyer deja configure</Text>
-                    <Text style={[styles.lockText, { color: theme.textSecondary }]}>La configuration initiale est terminee.</Text>
+                    <Text style={[styles.lockTitle, { color: theme.text }]}>Foyer déjà configuré</Text>
+                    <Text style={[styles.lockText, { color: theme.textSecondary }]}>La configuration initiale est terminée.</Text>
                     <TouchableOpacity
                         onPress={() => router.replace("/(tabs)/home")}
                         style={[styles.submitButton, { backgroundColor: theme.tint, marginTop: 16 }]}
                     >
-                        <Text style={styles.submitButtonText}>Retour a l&apos;accueil</Text>
+                        <Text style={styles.submitButtonText}>Retour à l&apos;accueil</Text>
                     </TouchableOpacity>
                 </View>
             </View>
@@ -819,18 +886,29 @@ export default function SetupHousehold() {
                 behavior={Platform.OS === "ios" ? "padding" : "height"}
                 style={{ flex: 1, backgroundColor: theme.background }}
             >
-                <View style={[styles.headerBar, { borderBottomColor: theme.icon }]}>
-                    <TouchableOpacity onPress={() => router.replace("/(tabs)/home")}>
-                        <MaterialCommunityIcons name="close" size={24} color={theme.text} />
+                <View
+                    style={[
+                        styles.headerBar,
+                        {
+                            borderBottomColor: theme.icon,
+                            paddingTop: Math.max(insets.top, 12),
+                        },
+                    ]}
+                >
+                    <TouchableOpacity
+                        onPress={() => router.replace("/(tabs)/home")}
+                        style={[styles.headerActionBtn, { borderColor: theme.icon }]}
+                    >
+                        <MaterialCommunityIcons name="close" size={20} color={theme.tint} />
                     </TouchableOpacity>
-                    <Text style={[styles.headerTitle, { color: theme.text }]}>Comptes crees</Text>
+                    <Text style={[styles.headerTitle, { color: theme.text }]}>Comptes créés</Text>
                 </View>
 
                 <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
                     <View style={styles.section}>
-                        <Text style={[styles.sectionTitle, { color: theme.text }]}>Envoyer les acces</Text>
+                        <Text style={[styles.sectionTitle, { color: theme.text }]}>Envoyer les accès</Text>
                         <Text style={[styles.memberMeta, { color: theme.textSecondary, marginBottom: 10 }]}>
-                            Envoie les identifiants temporaires a chaque membre.
+                            Envoie les identifiants temporaires à chaque membre.
                         </Text>
 
                         <View style={{ gap: 8 }}>
@@ -847,7 +925,7 @@ export default function SetupHousehold() {
                                                 {member.name || "Membre"}
                                             </Text>
                                             <Text style={[styles.memberMeta, { color: theme.textSecondary }]}>
-                                                {member.generated_email || "Email genere"}
+                                                {member.generated_email || "Email généré"}
                                             </Text>
                                         </View>
 
@@ -890,17 +968,25 @@ export default function SetupHousehold() {
             behavior={Platform.OS === "ios" ? "padding" : "height"}
             style={{ flex: 1, backgroundColor: theme.background }}
         >
-            <View style={[styles.headerBar, { borderBottomColor: theme.icon }]}> 
-                <TouchableOpacity onPress={() => router.back()}>
-                    <MaterialCommunityIcons name="arrow-left" size={24} color={theme.text} />
+            <View
+                style={[
+                    styles.headerBar,
+                    {
+                        borderBottomColor: theme.icon,
+                        paddingTop: Math.max(insets.top, 12),
+                    },
+                ]}
+            >
+                <TouchableOpacity onPress={() => router.back()} style={[styles.headerActionBtn, { borderColor: theme.icon }]}>
+                    <MaterialCommunityIcons name="arrow-left" size={20} color={theme.tint} />
                 </TouchableOpacity>
                 <Text style={[styles.headerTitle, { color: theme.text }]}>
                     {isMealsScope
-                        ? "Parametres repas"
+                        ? "Paramètres repas"
                         : isTasksScope
-                            ? "Parametres taches"
+                            ? "Paramètres tâches"
                             : isCalendarScope
-                                ? "Parametres calendrier"
+                                ? "Paramètres calendrier"
                         : (isEditMode ? "Modifier le foyer" : "Nouveau Foyer")}
                 </Text>
             </View>
@@ -1013,7 +1099,7 @@ export default function SetupHousehold() {
                         {isMealsScope
                             ? "Repas & courses"
                             : isTasksScope
-                                ? "Taches menageres"
+                                ? "Tâches ménagères"
                                 : isCalendarScope
                                     ? "Calendrier"
                                 : "Modules et sous-config"}
@@ -1074,7 +1160,7 @@ export default function SetupHousehold() {
                                     {mealOptions.recipes && mealExpandedSections.recipes && (
                                         <View style={[styles.mealSectionBox, { backgroundColor: theme.background }]}>
                                             <Text style={[styles.label, { color: theme.text, marginTop: 4 }]}>
-                                                Portions par defaut du foyer
+                                                Portions par défaut du foyer
                                             </Text>
                                             <TextInput
                                                 style={[styles.input, { backgroundColor: theme.card, color: theme.text, marginBottom: 0 }]}
@@ -1122,7 +1208,7 @@ export default function SetupHousehold() {
                                             {selectedTagsForCurrentType.length > 0 && (
                                                 <View style={{ marginBottom: 10 }}>
                                                     <Text style={[styles.selectedHint, { color: theme.textSecondary }]}>
-                                                        Selection dans {DIETARY_TYPE_LABELS[selectedDietaryTypeFilter]}:
+                                                        Sélection dans {DIETARY_TYPE_LABELS[selectedDietaryTypeFilter]}:
                                                     </Text>
                                                     <Text style={[styles.selectedValues, { color: theme.text }]}>
                                                         {selectedTagsForCurrentType.map((tag) => tag.label).join(", ")}
@@ -1146,7 +1232,7 @@ export default function SetupHousehold() {
                                                 </View>
                                             ) : filteredDietaryTags.length === 0 ? (
                                                 <Text style={{ color: theme.textSecondary, fontSize: 12 }}>
-                                                    Aucun tag ne correspond a la recherche.
+                                                    Aucun tag ne correspond à la recherche.
                                                 </Text>
                                             ) : (
                                                 <View style={styles.tagsWrap}>
@@ -1186,7 +1272,7 @@ export default function SetupHousehold() {
                                                         Ajouter &quot;{dietaryTagSearch.trim()}&quot; ?
                                                     </Text>
                                                     <Text style={[styles.createTagTypeText, { color: theme.textSecondary }]}>
-                                                        Categorie: {DIETARY_TYPE_LABELS[selectedDietaryTypeFilter]}
+                                                        Catégorie: {DIETARY_TYPE_LABELS[selectedDietaryTypeFilter]}
                                                     </Text>
                                                     <TouchableOpacity
                                                         onPress={createDietaryTag}
@@ -1314,149 +1400,201 @@ export default function SetupHousehold() {
                                         />
                                     </View>
 
-                                    <Text style={[styles.label, { color: theme.text, marginTop: 6 }]}>Templates de taches</Text>
-                                    <TextInput
-                                        style={[styles.input, { backgroundColor: theme.background, color: theme.text, marginBottom: 10 }]}
-                                        value={taskTemplateName}
-                                        onChangeText={setTaskTemplateName}
-                                        placeholder="Ex: Sortir les poubelles"
-                                        placeholderTextColor={theme.textSecondary}
-                                    />
-                                    <TextInput
-                                        style={[styles.input, { backgroundColor: theme.background, color: theme.text, marginBottom: 10, height: 44 }]}
-                                        value={taskTemplateDescription}
-                                        onChangeText={setTaskTemplateDescription}
-                                        placeholder="Description (optionnelle)"
-                                        placeholderTextColor={theme.textSecondary}
-                                    />
-                                    <View style={styles.inlineRow}>
-                                        <TouchableOpacity
-                                            onPress={() => applyTaskRecurrence("daily")}
-                                            style={[
-                                                styles.smallChip,
-                                                { borderColor: theme.icon, backgroundColor: theme.background },
-                                                taskTemplateRecurrence === "daily" && { borderColor: theme.tint, backgroundColor: theme.tint + "20" },
-                                            ]}
-                                        >
-                                            <Text style={{ color: theme.text }}>Quotidien</Text>
-                                        </TouchableOpacity>
-                                        <TouchableOpacity
-                                            onPress={() => applyTaskRecurrence("weekly")}
-                                            style={[
-                                                styles.smallChip,
-                                                { borderColor: theme.icon, backgroundColor: theme.background },
-                                                taskTemplateRecurrence === "weekly" && { borderColor: theme.tint, backgroundColor: theme.tint + "20" },
-                                            ]}
-                                        >
-                                            <Text style={{ color: theme.text }}>Hebdo</Text>
-                                        </TouchableOpacity>
-                                        <TouchableOpacity
-                                            onPress={() => applyTaskRecurrence("monthly")}
-                                            style={[
-                                                styles.smallChip,
-                                                { borderColor: theme.icon, backgroundColor: theme.background },
-                                                taskTemplateRecurrence === "monthly" && { borderColor: theme.tint, backgroundColor: theme.tint + "20" },
-                                            ]}
-                                        >
-                                            <Text style={{ color: theme.text }}>Mensuel</Text>
-                                        </TouchableOpacity>
-                                    </View>
-
-                                    {(taskTemplateRecurrence === "daily" || taskTemplateRecurrence === "weekly") && (
-                                        <>
-                                            <Text style={[styles.label, { color: theme.text }]}>Jours d&apos;execution</Text>
-                                            <View style={[styles.inlineRow, { flexWrap: "wrap" }]}>
-                                                {DAYS.map((day) => {
-                                                    const selected = taskTemplateRecurrenceDays.includes(day.value);
-                                                    return (
-                                                        <TouchableOpacity
-                                                            key={`task-day-${day.value}`}
-                                                            onPress={() => toggleTaskRecurrenceDay(day.value)}
-                                                            style={[
-                                                                styles.smallChip,
-                                                                { borderColor: theme.icon, backgroundColor: theme.background },
-                                                                selected && { borderColor: theme.tint, backgroundColor: theme.tint + "20" },
-                                                            ]}
-                                                        >
-                                                            <Text style={{ color: theme.text }}>{day.label}</Text>
-                                                        </TouchableOpacity>
-                                                    );
-                                                })}
-                                            </View>
-                                        </>
-                                    )}
-
                                     <View style={styles.switchRow}>
-                                        <Text style={[styles.label, { color: theme.text, marginBottom: 0 }]}>Tache tournante</Text>
+                                        <Text style={[styles.label, { color: theme.text, marginBottom: 0 }]}>Garde alternée</Text>
                                         <Switch
-                                            value={taskTemplateRotation}
-                                            onValueChange={setTaskTemplateRotation}
+                                            value={tasksSettings.alternating_custody_enabled}
+                                            onValueChange={(value) =>
+                                                setTasksSettings((prev) => ({ ...prev, alternating_custody_enabled: value }))
+                                            }
                                             trackColor={{ false: theme.icon, true: theme.tint }}
                                         />
                                     </View>
 
-                                    {taskTemplateRotation && (
-                                        <View style={styles.inlineRow}>
-                                            <TouchableOpacity
-                                                onPress={() => setTaskTemplateRotationCycleWeeks(1)}
-                                                style={[
-                                                    styles.smallChip,
-                                                    { borderColor: theme.icon, backgroundColor: theme.background },
-                                                    taskTemplateRotationCycleWeeks === 1 && { borderColor: theme.tint, backgroundColor: theme.tint + "20" },
-                                                ]}
-                                            >
-                                                <Text style={{ color: theme.text }}>Chaque semaine</Text>
-                                            </TouchableOpacity>
-                                            <TouchableOpacity
-                                                onPress={() => setTaskTemplateRotationCycleWeeks(2)}
-                                                style={[
-                                                    styles.smallChip,
-                                                    { borderColor: theme.icon, backgroundColor: theme.background },
-                                                    taskTemplateRotationCycleWeeks === 2 && { borderColor: theme.tint, backgroundColor: theme.tint + "20" },
-                                                ]}
-                                            >
-                                                <Text style={{ color: theme.text }}>Toutes les 2 semaines</Text>
-                                            </TouchableOpacity>
-                                        </View>
-                                    )}
-
-                                    <TouchableOpacity onPress={addTaskTemplate} style={[styles.addButton, { backgroundColor: theme.background }]}>
-                                        <MaterialCommunityIcons name="plus" size={20} color={theme.tint} />
-                                        <Text style={[styles.addButtonText, { color: theme.tint }]}>Ajouter ce template</Text>
-                                    </TouchableOpacity>
-
-                                    {tasksSettings.templates.length > 0 && (
-                                        <View style={{ marginTop: 10, gap: 8 }}>
-                                            {tasksSettings.templates.map((template, index) => (
-                                                <View key={`${template.name}-${index}`} style={[styles.templateCard, { backgroundColor: theme.background }]}>
-                                                    <View style={{ flex: 1 }}>
-                                                        <Text style={[styles.templateName, { color: theme.text }]}>{template.name}</Text>
-                                                        <Text style={[styles.memberMeta, { color: theme.textSecondary }]}>
-                                                            Recurrence: {template.recurrence}
-                                                            {template.is_rotation
-                                                                ? ` | Rotation ${template.rotation_cycle_weeks === 2 ? "bihebdo" : "hebdo"}`
-                                                                : ""}
+                                    {tasksSettings.alternating_custody_enabled ? (
+                                        <>
+                                            <Text style={[styles.label, { color: theme.text, marginTop: 6 }]}>Jour de bascule</Text>
+                                            <View style={styles.daysContainer}>
+                                                {DAYS.map((day) => (
+                                                    <TouchableOpacity
+                                                        key={`custody-day-${day.value}`}
+                                                        onPress={() =>
+                                                            setTasksSettings((prev) => ({
+                                                                ...prev,
+                                                                custody_change_day: day.value,
+                                                                custody_home_week_start: normalizeCustodyWeekStartDate(
+                                                                    prev.custody_home_week_start,
+                                                                    day.value
+                                                                ),
+                                                            }))
+                                                        }
+                                                        style={[
+                                                            styles.dayChip,
+                                                            { borderColor: theme.icon, backgroundColor: theme.card },
+                                                            tasksSettings.custody_change_day === day.value
+                                                                && { backgroundColor: theme.tint, borderColor: theme.tint },
+                                                        ]}
+                                                    >
+                                                        <Text
+                                                            style={{
+                                                                color: tasksSettings.custody_change_day === day.value ? "white" : theme.text,
+                                                                fontSize: 12,
+                                                            }}
+                                                        >
+                                                            {day.label}
                                                         </Text>
-                                                        {(template.recurrence === "daily" || template.recurrence === "weekly") && (
-                                                            <Text style={[styles.memberMeta, { color: theme.textSecondary }]}>
-                                                                Jours: {normalizeTaskRecurrenceDays(template.recurrence_days)
-                                                                    .map((day) => DAYS.find((item) => item.value === day)?.label ?? "")
-                                                                    .filter((label) => label.length > 0)
-                                                                    .join(", ") || "n/a"}
-                                                            </Text>
-                                                        )}
-                                                        {template.description ? (
-                                                            <Text style={[styles.memberMeta, { color: theme.textSecondary }]}>
-                                                                {template.description}
-                                                            </Text>
-                                                        ) : null}
-                                                    </View>
-                                                    <TouchableOpacity onPress={() => removeTaskTemplate(index)}>
-                                                        <MaterialCommunityIcons name="trash-can-outline" size={22} color={theme.textSecondary} />
                                                     </TouchableOpacity>
+                                                ))}
+                                            </View>
+
+                                            <Text style={[styles.label, { color: theme.text }]}>Début d&apos;une semaine à la maison</Text>
+                                            <TouchableOpacity
+                                                onPress={openCustodyDateWheel}
+                                                style={[styles.pickerFieldBtn, { borderColor: theme.icon, backgroundColor: theme.background }]}
+                                            >
+                                                <MaterialCommunityIcons name="calendar-month-outline" size={16} color={theme.textSecondary} />
+                                                <Text style={[styles.pickerFieldText, { color: theme.text }]}>
+                                                    {tasksSettings.custody_home_week_start}
+                                                </Text>
+                                            </TouchableOpacity>
+                                            {custodyDateWheelVisible ? (
+                                                <View style={[styles.inlineWheelPanel, { borderColor: theme.icon, backgroundColor: theme.background }]}>
+                                                    <Text style={[styles.label, { color: theme.text }]}>Choisir la semaine de référence</Text>
+
+                                                    <View style={styles.wheelRow}>
+                                                        <View style={styles.wheelColumn}>
+                                                            <ScrollView
+                                                                ref={custodyDayWheelRef}
+                                                                nestedScrollEnabled
+                                                                showsVerticalScrollIndicator={false}
+                                                                snapToInterval={WHEEL_ITEM_HEIGHT}
+                                                                decelerationRate="fast"
+                                                                scrollEventThrottle={32}
+                                                                contentContainerStyle={styles.wheelContentContainer}
+                                                                onScroll={(event) => {
+                                                                    const index = wheelIndexFromOffset(event.nativeEvent.contentOffset.y, custodyDayOptions.length);
+                                                                    if (index === custodyDateDayIndexRef.current) {
+                                                                        return;
+                                                                    }
+                                                                    custodyDateDayIndexRef.current = index;
+                                                                    setCustodyDateWheelDay(custodyDayOptions[index]);
+                                                                }}
+                                                            >
+                                                                {custodyDayOptions.map((value) => (
+                                                                    <View key={`custody-wheel-day-${value}`} style={styles.wheelItem}>
+                                                                        <Text
+                                                                            style={[
+                                                                                styles.wheelItemText,
+                                                                                { color: custodyDateWheelDay === value ? theme.text : theme.textSecondary },
+                                                                                custodyDateWheelDay === value && styles.wheelItemTextSelected,
+                                                                            ]}
+                                                                        >
+                                                                            {`${weekDayShortLabel(custodyDateWheelYear, custodyDateWheelMonth, value)} ${pad2(value)}`}
+                                                                        </Text>
+                                                                    </View>
+                                                                ))}
+                                                            </ScrollView>
+                                                            <View
+                                                                pointerEvents="none"
+                                                                style={[
+                                                                    styles.wheelSelectionOverlay,
+                                                                    { borderColor: theme.icon, backgroundColor: `${theme.tint}14` },
+                                                                ]}
+                                                            />
+                                                        </View>
+
+                                                        <View style={styles.wheelColumn}>
+                                                            <ScrollView
+                                                                ref={custodyMonthWheelRef}
+                                                                nestedScrollEnabled
+                                                                showsVerticalScrollIndicator={false}
+                                                                snapToInterval={WHEEL_ITEM_HEIGHT}
+                                                                decelerationRate="fast"
+                                                                scrollEventThrottle={32}
+                                                                contentContainerStyle={styles.wheelContentContainer}
+                                                                onScroll={(event) => {
+                                                                    const index = wheelIndexFromOffset(event.nativeEvent.contentOffset.y, custodyMonthOptions.length);
+                                                                    if (index === custodyDateMonthIndexRef.current) {
+                                                                        return;
+                                                                    }
+                                                                    custodyDateMonthIndexRef.current = index;
+                                                                    setCustodyDateWheelMonth(custodyMonthOptions[index]);
+                                                                }}
+                                                            >
+                                                                {custodyMonthOptions.map((value) => (
+                                                                    <View key={`custody-wheel-month-${value}`} style={styles.wheelItem}>
+                                                                        <Text
+                                                                            style={[
+                                                                                styles.wheelItemText,
+                                                                                { color: custodyDateWheelMonth === value ? theme.text : theme.textSecondary },
+                                                                                custodyDateWheelMonth === value && styles.wheelItemTextSelected,
+                                                                            ]}
+                                                                        >
+                                                                            {MONTH_LABELS[value - 1]}
+                                                                        </Text>
+                                                                    </View>
+                                                                ))}
+                                                            </ScrollView>
+                                                            <View
+                                                                pointerEvents="none"
+                                                                style={[
+                                                                    styles.wheelSelectionOverlay,
+                                                                    { borderColor: theme.icon, backgroundColor: `${theme.tint}14` },
+                                                                ]}
+                                                            />
+                                                        </View>
+
+                                                        <View style={styles.wheelColumn}>
+                                                            <ScrollView
+                                                                ref={custodyYearWheelRef}
+                                                                nestedScrollEnabled
+                                                                showsVerticalScrollIndicator={false}
+                                                                snapToInterval={WHEEL_ITEM_HEIGHT}
+                                                                decelerationRate="fast"
+                                                                scrollEventThrottle={32}
+                                                                contentContainerStyle={styles.wheelContentContainer}
+                                                                onScroll={(event) => {
+                                                                    const index = wheelIndexFromOffset(event.nativeEvent.contentOffset.y, custodyYearOptions.length);
+                                                                    if (index === custodyDateYearIndexRef.current) {
+                                                                        return;
+                                                                    }
+                                                                    custodyDateYearIndexRef.current = index;
+                                                                    setCustodyDateWheelYear(custodyYearOptions[index]);
+                                                                }}
+                                                            >
+                                                                {custodyYearOptions.map((value) => (
+                                                                    <View key={`custody-wheel-year-${value}`} style={styles.wheelItem}>
+                                                                        <Text
+                                                                            style={[
+                                                                                styles.wheelItemText,
+                                                                                { color: custodyDateWheelYear === value ? theme.text : theme.textSecondary },
+                                                                                custodyDateWheelYear === value && styles.wheelItemTextSelected,
+                                                                            ]}
+                                                                        >
+                                                                            {value}
+                                                                        </Text>
+                                                                    </View>
+                                                                ))}
+                                                            </ScrollView>
+                                                            <View
+                                                                pointerEvents="none"
+                                                                style={[
+                                                                    styles.wheelSelectionOverlay,
+                                                                    { borderColor: theme.icon, backgroundColor: `${theme.tint}14` },
+                                                                ]}
+                                                            />
+                                                        </View>
+                                                    </View>
                                                 </View>
-                                            ))}
-                                        </View>
+                                            ) : null}
+                                            <Text style={[styles.memberMeta, { color: theme.textSecondary }]}>
+                                                Les tâches récurrentes des enfants seront planifiées une semaine sur deux, à partir de cette semaine.
+                                            </Text>
+                                        </>
+                                    ) : (
+                                        <Text style={[styles.memberMeta, { color: theme.textSecondary, marginTop: 4 }]}>
+                                            Active la garde alternée pour limiter les routines enfants aux semaines à la maison.
+                                        </Text>
                                     )}
                                 </View>
                             )}
@@ -1464,7 +1602,7 @@ export default function SetupHousehold() {
                             {activeModules[module.id] && expandedModules[module.id] && module.id === "calendar" && (
                                 <View style={styles.subConfigBox}>
                                     <View style={styles.switchRow}>
-                                        <Text style={[styles.label, { color: theme.text }]}>Vue partagee</Text>
+                                        <Text style={[styles.label, { color: theme.text }]}>Vue partagée</Text>
                                         <Switch
                                             value={calendarSettings.shared_view_enabled}
                                             onValueChange={(value) => setCalendarSettings((prev) => ({ ...prev, shared_view_enabled: value }))}
@@ -1515,7 +1653,7 @@ export default function SetupHousehold() {
                         <ActivityIndicator color="white" />
                     ) : (
                         <Text style={styles.submitButtonText}>
-                            {isEditMode ? "Enregistrer la configuration" : "Creer le foyer"}
+                            {isEditMode ? "Enregistrer la configuration" : "Créer le foyer"}
                         </Text>
                     )}
                 </TouchableOpacity>
@@ -1532,18 +1670,81 @@ const styles = StyleSheet.create({
     lockTitle: { fontSize: 20, fontWeight: "700", marginTop: 10 },
     lockText: { fontSize: 14, marginTop: 6 },
     headerBar: {
-        height: 60,
         flexDirection: "row",
         alignItems: "center",
         paddingHorizontal: 20,
-        marginTop: Platform.OS === "android" ? 30 : 0,
+        paddingBottom: 12,
+        borderBottomWidth: 1,
+        gap: 12,
     },
-    headerTitle: { fontSize: 18, fontWeight: "700", marginLeft: 16 },
+    headerActionBtn: {
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+        borderWidth: 1,
+        alignItems: "center",
+        justifyContent: "center",
+        marginTop: 2,
+    },
+    headerTitle: { fontSize: 18, fontWeight: "700", flex: 1 },
     container: { padding: 20 },
     section: { marginBottom: 24 },
     sectionTitle: { fontSize: 16, fontWeight: "700", marginBottom: 12 },
     label: { fontSize: 14, fontWeight: "600", marginBottom: 8 },
     input: { height: 50, borderRadius: 12, paddingHorizontal: 16, fontSize: 16, marginBottom: 16 },
+    pickerFieldBtn: {
+        borderWidth: 1,
+        borderRadius: 10,
+        minHeight: 44,
+        paddingHorizontal: 12,
+        marginBottom: 10,
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 8,
+    },
+    pickerFieldText: {
+        fontSize: 14,
+        fontWeight: "600",
+    },
+    inlineWheelPanel: {
+        borderWidth: 1,
+        borderRadius: 12,
+        padding: 10,
+        marginBottom: 10,
+    },
+    wheelRow: {
+        flexDirection: "row",
+        gap: 8,
+    },
+    wheelColumn: {
+        flex: 1,
+        height: WHEEL_CONTAINER_HEIGHT,
+        position: "relative",
+    },
+    wheelContentContainer: {
+        paddingVertical: WHEEL_VERTICAL_PADDING,
+    },
+    wheelItem: {
+        height: WHEEL_ITEM_HEIGHT,
+        alignItems: "center",
+        justifyContent: "center",
+    },
+    wheelItemText: {
+        fontSize: 16,
+        fontWeight: "500",
+    },
+    wheelItemTextSelected: {
+        fontWeight: "700",
+    },
+    wheelSelectionOverlay: {
+        position: "absolute",
+        left: 0,
+        right: 0,
+        top: WHEEL_VERTICAL_PADDING,
+        height: WHEEL_ITEM_HEIGHT,
+        borderWidth: 1,
+        borderRadius: 10,
+    },
 
     activeUserCard: {
         borderRadius: 12,
@@ -1766,3 +1967,4 @@ const styles = StyleSheet.create({
     },
     submitButtonText: { color: "white", fontSize: 18, fontWeight: "bold" },
 });
+

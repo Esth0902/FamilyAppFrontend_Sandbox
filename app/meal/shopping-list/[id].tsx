@@ -2,12 +2,12 @@ import React, { useCallback, useMemo, useState } from "react";
 import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
-import * as SecureStore from "expo-secure-store";
 
 import { Colors } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import { apiFetch } from "@/src/api/client";
 import { subscribeToHouseholdRealtime } from "@/src/realtime/client";
+import { getStoredHouseholdId } from "@/src/session/user-cache";
 
 type ShoppingListItem = {
   id: number;
@@ -17,6 +17,7 @@ type ShoppingListItem = {
   unit?: string | null;
   is_checked: boolean;
   checked_by?: { id: number; name: string } | null;
+  created_by?: { id: number; name: string } | null;
   is_manual_addition: boolean;
 };
 
@@ -41,6 +42,7 @@ type PlannedRecipeSuggestion = {
 
 type ShoppingListDetailPayload = {
   can_manage: boolean;
+  can_add_manual_items?: boolean;
   planned_meals_from?: string;
   planned_meals_to?: string;
   planned_recipe_suggestions?: PlannedRecipeSuggestion[];
@@ -51,9 +53,6 @@ type ShoppingListDetailPayload = {
     items: ShoppingListItem[];
   };
 };
-
-type StoredHousehold = { id: number };
-type StoredUser = { household_id?: number; households?: StoredHousehold[] };
 
 const parseDate = (isoDate: string) => new Date(`${isoDate}T00:00:00`);
 
@@ -82,18 +81,6 @@ const normalizeIngredientKey = (ingredientId?: number | null, name?: string, uni
   return `name:${(name || "").trim().toLowerCase()}|unit:${(unit || "").trim().toLowerCase()}`;
 };
 
-const resolveStoredHouseholdId = async () => {
-  const rawUser = await SecureStore.getItemAsync("user");
-  if (!rawUser) return null;
-
-  try {
-    const user = JSON.parse(rawUser) as StoredUser;
-    return Number(user?.household_id ?? user?.households?.[0]?.id ?? 0) || null;
-  } catch {
-    return null;
-  }
-};
-
 export default function ShoppingListDetailScreen() {
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id?: string }>();
@@ -103,6 +90,7 @@ export default function ShoppingListDetailScreen() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [canManage, setCanManage] = useState(false);
+  const [canAddManualItems, setCanAddManualItems] = useState(false);
   const [listTitle, setListTitle] = useState("Liste");
   const [items, setItems] = useState<ShoppingListItem[]>([]);
   const [plannedRecipes, setPlannedRecipes] = useState<PlannedRecipeSuggestion[]>([]);
@@ -175,6 +163,7 @@ export default function ShoppingListDetailScreen() {
     try {
       const response = (await apiFetch(`/shopping-lists/${listId}`)) as ShoppingListDetailPayload;
       setCanManage(Boolean(response?.can_manage));
+      setCanAddManualItems(Boolean(response?.can_add_manual_items ?? response?.can_manage));
       setListTitle(response?.list?.title ?? "Liste");
       setItems(Array.isArray(response?.list?.items) ? response.list.items : []);
       setPlannedRecipes(Array.isArray(response?.planned_recipe_suggestions) ? response.planned_recipe_suggestions : []);
@@ -203,7 +192,7 @@ export default function ShoppingListDetailScreen() {
 
         if (!active) return;
 
-        const householdId = await resolveStoredHouseholdId();
+        const householdId = await getStoredHouseholdId();
         if (!householdId || !active) return;
 
         unsubscribeRealtime = await subscribeToHouseholdRealtime(householdId, (message) => {
@@ -245,7 +234,7 @@ export default function ShoppingListDetailScreen() {
       });
       setItems((prev) => prev.map((current) => (current.id === item.id ? updated : current)));
     } catch (error: any) {
-      Alert.alert("Liste de courses", error?.message || "Impossible de mettre a jour l'element.");
+      Alert.alert("Liste de courses", error?.message || "Impossible de mettre à jour l'élément.");
     }
   };
 
@@ -257,18 +246,18 @@ export default function ShoppingListDetailScreen() {
       await apiFetch(`/shopping-lists/items/${itemId}`, { method: "DELETE" });
       setItems((prev) => prev.filter((item) => item.id !== itemId));
     } catch (error: any) {
-      Alert.alert("Liste de courses", error?.message || "Impossible de supprimer cet element.");
+      Alert.alert("Liste de courses", error?.message || "Impossible de supprimer cet élément.");
     } finally {
       setSaving(false);
     }
   };
 
   const addManualItem = async () => {
-    if (!canManage || !hasValidId) return;
+    if (!canAddManualItems || !hasValidId) return;
 
     const name = manualName.trim();
     if (!name) {
-      Alert.alert("Liste de courses", "Le nom de l'ingredient est obligatoire.");
+      Alert.alert("Liste de courses", "Le nom de l'ingrédient est obligatoire.");
       return;
     }
 
@@ -283,7 +272,7 @@ export default function ShoppingListDetailScreen() {
       if (rawQty !== "") {
         const parsed = Number(rawQty.replace(",", "."));
         if (!Number.isFinite(parsed) || parsed < 0) {
-          Alert.alert("Liste de courses", "La quantite doit etre numerique.");
+          Alert.alert("Liste de courses", "La quantité doit être numérique.");
           setSaving(false);
           return;
         }
@@ -300,7 +289,7 @@ export default function ShoppingListDetailScreen() {
       setManualQuantity("");
       setManualUnit("");
     } catch (error: any) {
-      Alert.alert("Liste de courses", error?.message || "Impossible d'ajouter cet ingredient.");
+      Alert.alert("Liste de courses", error?.message || "Impossible d'ajouter cet ingrédient.");
     } finally {
       setSaving(false);
     }
@@ -470,7 +459,7 @@ export default function ShoppingListDetailScreen() {
                               <Text style={{ color: theme.text, fontWeight: "600" }}>{ingredient.name}</Text>
                               <Text style={{ color: theme.textSecondary, fontSize: 12 }}>
                                 {ingredient.quantity} {ingredient.unit || ""}
-                                {ingredient.already_in_list ? " - deja dans la liste" : ""}
+                                {ingredient.already_in_list ? " - déjà dans la liste" : ""}
                               </Text>
                             </View>
                             {canManage ? (
@@ -503,7 +492,7 @@ export default function ShoppingListDetailScreen() {
           )}
         </View>
 
-        {canManage ? (
+        {canAddManualItems ? (
           <View style={[styles.card, { backgroundColor: theme.card }]}>
             <Text style={[styles.cardTitle, { color: theme.text }]}>Ajouter manuellement</Text>
             <TextInput
@@ -565,7 +554,12 @@ export default function ShoppingListDetailScreen() {
                     {item.name}
                   </Text>
                   <Text style={{ color: theme.textSecondary, fontSize: 12 }}>
-                    {item.quantity || "-"} {item.unit || ""} {item.is_manual_addition ? "- Manuel" : ""}
+                    {item.quantity || "-"} {item.unit || ""}{" "}
+                    {item.is_manual_addition
+                      ? item.created_by?.name
+                        ? `- ajouté par ${item.created_by.name}`
+                        : "- ajouté manuellement"
+                      : ""}
                   </Text>
                   {item.is_checked && item.checked_by?.name ? (
                     <View style={[styles.checkedByTag, { backgroundColor: `${theme.tint}22`, borderColor: theme.tint }]}>

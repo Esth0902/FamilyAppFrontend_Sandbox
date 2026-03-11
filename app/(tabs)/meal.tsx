@@ -157,6 +157,10 @@ export default function MealScreen() {
                         }
                         return;
                     }
+                    if (Number(error?.status) === 401) {
+                        router.replace("/");
+                        return;
+                    }
                     console.error("Erreur chargement config repas:", error);
                 } finally {
                     if (!cancelled) {
@@ -170,7 +174,7 @@ export default function MealScreen() {
             return () => {
                 cancelled = true;
             };
-        }, [])
+        }, [router])
     );
 
     return (

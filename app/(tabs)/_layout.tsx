@@ -65,7 +65,7 @@ export default function TabsLayout() {
             <Tabs.Screen
                 name="tasks"
                 options={{
-                    title: "Taches",
+                    title: "Tâches",
                     tabBarIcon: ({ color, focused }) => (
                         <Ionicons
                             name={focused ? "checkbox" : "checkbox-outline"}

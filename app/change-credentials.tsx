@@ -60,12 +60,12 @@ export default function ChangeCredentialsScreen() {
 
     const onSubmit = async () => {
         if (!email.trim() || !password || !passwordConfirm) {
-            Alert.alert("Mise a jour", "Merci de compléter tous les champs.");
+            Alert.alert("Mise à jour", "Merci de compléter tous les champs.");
             return;
         }
 
         if (password !== passwordConfirm) {
-            Alert.alert("Mise a jour", "Les mots de passe ne correspondent pas.");
+            Alert.alert("Mise à jour", "Les mots de passe ne correspondent pas.");
             return;
         }
 
@@ -97,7 +97,7 @@ export default function ChangeCredentialsScreen() {
                 return;
             }
 
-            Alert.alert("Mise a jour", "Identifiants mis à jour.");
+            Alert.alert("Mise à jour", "Identifiants mis à jour.");
             router.replace("/(tabs)/home");
         } catch (error: any) {
             Alert.alert("Erreur", error?.message || "Impossible de mettre à jour les identifiants.");
@@ -132,7 +132,7 @@ export default function ChangeCredentialsScreen() {
                 <View style={styles.passwordFieldContainer}>
                     <TextInput
                         style={[styles.input, styles.passwordInput, { backgroundColor: theme.card, color: theme.text, borderColor: theme.icon }]}
-                        placeholder="Minimum 8 caracteres"
+                        placeholder="Minimum 8 caractères"
                         placeholderTextColor={theme.textSecondary}
                         secureTextEntry={!showPassword}
                         value={password}

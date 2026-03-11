@@ -19,10 +19,22 @@ type DashboardPoll = {
   id: number;
 };
 
+type DashboardTaskSummary = {
+  enabled: boolean;
+  range?: {
+    from: string;
+    to: string;
+  };
+  todo_count?: number;
+  done_count?: number;
+  validated_count?: number;
+};
+
 type DashboardResponse = {
   polls_open?: DashboardPoll[];
   polls_closed?: DashboardPoll[];
   polls?: DashboardPoll[];
+  tasks_summary?: DashboardTaskSummary;
 };
 
 export default function DashboardScreen() {
@@ -54,6 +66,10 @@ export default function DashboardScreen() {
   const pollsOpenCount = data?.polls_open?.length ?? 0;
   const pollsClosedCount = data?.polls_closed?.length ?? 0;
   const pollsTotalCount = data?.polls?.length ?? 0;
+  const tasksSummary = data?.tasks_summary;
+  const tasksTodoCount = tasksSummary?.todo_count ?? 0;
+  const tasksDoneCount = tasksSummary?.done_count ?? 0;
+  const tasksValidatedCount = tasksSummary?.validated_count ?? 0;
 
   if (loading) {
     return (
@@ -90,6 +106,28 @@ export default function DashboardScreen() {
                 <Text style={[styles.cardTitle, { color: theme.text }]}>Mes sondages</Text>
                 <Text style={[styles.cardDescription, { color: theme.textSecondary }]}>
                   Ouverts : {pollsOpenCount} | Cloturés : {pollsClosedCount} | Total : {pollsTotalCount}
+                </Text>
+              </View>
+              <MaterialCommunityIcons name="chevron-right" size={20} color={theme.textSecondary} />
+            </View>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.card, { backgroundColor: colorScheme === "dark" ? "#1E1E1E" : "#FFF", marginTop: 10 }]}
+            onPress={() => router.push("/(tabs)/tasks")}
+            activeOpacity={0.7}
+          >
+            <View style={[styles.cardAccent, { backgroundColor: "#50BFA5" }]} />
+            <View style={styles.cardContent}>
+              <View style={[styles.iconContainer, { backgroundColor: "rgba(80, 191, 165, 0.12)" }]}>
+                <MaterialCommunityIcons name="checkbox-marked-circle-outline" size={28} color="#50BFA5" />
+              </View>
+              <View style={styles.textContainer}>
+                <Text style={[styles.cardTitle, { color: theme.text }]}>Mes tâches</Text>
+                <Text style={[styles.cardDescription, { color: theme.textSecondary }]}>
+                  {tasksSummary?.enabled
+                    ? `À faire : ${tasksTodoCount} | Réalisées : ${tasksDoneCount} | Validées : ${tasksValidatedCount}`
+                    : "Module tâches désactivé"}
                 </Text>
               </View>
               <MaterialCommunityIcons name="chevron-right" size={20} color={theme.textSecondary} />
@@ -164,4 +202,3 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
 });
-
