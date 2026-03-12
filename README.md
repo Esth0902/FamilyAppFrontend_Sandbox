@@ -16,6 +16,21 @@ This is an [Expo](https://expo.dev) project created with [`create-expo-app`](htt
    npx expo start
    ```
 
+## Configuration API (local / en ligne)
+
+1. Créer `frontend/.env` à partir de `frontend/.env.example`.
+2. Renseigner les URLs locales et en ligne.
+3. Démarrer en mode local ou en ligne :
+
+   ```bash
+   npm run start:local
+   npm run start:online
+   ```
+
+Le mode actif est piloté par `EXPO_PUBLIC_API_MODE` et résout automatiquement :
+- `EXPO_PUBLIC_API_URL_LOCAL` / `EXPO_PUBLIC_API_URL_ONLINE`
+- `EXPO_PUBLIC_REVERB_*_LOCAL` / `EXPO_PUBLIC_REVERB_*_ONLINE` (si définis)
+
 In the output, you'll find options to open the app in a
 
 - [development build](https://docs.expo.dev/develop/development-builds/introduction/)

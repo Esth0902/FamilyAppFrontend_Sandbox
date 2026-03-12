@@ -1,6 +1,10 @@
 import * as SecureStore from "expo-secure-store";
+import { resolvePublicApiUrl } from "@/src/config/public-env";
 
-export const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL;
+const trimRightSlash = (value: string) => value.replace(/\/+$/, "");
+
+const resolvedApiBaseUrl = resolvePublicApiUrl();
+export const API_BASE_URL = resolvedApiBaseUrl ? trimRightSlash(resolvedApiBaseUrl) : null;
 
 const parseJsonSafe = async (response: Response) => {
     const text = await response.text();
@@ -19,7 +23,7 @@ export const apiFetch = async (endpoint: string, options: RequestInit = {}) => {
     if (!API_BASE_URL) {
         throw {
             status: 0,
-            message: "EXPO_PUBLIC_API_URL est manquant.",
+            message: "Configuration API manquante (EXPO_PUBLIC_API_URL ou EXPO_PUBLIC_API_URL_LOCAL/ONLINE).",
         };
     }
 

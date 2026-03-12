@@ -41,7 +41,7 @@ export default function ForgotPasswordScreen() {
         }
 
         if (!API_BASE_URL) {
-            Alert.alert("Erreur", "EXPO_PUBLIC_API_URL est manquant.");
+            Alert.alert("Erreur", "Configuration API manquante. Vérifie EXPO_PUBLIC_API_MODE et EXPO_PUBLIC_API_URL_*.");
             return;
         }
 
@@ -181,4 +181,3 @@ const styles = StyleSheet.create({
         fontWeight: "bold",
     },
 });
-

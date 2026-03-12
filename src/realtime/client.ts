@@ -1,6 +1,13 @@
 import * as SecureStore from "expo-secure-store";
 
 import { API_BASE_URL } from "@/src/api/client";
+import {
+  resolvePublicPusherCluster,
+  resolvePublicReverbHost,
+  resolvePublicReverbKey,
+  resolvePublicReverbPort,
+  resolvePublicReverbScheme,
+} from "@/src/config/public-env";
 
 export type HouseholdRealtimeMessage = {
   module?: string;
@@ -40,7 +47,7 @@ const resolveApiBase = () => {
 };
 
 const resolveReverbHost = () => {
-  const explicit = process.env.EXPO_PUBLIC_REVERB_HOST?.trim();
+  const explicit = resolvePublicReverbHost();
   if (explicit) {
     return explicit;
   }
@@ -58,7 +65,7 @@ const resolveReverbHost = () => {
 };
 
 const resolveReverbPort = () => {
-  const explicit = Number(process.env.EXPO_PUBLIC_REVERB_PORT);
+  const explicit = Number(resolvePublicReverbPort());
   if (Number.isFinite(explicit) && explicit > 0) {
     return explicit;
   }
@@ -66,7 +73,7 @@ const resolveReverbPort = () => {
 };
 
 const resolveReverbScheme = () => {
-  const explicit = process.env.EXPO_PUBLIC_REVERB_SCHEME?.toLowerCase();
+  const explicit = resolvePublicReverbScheme()?.toLowerCase();
   if (explicit === "http" || explicit === "https") {
     return explicit;
   }
@@ -93,7 +100,7 @@ const resolveRealtimeConfig = () => {
 
   const port = resolveReverbPort();
   const scheme = resolveReverbScheme();
-  const key = process.env.EXPO_PUBLIC_REVERB_KEY?.trim() || "familyapp-local-key";
+  const key = resolvePublicReverbKey() || "familyapp-local-key";
 
   return {
     key,
@@ -135,7 +142,7 @@ const getOrCreatePusher = async (): Promise<PusherInstance | null> => {
     }
 
     const pusher = new Pusher(config.key, {
-      cluster: process.env.EXPO_PUBLIC_PUSHER_APP_CLUSTER || "mt1",
+      cluster: resolvePublicPusherCluster() || "mt1",
       wsHost: config.host,
       wsPort: config.port,
       wssPort: config.port,
