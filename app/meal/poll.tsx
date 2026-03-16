@@ -31,7 +31,11 @@ import {
 } from "@/src/features/shopping-list/list-utils";
 import { ShoppingListPickerModal } from "@/src/features/shopping-list/shopping-list-picker-modal";
 import { subscribeToHouseholdRealtime } from "@/src/realtime/client";
-import { getStoredUser } from "@/src/session/user-cache";
+import {
+  getStoredUserStateSnapshot,
+  refreshStoredUserFromStorage,
+  useStoredUserState,
+} from "@/src/session/user-cache";
 import { addDaysFromIso, addDaysIso, parseOptionalIsoDate, toIsoDate, todayIso } from "@/src/utils/date";
 
 type Recipe = {
@@ -73,6 +77,21 @@ type MealPlanAssignment = {
   meal_type: MealType;
   recipe_id: number;
   servings: number;
+};
+
+type AiPreviewIngredient = {
+  name: string;
+  quantity: number;
+  unit: string;
+  category: string;
+};
+
+type AiPreviewRecipe = {
+  title: string;
+  description: string;
+  instructions: string;
+  type: string;
+  ingredients: AiPreviewIngredient[];
 };
 
 const MEAL_TYPES: { label: string; value: MealType }[] = [
@@ -174,17 +193,44 @@ const buildWeekSlots = (startIso?: string | null, endIso?: string | null) => {
   return slots;
 };
 
+const normalizeAiPreviewRecipe = (payload: any): AiPreviewRecipe | null => {
+  const title = String(payload?.title ?? "").trim();
+  if (!title) {
+    return null;
+  }
+
+  const ingredientsSource = Array.isArray(payload?.ingredients) ? payload.ingredients : [];
+  const ingredients = ingredientsSource.map((ingredient: any) => {
+    const quantityRaw = Number(ingredient?.quantity);
+    const quantity = Number.isFinite(quantityRaw) && quantityRaw > 0 ? quantityRaw : 1;
+
+    return {
+      name: String(ingredient?.name ?? "ingredient").trim() || "ingrédient",
+      quantity,
+      unit: String(ingredient?.unit ?? "unite").trim() || "unité",
+      category: String(ingredient?.category ?? "autre").trim() || "autre",
+    };
+  });
+
+  return {
+    title,
+    description: String(payload?.description ?? ""),
+    instructions: String(payload?.instructions ?? ""),
+    type: String(payload?.type ?? "plat principal"),
+    ingredients,
+  };
+};
+
 export default function MealPollScreen() {
   const router = useRouter();
   const colorScheme = useColorScheme();
   const theme = Colors[colorScheme ?? "light"];
+  const { householdId, role } = useStoredUserState();
+  const isParent = role === "parent";
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [aiLoading, setAiLoading] = useState(false);
-
-  const [isParent, setIsParent] = useState(false);
-  const [householdId, setHouseholdId] = useState<number | null>(null);
 
   const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [activePoll, setActivePoll] = useState<Poll | null>(null);
@@ -204,7 +250,7 @@ export default function MealPollScreen() {
   const [selectedRecipeIdsForCreation, setSelectedRecipeIdsForCreation] = useState<number[]>([]);
 
   const [manualTitle, setManualTitle] = useState("");
-  const [aiPreview, setAiPreview] = useState<any | null>(null);
+  const [aiPreview, setAiPreview] = useState<AiPreviewRecipe | null>(null);
 
   const [draftVoteOptionIds, setDraftVoteOptionIds] = useState<number[]>([]);
   const shakeAnim = useRef(new Animated.Value(0)).current;
@@ -276,19 +322,15 @@ export default function MealPollScreen() {
     }
 
     try {
-      const user = await getStoredUser();
-
-      const hid = user?.household_id ?? user?.households?.[0]?.id ?? null;
-      const role = user?.households?.[0]?.pivot?.role ?? user?.role;
-
-      setHouseholdId(hid);
-      setIsParent(role === "parent");
+      await refreshStoredUserFromStorage();
+      const sessionState = getStoredUserStateSnapshot();
+      const currentRole = sessionState.role ?? role;
 
       let configuredDuration = 24;
       let configuredMaxVotes = 3;
       let configuredDefaultServings = 4;
 
-      if (role === "parent") {
+      if (currentRole === "parent") {
         try {
           const configResponse = await apiFetch("/households/config");
           const mealsSettings = configResponse?.config?.modules?.meals?.settings ?? {};
@@ -319,7 +361,7 @@ export default function MealPollScreen() {
 
       if (poll) {
         createDefaultsAppliedRef.current = false;
-      } else if (role === "parent" && !createDefaultsAppliedRef.current) {
+      } else if (currentRole === "parent" && !createDefaultsAppliedRef.current) {
         setDurationHours(configuredDuration);
         setMaxVotesPerUser(configuredMaxVotes);
         setPlanningStartDate(todayIso());
@@ -334,7 +376,7 @@ export default function MealPollScreen() {
         setDraftVoteOptionIds(mineFromPayload);
       }
 
-      if (poll?.status === "closed" && role === "parent") {
+      if (poll?.status === "closed" && currentRole === "parent") {
         const defaultSelection = [...poll.options]
           .filter((option) => option.votes_count > 0)
           .sort((a, b) => b.votes_count - a.votes_count)
@@ -372,7 +414,7 @@ export default function MealPollScreen() {
         setLoading(false);
       }
     }
-  }, []);
+  }, [role]);
 
   useFocusEffect(
     useCallback(() => {
@@ -620,7 +662,12 @@ export default function MealPollScreen() {
         method: "POST",
         body: JSON.stringify({ title }),
       });
-      setAiPreview(preview);
+      const normalizedPreview = normalizeAiPreviewRecipe(preview);
+      if (!normalizedPreview) {
+        Alert.alert("IA", "La réponse IA est invalide. Réessaie avec un autre intitulé.");
+        return;
+      }
+      setAiPreview(normalizedPreview);
     } catch (error: any) {
       Alert.alert("IA", error?.message || "Impossible de générer la recette IA.");
     } finally {
@@ -633,22 +680,12 @@ export default function MealPollScreen() {
 
     setSaving(true);
     try {
-      const ingredients = Array.isArray(aiPreview.ingredients) ? aiPreview.ingredients : [];
-
       const recipe = await apiFetch("/recipes/ai-store", {
         method: "POST",
         body: JSON.stringify({
           ...aiPreview,
           household_id: householdId,
-          type: String(aiPreview.type ?? "plat principal"),
-          description: String(aiPreview.description ?? ""),
-          instructions: String(aiPreview.instructions ?? ""),
-          ingredients: ingredients.map((ing: any) => ({
-            name: String(ing?.name ?? "ingredient").trim(),
-            quantity: Number(ing?.quantity ?? 1),
-            unit: String(ing?.unit ?? "unite"),
-            category: String(ing?.category ?? "autre"),
-          })),
+          ingredients: aiPreview.ingredients,
         }),
       });
 
@@ -1580,7 +1617,7 @@ export default function MealPollScreen() {
           <View style={[styles.card, { backgroundColor: theme.card, alignItems: "center" }]}> 
             <MaterialCommunityIcons name="vote-outline" size={44} color={theme.tint} />
             <Text style={[styles.cardTitle, { color: theme.text, textAlign: "center", marginTop: 10 }]}>Aucun sondage actif</Text>
-            <Text style={[styles.cardText, { color: theme.textSecondary, textAlign: "center" }]}>Un parent doit ouvrir un sondage pour démarrer les votes.</Text>
+            <Text style={[styles.cardText, { color: theme.textSecondary, textAlign: "center" }]}>Un sondage doit être ouvert pour démarrer les votes.</Text>
           </View>
         ) : activePoll.status === "open" ? (
           renderVotingView()
@@ -1726,7 +1763,7 @@ export default function MealPollScreen() {
 
       <ShoppingListPickerModal
         visible={shoppingPickerVisible}
-        title="Ajouter le meal plan à la liste de courses"
+        title="Ajouter le repas à la liste de courses"
         confirmLabel="Ajouter les ingrédients"
         theme={theme}
         saving={saving}

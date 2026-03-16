@@ -6,6 +6,8 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { Colors } from '@/constants/theme';
 import { apiFetch } from "@/src/api/client";
 import Constants from "expo-constants";
+import { clearStoredUser, getStoredUser, persistStoredUser, setStoredUserCache } from "@/src/session/user-cache";
+import { AppErrorBoundary } from "@/src/components/app-error-boundary";
 
 type NotificationsModule = typeof import("expo-notifications");
 
@@ -54,16 +56,9 @@ export default function RootLayout() {
                     return;
                 }
 
-                const userStr = await SecureStore.getItemAsync("user");
-                if (userStr) {
-                    try {
-                        const user = JSON.parse(userStr);
-                        if (user?.must_change_password) {
-                            return;
-                        }
-                    } catch {
-                        // Ignore malformed user cache.
-                    }
+                const user = await getStoredUser();
+                if (user?.must_change_password) {
+                    return;
                 }
 
                 const Notifications = await loadNotificationsModule();
@@ -99,7 +94,7 @@ export default function RootLayout() {
                         for (const notification of notifications) {
                             await Notifications.scheduleNotificationAsync({
                                 content: {
-                                    title: String(notification?.title ?? 'FamilyApp'),
+                                    title: String(notification?.title ?? 'FamilyFlow'),
                                     body: String(notification?.body ?? ''),
                                     data: notification?.data ?? {},
                                 },
@@ -138,22 +133,14 @@ export default function RootLayout() {
         const checkAuth = async () => {
             try {
                 const token = await SecureStore.getItemAsync('authToken');
-                const userStr = await SecureStore.getItemAsync('user');
-                let user = null;
-                if (userStr) {
-                    try {
-                        user = JSON.parse(userStr);
-                    } catch {
-                        await SecureStore.deleteItemAsync("user");
-                    }
-                }
+                let user = token ? await getStoredUser() : null;
 
                 if (token && !user) {
                     try {
                         const meResponse = await apiFetch("/me");
                         if (meResponse?.user) {
                             user = meResponse.user;
-                            await SecureStore.setItemAsync("user", JSON.stringify(meResponse.user));
+                            await persistStoredUser(meResponse.user);
                         }
                     } catch {
                         // Token invalid or backend unavailable: handled below.
@@ -162,7 +149,9 @@ export default function RootLayout() {
 
                 if (token && !user) {
                     await SecureStore.deleteItemAsync("authToken");
-                    await SecureStore.deleteItemAsync("user");
+                    await clearStoredUser();
+                } else if (!token) {
+                    setStoredUserCache(null, true);
                 }
 
                 const refreshedToken = await SecureStore.getItemAsync('authToken');
@@ -224,7 +213,9 @@ export default function RootLayout() {
 
     return (
         <GestureHandlerRootView style={{ flex: 1 }}>
-            <Slot />
+            <AppErrorBoundary>
+                <Slot />
+            </AppErrorBoundary>
         </GestureHandlerRootView>
     );
 }

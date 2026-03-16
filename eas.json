@@ -6,17 +6,36 @@
   "build": {
     "development": {
       "developmentClient": true,
-      "distribution": "internal"
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_API_MODE": "local"
+      }
     },
 
     "preview": {
+      "env": {
+        "EXPO_PUBLIC_API_MODE": "online",
+        "EXPO_PUBLIC_API_URL_ONLINE": "https://api.familyapp-devlab.ovh/api",
+        "EXPO_PUBLIC_REVERB_PORT_ONLINE": "443",
+        "EXPO_PUBLIC_REVERB_SCHEME_ONLINE": "https",
+        "EXPO_PUBLIC_REVERB_KEY_ONLINE": "familyapp-prod-key",
+        "EXPO_PUBLIC_PUSHER_APP_CLUSTER": "mt1"
+      },
       "android": {
         "buildType": "apk"
       }
     },
 
     "production": {
-      "autoIncrement": true
+      "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_API_MODE": "online",
+        "EXPO_PUBLIC_API_URL_ONLINE": "https://api.familyapp-devlab.ovh/api",
+        "EXPO_PUBLIC_REVERB_PORT_ONLINE": "443",
+        "EXPO_PUBLIC_REVERB_SCHEME_ONLINE": "https",
+        "EXPO_PUBLIC_REVERB_KEY_ONLINE": "familyapp-prod-key",
+        "EXPO_PUBLIC_PUSHER_APP_CLUSTER": "mt1"
+      }
     }
   },
   "submit": {

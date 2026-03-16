@@ -51,17 +51,17 @@ export default function PasswordResetScreen() {
 
     const onSubmit = async () => {
         if (!token) {
-            Alert.alert("Reinitialisation", "Le token de reinitialisation est manquant.");
+            Alert.alert("Réinitialisation", "Le token de réinitialisation est manquant.");
             return;
         }
 
         if (!email.trim() || !password || !passwordConfirmation) {
-            Alert.alert("Reinitialisation", "Merci de remplir tous les champs.");
+            Alert.alert("Réinitialisation", "Merci de remplir tous les champs.");
             return;
         }
 
         if (password !== passwordConfirmation) {
-            Alert.alert("Reinitialisation", "La confirmation du mot de passe est invalide.");
+            Alert.alert("Réinitialisation", "La confirmation du mot de passe est invalide.");
             return;
         }
 
@@ -93,11 +93,11 @@ export default function PasswordResetScreen() {
                 return;
             }
 
-            Alert.alert("Reinitialisation", data?.message || "Mot de passe reinitialise.");
+            Alert.alert("Réinitialisation", data?.message || "Mot de passe réinitialisé.");
             router.replace("/login");
         } catch (error) {
             console.error("Erreur reset password:", error);
-            Alert.alert("Erreur reseau", "Impossible de contacter le serveur.");
+            Alert.alert("Erreur réseau", "Impossible de contacter le serveur.");
         } finally {
             setLoading(false);
         }
@@ -182,7 +182,7 @@ export default function PasswordResetScreen() {
                             onPress={onSubmit}
                             activeOpacity={0.8}
                         >
-                            <Text style={styles.primaryButtonText}>Reinitialiser le mot de passe</Text>
+                            <Text style={styles.primaryButtonText}>Réinitialiser le mot de passe</Text>
                         </TouchableOpacity>
                     )}
                 </View>

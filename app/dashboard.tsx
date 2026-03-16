@@ -103,7 +103,7 @@ export default function DashboardScreen() {
                 <MaterialCommunityIcons name="vote" size={28} color={theme.tint} />
               </View>
               <View style={styles.textContainer}>
-                <Text style={[styles.cardTitle, { color: theme.text }]}>Mes sondages</Text>
+                <Text style={[styles.cardTitle, { color: theme.text }]}>Sondages</Text>
                 <Text style={[styles.cardDescription, { color: theme.textSecondary }]}>
                   Ouverts : {pollsOpenCount} | Cloturés : {pollsClosedCount} | Total : {pollsTotalCount}
                 </Text>
@@ -123,7 +123,7 @@ export default function DashboardScreen() {
                 <MaterialCommunityIcons name="checkbox-marked-circle-outline" size={28} color="#50BFA5" />
               </View>
               <View style={styles.textContainer}>
-                <Text style={[styles.cardTitle, { color: theme.text }]}>Mes tâches</Text>
+                <Text style={[styles.cardTitle, { color: theme.text }]}>Tâches</Text>
                 <Text style={[styles.cardDescription, { color: theme.textSecondary }]}>
                   {tasksSummary?.enabled
                     ? `À faire : ${tasksTodoCount} | Réalisées : ${tasksDoneCount} | Validées : ${tasksValidatedCount}`

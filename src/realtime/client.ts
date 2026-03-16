@@ -64,12 +64,12 @@ const resolveReverbHost = () => {
   }
 };
 
-const resolveReverbPort = () => {
+const resolveReverbPort = (scheme: "http" | "https") => {
   const explicit = Number(resolvePublicReverbPort());
   if (Number.isFinite(explicit) && explicit > 0) {
     return explicit;
   }
-  return 8080;
+  return scheme === "https" ? 443 : 8080;
 };
 
 const resolveReverbScheme = () => {
@@ -98,8 +98,8 @@ const resolveRealtimeConfig = () => {
     return null;
   }
 
-  const port = resolveReverbPort();
   const scheme = resolveReverbScheme();
+  const port = resolveReverbPort(scheme);
   const key = resolvePublicReverbKey() || "familyapp-local-key";
 
   return {

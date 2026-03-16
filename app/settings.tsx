@@ -15,6 +15,12 @@ import * as SecureStore from "expo-secure-store";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { Colors } from "@/constants/theme";
 import { apiFetch } from "@/src/api/client";
+import {
+    normalizeStoredUser,
+    persistStoredUser,
+    switchStoredHousehold,
+    type StoredUser,
+} from "@/src/session/user-cache";
 
 type HouseholdPivot = {
     role?: string;
@@ -33,6 +39,7 @@ type ApiUser = {
     id: number;
     name: string;
     email: string;
+    household_id?: number | null;
     households?: HouseholdMembership[];
 };
 
@@ -52,6 +59,7 @@ export default function SettingsScreen() {
     const [loading, setLoading] = useState(true);
     const [savingProfile, setSavingProfile] = useState(false);
     const [savingNicknameFor, setSavingNicknameFor] = useState<number | null>(null);
+    const [switchingHouseholdFor, setSwitchingHouseholdFor] = useState<number | null>(null);
 
     const [user, setUser] = useState<ApiUser | null>(null);
     const [email, setEmail] = useState("");
@@ -74,18 +82,50 @@ export default function SettingsScreen() {
         setHouseholdNicknames(nextNicknames);
     }, []);
 
-    const persistUserCache = useCallback(async (apiUser: ApiUser) => {
-        const normalizedUser = {
-            ...apiUser,
-            household_id: apiUser.households && apiUser.households.length > 0
-                ? apiUser.households[0].id
-                : null,
-        };
+    const households = useMemo(() => user?.households ?? [], [user?.households]);
+    const activeHouseholdId = useMemo(() => {
+        const explicit = Number(user?.household_id ?? 0);
+        if (Number.isFinite(explicit) && explicit > 0) {
+            return explicit;
+        }
 
-        await SecureStore.setItemAsync("user", JSON.stringify(normalizedUser));
+        const firstHouseholdId = Number(households[0]?.id ?? 0);
+        return Number.isFinite(firstHouseholdId) && firstHouseholdId > 0 ? firstHouseholdId : null;
+    }, [households, user?.household_id]);
+
+    const resolveCachedHouseholdId = useCallback(async (): Promise<number | null> => {
+        try {
+            const rawUser = await SecureStore.getItemAsync("user");
+            if (!rawUser) {
+                return null;
+            }
+
+            const parsedUser = JSON.parse(rawUser) as { household_id?: number | string };
+            const parsedId = Number(parsedUser?.household_id ?? 0);
+            return Number.isFinite(parsedId) && parsedId > 0 ? Math.trunc(parsedId) : null;
+        } catch {
+            return null;
+        }
     }, []);
 
-    const loadProfile = useCallback(async () => {
+    const persistUserCache = useCallback(async (apiUser: ApiUser, preferredHouseholdId?: number | null) => {
+        const cachedHouseholdId = await resolveCachedHouseholdId();
+        const resolvedPreferredHouseholdId = preferredHouseholdId ?? activeHouseholdId ?? cachedHouseholdId;
+
+        const normalizedUser = normalizeStoredUser(
+            apiUser as StoredUser,
+            resolvedPreferredHouseholdId
+        ) as ApiUser | null;
+
+        if (!normalizedUser) {
+            return null;
+        }
+
+        await persistStoredUser(normalizedUser as StoredUser);
+        return normalizedUser;
+    }, [activeHouseholdId, resolveCachedHouseholdId]);
+
+    const loadProfile = useCallback(async (preferredHouseholdId?: number | null) => {
         try {
             const response = await apiFetch("/me");
             const apiUser = response?.user as ApiUser | undefined;
@@ -94,8 +134,8 @@ export default function SettingsScreen() {
                 throw new Error("Profil introuvable.");
             }
 
-            hydrateFromUser(apiUser);
-            await persistUserCache(apiUser);
+            const normalizedUser = await persistUserCache(apiUser, preferredHouseholdId);
+            hydrateFromUser(normalizedUser ?? apiUser);
         } catch (error: any) {
             if (Number(error?.status) === 401) {
                 await SecureStore.deleteItemAsync("authToken");
@@ -114,8 +154,6 @@ export default function SettingsScreen() {
         void loadProfile();
     }, [loadProfile]);
 
-    const households = useMemo(() => user?.households ?? [], [user?.households]);
-
     const onSaveNickname = async (householdId: number) => {
         const nickname = (householdNicknames[householdId] ?? "").trim();
         if (!nickname) {
@@ -130,12 +168,29 @@ export default function SettingsScreen() {
                 body: JSON.stringify({ nickname }),
             });
 
-            await loadProfile();
+            await loadProfile(activeHouseholdId);
             Alert.alert("Pseudo", "Pseudo du foyer mis à jour.");
         } catch (error: any) {
             Alert.alert("Erreur", error?.message || "Impossible de mettre à jour le pseudo.");
         } finally {
             setSavingNicknameFor(null);
+        }
+    };
+
+    const onSwitchHousehold = async (householdId: number) => {
+        if (householdId === activeHouseholdId) {
+            return;
+        }
+
+        setSwitchingHouseholdFor(householdId);
+        try {
+            await switchStoredHousehold(householdId);
+            await loadProfile(householdId);
+            Alert.alert("Foyer", "Foyer actif mis à jour.");
+        } catch (error: any) {
+            Alert.alert("Erreur", error?.message || "Impossible de changer de foyer.");
+        } finally {
+            setSwitchingHouseholdFor(null);
         }
     };
 
@@ -190,8 +245,8 @@ export default function SettingsScreen() {
 
             const updatedUser = response?.user as ApiUser | undefined;
             if (updatedUser) {
-                hydrateFromUser(updatedUser);
-                await persistUserCache(updatedUser);
+                const normalizedUser = await persistUserCache(updatedUser, activeHouseholdId);
+                hydrateFromUser(normalizedUser ?? updatedUser);
             }
 
             setCurrentPassword("");
@@ -224,7 +279,7 @@ export default function SettingsScreen() {
                 </TouchableOpacity>
                 <Text style={[styles.title, { color: theme.text }]}>Paramètres utilisateur</Text>
                 <Text style={[styles.subtitle, { color: theme.textSecondary }]}>
-                    Gère tes foyers, ton pseudo, ton email et ton mot de passe.
+                    Gère tes foyers, ton pseudo, ton e-mail et ton mot de passe.
                 </Text>
             </View>
 
@@ -236,6 +291,9 @@ export default function SettingsScreen() {
                 ) : (
                     households.map((household) => {
                         const isSaving = savingNicknameFor === household.id;
+                        const isActiveHousehold = household.id === activeHouseholdId;
+                        const canSwitchHousehold = households.length > 1;
+                        const isSwitching = switchingHouseholdFor === household.id;
 
                         return (
                             <View
@@ -245,9 +303,34 @@ export default function SettingsScreen() {
                                 <View style={styles.householdMetaRow}>
                                     <Text style={[styles.householdName, { color: theme.text }]}>{household.name}</Text>
                                     <Text style={[styles.householdRole, { color: theme.textSecondary }]}>
-                                        Role: {getHouseholdRole(household)}
+                                        Rôle : {getHouseholdRole(household)}
                                     </Text>
                                 </View>
+
+                                {canSwitchHousehold ? (
+                                    <View style={styles.householdSwitchRow}>
+                                        <Text style={[styles.householdSwitchHint, { color: theme.textSecondary }]}>
+                                            {isActiveHousehold ? "Foyer actif" : "Foyer disponible"}
+                                        </Text>
+                                        {isActiveHousehold ? (
+                                            <View style={[styles.activeBadge, { backgroundColor: `${theme.tint}22` }]}>
+                                                <Text style={[styles.activeBadgeText, { color: theme.tint }]}>Actif</Text>
+                                            </View>
+                                        ) : (
+                                            <TouchableOpacity
+                                                style={[styles.secondaryInlineButton, { borderColor: theme.tint }]}
+                                                onPress={() => {
+                                                    void onSwitchHousehold(household.id);
+                                                }}
+                                                disabled={isSwitching}
+                                            >
+                                                <Text style={[styles.secondaryInlineButtonText, { color: theme.tint }]}>
+                                                    {isSwitching ? "Changement..." : "Utiliser ce foyer"}
+                                                </Text>
+                                            </TouchableOpacity>
+                                        )}
+                                    </View>
+                                ) : null}
 
                                 <TextInput
                                     style={[
@@ -287,12 +370,11 @@ export default function SettingsScreen() {
             </View>
 
             <View style={[styles.card, { backgroundColor: theme.card }]}>
-                <Text style={[styles.sectionTitle, { color: theme.text }]}>Compte</Text>
+                <Text style={[styles.sectionTitle, { color: theme.text }]}>Mon compte</Text>
 
-                <Text style={[styles.label, { color: theme.text }]}>Adresse email</Text>
+                <Text style={[styles.label, { color: theme.text }]}>Adresse e-mail</Text>
                 <TextInput
                     style={[styles.input, { backgroundColor: theme.background, color: theme.text, borderColor: theme.icon }]}
-                    placeholder="email@exemple.com"
                     placeholderTextColor={theme.textSecondary}
                     autoCapitalize="none"
                     keyboardType="email-address"
@@ -304,7 +386,6 @@ export default function SettingsScreen() {
                 <View style={styles.passwordFieldContainer}>
                     <TextInput
                         style={[styles.input, styles.passwordInput, { backgroundColor: theme.background, color: theme.text, borderColor: theme.icon }]}
-                        placeholder="Obligatoire pour valider"
                         placeholderTextColor={theme.textSecondary}
                         secureTextEntry={!showCurrentPassword}
                         value={currentPassword}
@@ -328,7 +409,6 @@ export default function SettingsScreen() {
                 <View style={styles.passwordFieldContainer}>
                     <TextInput
                         style={[styles.input, styles.passwordInput, { backgroundColor: theme.background, color: theme.text, borderColor: theme.icon }]}
-                        placeholder="Laisse vide si tu changes seulement l'email"
                         placeholderTextColor={theme.textSecondary}
                         secureTextEntry={!showNewPassword}
                         value={newPassword}
@@ -348,7 +428,7 @@ export default function SettingsScreen() {
                     </TouchableOpacity>
                 </View>
 
-                <Text style={[styles.label, { color: theme.text }]}>Confirmation nouveau mot de passe</Text>
+                <Text style={[styles.label, { color: theme.text }]}>Confirmation du nouveau mot de passe</Text>
                 <View style={styles.passwordFieldContainer}>
                     <TextInput
                         style={[styles.input, styles.passwordInput, { backgroundColor: theme.background, color: theme.text, borderColor: theme.icon }]}
@@ -462,6 +542,38 @@ const styles = StyleSheet.create({
     householdRole: {
         fontSize: 12,
         fontWeight: "600",
+    },
+    householdSwitchRow: {
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "space-between",
+        marginBottom: 10,
+        gap: 8,
+    },
+    householdSwitchHint: {
+        fontSize: 12,
+        fontWeight: "500",
+    },
+    activeBadge: {
+        borderRadius: 999,
+        paddingHorizontal: 10,
+        paddingVertical: 5,
+    },
+    activeBadgeText: {
+        fontSize: 12,
+        fontWeight: "700",
+    },
+    secondaryInlineButton: {
+        borderRadius: 10,
+        borderWidth: 1,
+        paddingVertical: 8,
+        paddingHorizontal: 10,
+        alignItems: "center",
+        justifyContent: "center",
+    },
+    secondaryInlineButtonText: {
+        fontSize: 13,
+        fontWeight: "700",
     },
     label: {
         fontSize: 13,

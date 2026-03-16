@@ -77,6 +77,20 @@ export default function TabsLayout() {
             />
 
             <Tabs.Screen
+                name="budget"
+                options={{
+                    title: "Budget",
+                    tabBarIcon: ({ color }) => (
+                        <MaterialCommunityIcons
+                            name="piggy-bank-outline"
+                            size={24}
+                            color={color}
+                        />
+                    ),
+                }}
+            />
+
+            <Tabs.Screen
                 name="calendar"
                 options={{
                     title: "Calendrier",

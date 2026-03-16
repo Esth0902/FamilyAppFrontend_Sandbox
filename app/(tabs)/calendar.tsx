@@ -212,7 +212,7 @@ const mealTypeColor = (value: string) => {
 };
 
 const taskStatusLabel = (value: string) => {
-  if (isTaskStatus(value, TASK_STATUS_TODO)) return "à faire";
+  if (isTaskStatus(value, TASK_STATUS_TODO)) return "À faire";
   if (isTaskStatus(value, TASK_STATUS_DONE)) return "Réalisée";
   if (isTaskStatus(value, TASK_STATUS_CANCELLED)) return "Annulée";
   return value;
@@ -913,12 +913,12 @@ export default function CalendarScreen() {
 
   const handleCreateMealPlan = async () => {
     if (!permissions.can_manage_meal_plan) {
-      Alert.alert("Calendrier", "Seul un parent peut créer un meal plan.");
+      Alert.alert("Calendrier", "Seul un parent peut planifier les repas.");
       return;
     }
 
     if (!isValidIsoDate(mealPlanDate)) {
-      Alert.alert("Calendrier", "La date du meal plan doit être au format YYYY-MM-DD.");
+      Alert.alert("Calendrier", "La date de planification du repas doit être au format YYYY-MM-DD.");
       return;
     }
 
@@ -956,7 +956,7 @@ export default function CalendarScreen() {
       resetTaskForm();
       await loadBoard({ silent: true });
     } catch (error: any) {
-      Alert.alert("Calendrier", error?.message || "Impossible de créer ce meal plan.");
+      Alert.alert("Calendrier", error?.message || "Impossible de planifier ce repas.");
     } finally {
       setSaving(false);
     }
@@ -1070,7 +1070,7 @@ export default function CalendarScreen() {
     }
 
     if (!isValidIsoDate(mealPlanDate)) {
-      Alert.alert("Calendrier", "La date du meal plan doit être au format YYYY-MM-DD.");
+      Alert.alert("Calendrier", "La date de planification du repas doit être au format YYYY-MM-DD.");
       return;
     }
 
@@ -1106,14 +1106,14 @@ export default function CalendarScreen() {
       resetMealPlanForm();
       await loadBoard({ silent: true });
     } catch (error: any) {
-      Alert.alert("Calendrier", error?.message || "Impossible de modifier ce meal plan.");
+      Alert.alert("Calendrier", error?.message || "Impossible de modifier ce repas.");
     } finally {
       setSaving(false);
     }
   };
 
   const confirmDeleteMealPlan = (entry: MealPlanEntry) => {
-    Alert.alert("Supprimer le meal plan", `Supprimer le repas ${mealTypeLabel(entry.meal_type).toLowerCase()} ?`, [
+    Alert.alert("Supprimer le repas", `Supprimer le repas du ${mealTypeLabel(entry.meal_type).toLowerCase()} ?`, [
       { text: "Annuler", style: "cancel" },
       {
         text: "Supprimer",
@@ -1133,7 +1133,7 @@ export default function CalendarScreen() {
       }
       await loadBoard({ silent: true });
     } catch (error: any) {
-      Alert.alert("Calendrier", error?.message || "Impossible de supprimer ce meal plan.");
+      Alert.alert("Calendrier", error?.message || "Impossible de supprimer ce repas.");
     } finally {
       setSaving(false);
     }
@@ -1141,7 +1141,7 @@ export default function CalendarScreen() {
 
   const openMealPlanShoppingListPicker = async (entry: MealPlanEntry) => {
     if (!permissions.can_manage_meal_plan) {
-      Alert.alert("Calendrier", "Seul un parent peut ajouter un meal plan à la liste de courses.");
+      Alert.alert("Calendrier", "Seul un parent peut ajouter un repas à la liste de courses.");
       return;
     }
     if (saving) {
@@ -1151,7 +1151,7 @@ export default function CalendarScreen() {
 
     const plannedRecipes = entry.recipes.filter((recipe) => Number.isInteger(recipe.id) && recipe.id > 0);
     if (plannedRecipes.length === 0) {
-      Alert.alert("Calendrier", "Ce meal plan ne contient pas de recette exploitable pour la liste de courses.");
+      Alert.alert("Calendrier", "Cette planification de repas ne contient pas de recette exploitable pour la liste de courses.");
       return;
     }
 
@@ -1205,7 +1205,7 @@ export default function CalendarScreen() {
       .map((recipe) => ({ recipeId: recipe.id, servings: clamp(Number(recipe.servings) || 1, 1, 30) }));
 
     if (plannedRecipes.length === 0) {
-      Alert.alert("Calendrier", "Aucune recette exploitable dans ce meal plan.");
+      Alert.alert("Calendrier", "Aucune recette exploitable dans cette planification de repas.");
       return;
     }
 
@@ -1484,7 +1484,7 @@ export default function CalendarScreen() {
                   <View style={styles.sectionBlock}>
               <View style={styles.sectionTitleRow}>
                 <MaterialCommunityIcons name="silverware-fork-knife" size={18} color="#F5A623" />
-                <Text style={[styles.sectionTitle, { color: theme.text }]}>Meal plan</Text>
+                <Text style={[styles.sectionTitle, { color: theme.text }]}>Repas</Text>
               </View>
               {selectedDayMeals.length > 0 ? (
                 selectedDayMeals.map((entry) => (
@@ -1571,12 +1571,12 @@ export default function CalendarScreen() {
                         </Text>
                       </View>
                     </View>
-                    <Text style={[styles.itemMetaText, { color: theme.textSecondary }]}>Assigné ?: {task.assignee.name}</Text>
+                    <Text style={[styles.itemMetaText, { color: theme.textSecondary }]}>Assigné à: {task.assignee.name}</Text>
                     {task.description ? (
                       <Text style={[styles.bodyText, { color: theme.textSecondary }]}>{task.description}</Text>
                     ) : null}
                     {task.validated_by_parent ? (
-                      <Text style={[styles.itemMetaText, { color: "#2E8B78" }]}>Validée par un parent</Text>
+                      <Text style={[styles.itemMetaText, { color: "#2E8B78" }]}>Validée</Text>
                     ) : null}
                     {task.permissions.can_toggle || (task.permissions.can_validate && !task.validated_by_parent) ? (
                       <View style={styles.itemActionsRow}>
@@ -1697,7 +1697,7 @@ export default function CalendarScreen() {
             <View style={styles.modalBackdrop}>
               <View style={[styles.modalCard, { backgroundColor: theme.card }]}>
                 <View style={styles.cardTitleRow}>
-                  <Text style={[styles.cardTitle, { color: theme.text, marginBottom: 0 }]}>Modifier le meal plan</Text>
+                  <Text style={[styles.cardTitle, { color: theme.text, marginBottom: 0 }]}>Modifier le repas</Text>
                   <TouchableOpacity onPress={closeMealPlanModal} disabled={saving}>
                     <MaterialCommunityIcons name="close" size={22} color={theme.tint} />
                   </TouchableOpacity>
@@ -1760,7 +1760,7 @@ export default function CalendarScreen() {
                     <Text style={[styles.helperText, { color: theme.textSecondary }]}>
                       {mealPlanSearch.trim().length > 0
                         ? "Aucune recette ne correspond à cette recherche."
-                        : "Aucune recette disponible pour modifier ce meal plan."}
+                        : "Aucune recette disponible pour modifier ce repas."}
                     </Text>
                   )}
 
@@ -1831,7 +1831,7 @@ export default function CalendarScreen() {
 
           <ShoppingListPickerModal
             visible={shoppingPickerVisible}
-            title={pendingMealPlanForShopping ? "Ajouter ce meal plan à la liste de courses" : "Ajouter à la liste de courses"}
+            title={pendingMealPlanForShopping ? "Ajouter ce repas à la liste de courses" : "Ajouter à la liste de courses"}
             confirmLabel="Ajouter les ingrédients"
             theme={theme}
             saving={saving}
@@ -1851,7 +1851,7 @@ export default function CalendarScreen() {
               <View style={[styles.modalCard, { backgroundColor: theme.card }]}>
                 <View style={styles.cardTitleRow}>
                   <Text style={[styles.cardTitle, { color: theme.text, marginBottom: 0 }]}>
-                    {editingEventId ? "Modifier l'événement" : createEntryType === "meal_plan" ? "Nouveau meal plan" : createEntryType === "task" ? "Nouvelle tâche" : "Nouvel événement"}
+                    {editingEventId ? "Modifier l'événement" : createEntryType === "meal_plan" ? "Nouveau repas" : createEntryType === "task" ? "Nouvelle tâche" : "Nouvel événement"}
                   </Text>
                   <TouchableOpacity onPress={closeEventModal} disabled={saving}>
                     <MaterialCommunityIcons name="close" size={22} color={theme.tint} />
@@ -1870,7 +1870,7 @@ export default function CalendarScreen() {
                             createEntryType === "event" && { borderColor: theme.tint, backgroundColor: `${theme.tint}18` },
                           ]}
                         >
-                          <Text style={{ color: theme.text }}>événement</Text>
+                          <Text style={{ color: theme.text }}>Événement</Text>
                         </TouchableOpacity>
                         <TouchableOpacity
                           onPress={() => selectCreateEntryType("meal_plan")}
@@ -1882,7 +1882,7 @@ export default function CalendarScreen() {
                           ]}
                           disabled={!permissions.can_manage_meal_plan}
                         >
-                          <Text style={{ color: theme.text }}>Meal plan</Text>
+                          <Text style={{ color: theme.text }}>Repas</Text>
                         </TouchableOpacity>
                         <TouchableOpacity
                           onPress={() => selectCreateEntryType("task")}
@@ -1899,7 +1899,7 @@ export default function CalendarScreen() {
                       </View>
                       {!permissions.can_manage_meal_plan ? (
                         <Text style={[styles.helperText, { color: theme.textSecondary }]}>
-                          La création de meal plan est réservée à un parent.
+                          La planification de repas est réservée à un parent.
                         </Text>
                       ) : null}
                       {!tasksEnabled ? (

@@ -4,10 +4,10 @@ import {
     Text,
     StyleSheet,
     TouchableOpacity,
-    useColorScheme, Platform
+    useColorScheme, Platform,
+    Image,
 } from "react-native";
 import { useRouter } from "expo-router";
-import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { Colors } from "@/constants/theme";
 
 export default function PublicHome() {
@@ -20,7 +20,11 @@ export default function PublicHome() {
 
             <View style={styles.heroSection}>
                 <View style={[styles.iconContainer, { backgroundColor: theme.card }]}>
-                    <MaterialCommunityIcons name="home-heart" size={64} color={theme.accentWarm} />
+                    <Image
+                        source={require("../assets/images/logo.png")}
+                        style={styles.logoImage}
+                        resizeMode="contain"
+                    />
                 </View>
 
                 <Text style={[styles.logoText, { color: theme.text }]}>
@@ -73,7 +77,7 @@ const styles = StyleSheet.create({
     iconContainer: {
         width: 120,
         height: 120,
-        borderRadius: 60,
+        borderRadius: 24,
         alignItems: 'center',
         justifyContent: 'center',
         marginBottom: 24,
@@ -82,6 +86,12 @@ const styles = StyleSheet.create({
         shadowOpacity: 0.1,
         shadowRadius: 20,
         elevation: 5,
+        padding: 12,
+    },
+    logoImage: {
+        width: "100%",
+        height: "100%",
+        borderRadius: 12,
     },
     logoText: {
         fontSize: 36,

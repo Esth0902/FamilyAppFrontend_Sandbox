@@ -163,7 +163,7 @@ export default function ConnectedHome() {
                             </View>
 
                             <Text style={[styles.cardText, { color: theme.textSecondary }]}>
-                                Ton espace est configuré. Accède au planning, aux repas et au budget.
+                                Ton espace est configuré. Accède au planning, aux repas, au budget et au calendrier.
                             </Text>
 
                             <TouchableOpacity

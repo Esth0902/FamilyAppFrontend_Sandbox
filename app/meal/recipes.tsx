@@ -28,7 +28,7 @@ import {
     type ShoppingListSummary,
 } from "@/src/features/shopping-list/list-utils";
 import { ShoppingListPickerModal } from "@/src/features/shopping-list/shopping-list-picker-modal";
-import { getStoredHouseholdId, getStoredUser } from "@/src/session/user-cache";
+import { useStoredUserState } from "@/src/session/user-cache";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router, Stack } from "expo-router";
 
@@ -44,11 +44,62 @@ interface Recipe {
     is_in_my_recipes?: boolean;
 }
 type IngredientForm = { name: string; quantity: string; unit: string };
+type AiSuggestion = { title: string; description: string };
+type AiPreviewIngredient = { name: string; quantity: number; unit: string; category: string };
+type AiPreviewRecipe = {
+    title: string;
+    description: string;
+    instructions: string;
+    type: string;
+    ingredients: AiPreviewIngredient[];
+};
+
+const normalizeAiSuggestion = (value: any): AiSuggestion | null => {
+    const title = String(value?.title ?? "").trim();
+    if (!title) {
+        return null;
+    }
+
+    return {
+        title,
+        description: String(value?.description ?? ""),
+    };
+};
+
+const normalizeAiPreviewRecipe = (value: any): AiPreviewRecipe | null => {
+    const title = String(value?.title ?? "").trim();
+    if (!title) {
+        return null;
+    }
+
+    const ingredientsSource = Array.isArray(value?.ingredients) ? value.ingredients : [];
+    const ingredients = ingredientsSource.map((ingredient: any) => {
+        const quantityRaw = Number(ingredient?.quantity);
+        const quantity = Number.isFinite(quantityRaw) && quantityRaw > 0 ? quantityRaw : 1;
+
+        return {
+            name: String(ingredient?.name ?? "ingredient").trim() || "ingredient",
+            quantity,
+            unit: String(ingredient?.unit ?? "unite").trim() || "unite",
+            category: String(ingredient?.category ?? "autre").trim() || "autre",
+        };
+    });
+
+    return {
+        title,
+        description: String(value?.description ?? ""),
+        instructions: String(value?.instructions ?? ""),
+        type: String(value?.type ?? "plat principal"),
+        ingredients,
+    };
+};
 
 export default function RecipesScreen() {
     const insets = useSafeAreaInsets();
     const colorScheme = useColorScheme();
     const themeColors = Colors[colorScheme ?? 'light'];
+    const { householdId, role } = useStoredUserState();
+    const isParent = role === 'parent';
 
     const [recipes, setRecipes] = useState<Recipe[]>([]);
     const [loading, setLoading] = useState(true);
@@ -59,12 +110,11 @@ export default function RecipesScreen() {
     const [modalMode, setModalMode] = useState<'choice' | 'manual' | 'ai' | 'preview'>('choice');
     const [aiPrompt, setAiPrompt] = useState('');
     const [submitting, setSubmitting] = useState(false);
-    const [aiSuggestions, setAiSuggestions] = useState<any[]>([]);
-    const [previewRecipe, setPreviewRecipe] = useState<any | null>(null);
+    const [aiSuggestions, setAiSuggestions] = useState<AiSuggestion[]>([]);
+    const [previewRecipe, setPreviewRecipe] = useState<AiPreviewRecipe | null>(null);
     const [selectedRecipe, setSelectedRecipe] = useState<Recipe | null>(null);
     const [formMode, setFormMode] = useState<'create' | 'edit'>('create');
     const [aiIntent, setAiIntent] = useState<'specific' | 'ideas'>('ideas');
-    const [isParent, setIsParent] = useState(false);
     const [shoppingPickerVisible, setShoppingPickerVisible] = useState(false);
     const [shoppingLists, setShoppingLists] = useState<ShoppingListSummary[]>([]);
     const [selectedShoppingListId, setSelectedShoppingListId] = useState<number | null>(null);
@@ -80,24 +130,6 @@ export default function RecipesScreen() {
     };
     useEffect(() => {
         void fetchRecipes();
-    }, []);
-
-    useEffect(() => {
-        let mounted = true;
-
-        const loadRole = async () => {
-            const user = await getStoredUser();
-            if (!mounted) return;
-
-            const role = user?.households?.[0]?.pivot?.role ?? user?.role;
-            setIsParent(role === 'parent');
-        };
-
-        void loadRole();
-
-        return () => {
-            mounted = false;
-        };
     }, []);
 
     const fetchRecipes = async () => {
@@ -411,9 +443,12 @@ export default function RecipesScreen() {
             return Alert.alert('Erreur', 'Le nombre de portions doit être entre 1 et 30.');
         }
 
+        if (!householdId) {
+            return Alert.alert('Erreur', "Aucun foyer actif trouvé pour enregistrer la recette.");
+        }
+
         setSubmitting(true);
         try {
-            const householdId = await getStoredHouseholdId();
 
             const stepsArray = Array.isArray(newRecipe.instructions) ? newRecipe.instructions : [newRecipe.instructions];
 
@@ -506,11 +541,20 @@ export default function RecipesScreen() {
             });
 
             if (response.type === 'single' && response.data) {
-                setPreviewRecipe(response.data);
+                const normalized = normalizeAiPreviewRecipe(response.data);
+                if (!normalized) {
+                    Alert.alert('Erreur', 'La réponse IA est invalide.');
+                    setAiSuggestions([]);
+                    return;
+                }
+                setPreviewRecipe(normalized);
                 setModalMode('preview');
             }
             else if (response.type === 'list' && Array.isArray(response.data)) {
-                setAiSuggestions(response.data);
+                const normalizedSuggestions = (response.data as unknown[])
+                    .map((suggestion) => normalizeAiSuggestion(suggestion))
+                    .filter((suggestion): suggestion is AiSuggestion => suggestion !== null);
+                setAiSuggestions(normalizedSuggestions);
             }
             else {
                 setAiSuggestions([]);
@@ -530,7 +574,12 @@ export default function RecipesScreen() {
                 method: 'POST',
                 body: JSON.stringify({ title })
             });
-            setPreviewRecipe(response);
+            const normalized = normalizeAiPreviewRecipe(response);
+            if (!normalized) {
+                Alert.alert("Erreur", "La réponse IA est invalide.");
+                return;
+            }
+            setPreviewRecipe(normalized);
             setModalMode('preview');
         } catch {
             Alert.alert("Erreur", "Impossible de charger les détails.");
@@ -541,15 +590,18 @@ export default function RecipesScreen() {
 
     const handleFinalize = async () => {
         if (!previewRecipe) return;
+        if (!householdId) {
+            Alert.alert("Erreur", "Aucun foyer actif trouvé pour enregistrer la recette.");
+            return;
+        }
+
         setSubmitting(true);
         try {
-            const hId = await getStoredHouseholdId();
-
             const response = await apiFetch('/recipes/ai-store', {
                 method: 'POST',
                 body: JSON.stringify({
                     ...previewRecipe,
-                    household_id: hId
+                    household_id: householdId
                 })
             });
 
@@ -855,7 +907,7 @@ export default function RecipesScreen() {
                                     <Text style={{color: themeColors.icon, marginBottom: 15}}>{previewRecipe.description}</Text>
 
                                     <Text style={[styles.label, {color: themeColors.tint}]}>INGRÉDIENTS</Text>
-                                    {previewRecipe.ingredients.map((ing: any, i: number) => (
+                                    {previewRecipe.ingredients.map((ing: AiPreviewIngredient, i: number) => (
                                         <Text key={i} style={{color: themeColors.text, marginBottom: 3}}>
                                             - {ing.quantity > 0 ? `${ing.quantity} ` : ''}{ing.unit} {ing.name}
                                         </Text>

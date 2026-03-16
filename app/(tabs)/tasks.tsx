@@ -89,7 +89,7 @@ export default function TasksTabScreen() {
     {
       id: "planned",
       title: "Tâches planifiées",
-      description: "Suivi des tâches prévues et de leurs statuts",
+      description: "Suivi des tâches prévues et de leur statut",
       icon: "calendar-check-outline",
       color: colorScheme === "dark" ? "#4DABFF" : theme.tint,
       enabled: true,
@@ -97,7 +97,7 @@ export default function TasksTabScreen() {
     {
       id: "schedule",
       title: "Planifier une tâche ponctuelle",
-      description: "Créer une tâche ponctuelle et l'attribuer à un membre",
+      description: "Créer une tâche ponctuelle et l'attribuer à un membre du foyer",
       icon: "calendar-plus",
       color: "#7ED321",
       enabled: canManageTemplates || canManageInstances,

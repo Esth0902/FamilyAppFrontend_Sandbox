@@ -94,7 +94,7 @@ export default function Register() {
                 await SecureStore.setItemAsync("user", JSON.stringify(data.user));
             }
 
-            Alert.alert("Bienvenue !", "Votre compte a été créé avec succès.");
+            Alert.alert("Bienvenue !", "Compte a été créé avec succès.");
             router.replace("/(tabs)/home");
         } catch (error: unknown) {
             console.error(error);
@@ -170,7 +170,7 @@ export default function Register() {
                     <View style={styles.passwordFieldContainer}>
                         <TextInput
                             style={[styles.input, styles.passwordInput, { backgroundColor: theme.card, color: theme.text, borderColor: theme.icon }]}
-                            placeholder="Repetez le mot de passe"
+                            placeholder="Répétez le mot de passe"
                             placeholderTextColor={theme.textSecondary}
                             secureTextEntry={!showPasswordConfirm}
                             value={passwordConfirm}
