@@ -16,15 +16,11 @@ import * as SecureStore from "expo-secure-store";
 import { Colors } from "@/constants/theme";
 import { apiFetch } from "@/src/api/client";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
-
-type StoredUser = {
-    id?: number;
-    name?: string;
-    email?: string;
-    households?: { id: number }[];
-    must_change_password?: boolean;
-    household_id?: number | null;
-};
+import {
+    normalizeStoredUser,
+    persistStoredUser,
+    type StoredUser as CachedUser,
+} from "@/src/session/user-cache";
 
 export default function ChangeCredentialsScreen() {
     const router = useRouter();
@@ -46,7 +42,7 @@ export default function ChangeCredentialsScreen() {
                     return;
                 }
 
-                const user = JSON.parse(userStr) as StoredUser;
+                const user = JSON.parse(userStr) as CachedUser;
                 if (typeof user?.email === "string" && user.email.trim().length > 0) {
                     setEmail(user.email.trim());
                 }
@@ -80,17 +76,16 @@ export default function ChangeCredentialsScreen() {
                 }),
             });
 
-            const updatedUser = response?.user as StoredUser | undefined;
+            const updatedUser = response?.user as CachedUser | undefined;
             if (updatedUser) {
-                const normalizedUser: StoredUser = {
+                const normalizedUser = normalizeStoredUser({
                     ...updatedUser,
                     must_change_password: false,
-                    household_id: Array.isArray(updatedUser.households) && updatedUser.households.length > 0
-                        ? updatedUser.households[0].id
-                        : null,
-                };
+                } as CachedUser);
 
-                await SecureStore.setItemAsync("user", JSON.stringify(normalizedUser));
+                if (normalizedUser) {
+                    await persistStoredUser(normalizedUser);
+                }
 
                 const hasHousehold = Array.isArray(updatedUser.households) && updatedUser.households.length > 0;
                 router.replace(hasHousehold ? "/(tabs)/home" : "/householdSetup");
@@ -114,10 +109,10 @@ export default function ChangeCredentialsScreen() {
             <View style={styles.content}>
                 <Text style={[styles.title, { color: theme.text }]}>Mise à jour obligatoire</Text>
                 <Text style={[styles.subtitle, { color: theme.textSecondary }]}>
-                    Pour des raisons de sécurité, change ton email et ton mot de passe avant de continuer.
+                    Pour des raisons de sécurité, change ton e-mail et ton mot de passe avant de continuer.
                 </Text>
 
-                <Text style={[styles.label, { color: theme.text }]}>Nouvel email</Text>
+                <Text style={[styles.label, { color: theme.text }]}>Nouvel e-mail</Text>
                 <TextInput
                     style={[styles.input, { backgroundColor: theme.card, color: theme.text, borderColor: theme.icon }]}
                     placeholder="email@exemple.com"

@@ -32,6 +32,10 @@ type BoardPayload = {
   tasks_enabled: boolean;
   can_manage_templates: boolean;
   can_manage_instances: boolean;
+  current_user?: {
+    id: number;
+    role: "parent" | "enfant";
+  };
   instances: {
     status: TaskStatus;
     validated_by_parent: boolean;
@@ -47,6 +51,7 @@ export default function TasksTabScreen() {
   const [tasksEnabled, setTasksEnabled] = useState(false);
   const [canManageTemplates, setCanManageTemplates] = useState(false);
   const [canManageInstances, setCanManageInstances] = useState(false);
+  const [currentUserRole, setCurrentUserRole] = useState<"parent" | "enfant">("enfant");
   const [stats, setStats] = useState({ todo: 0, done: 0, validated: 0 });
 
   const rangeFrom = useMemo(() => toIsoDate(new Date()), []);
@@ -61,6 +66,7 @@ export default function TasksTabScreen() {
       setTasksEnabled(Boolean(payload?.tasks_enabled));
       setCanManageTemplates(Boolean(payload?.can_manage_templates));
       setCanManageInstances(Boolean(payload?.can_manage_instances));
+      setCurrentUserRole(payload?.current_user?.role === "parent" ? "parent" : "enfant");
       setStats({
         todo: instances.filter((instance) => instance.status === "à faire").length,
         done: instances.filter((instance) => instance.status === "réalisée").length,
@@ -110,6 +116,7 @@ export default function TasksTabScreen() {
     () => menuOptions.filter((option) => option.enabled),
     [menuOptions]
   );
+  const canManageHouseholdConfig = currentUserRole === "parent";
 
   if (loading) {
     return (
@@ -124,12 +131,14 @@ export default function TasksTabScreen() {
       <View style={styles.header}>
         <View style={styles.headerTopRow}>
           <Text style={[styles.headerTitle, { color: theme.text }]}>Tâches du foyer</Text>
-          <TouchableOpacity
-            onPress={() => router.push("/householdSetup?mode=edit&scope=tasks")}
-            style={[styles.settingsBtn, { borderColor: theme.icon }]}
-          >
-            <MaterialCommunityIcons name="cog-outline" size={20} color={theme.tint} />
-          </TouchableOpacity>
+          {canManageHouseholdConfig ? (
+            <TouchableOpacity
+              onPress={() => router.push("/householdSetup?mode=edit&scope=tasks")}
+              style={[styles.settingsBtn, { borderColor: theme.icon }]}
+            >
+              <MaterialCommunityIcons name="cog-outline" size={20} color={theme.tint} />
+            </TouchableOpacity>
+          ) : null}
         </View>
         <Text style={[styles.headerSubtitle, { color: theme.textSecondary }]}>Choisis un espace pour gérer les tâches</Text>
       </View>
@@ -140,12 +149,14 @@ export default function TasksTabScreen() {
           <Text style={{ color: theme.textSecondary, lineHeight: 20 }}>
             Active le module tâches dans la configuration du foyer pour commencer.
           </Text>
-          <TouchableOpacity
-            onPress={() => router.push("/householdSetup?mode=edit&scope=tasks")}
-            style={[styles.primaryBtn, { backgroundColor: theme.tint }]}
-          >
-            <Text style={styles.primaryBtnText}>Configurer le foyer</Text>
-          </TouchableOpacity>
+          {canManageHouseholdConfig ? (
+            <TouchableOpacity
+              onPress={() => router.push("/householdSetup?mode=edit&scope=tasks")}
+              style={[styles.primaryBtn, { backgroundColor: theme.tint }]}
+            >
+              <Text style={styles.primaryBtnText}>Configurer le foyer</Text>
+            </TouchableOpacity>
+          ) : null}
         </View>
       ) : (
         <>

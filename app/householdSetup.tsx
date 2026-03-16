@@ -30,6 +30,14 @@ type HouseholdMember = {
     email?: string;
 };
 
+type ManagedHouseholdMember = {
+    id: number;
+    name: string;
+    email: string;
+    role: MemberRole;
+    must_change_password: boolean;
+};
+
 type CreatedMemberCredential = {
     id?: number;
     name?: string;
@@ -56,6 +64,10 @@ type DietaryTagDetail = {
     key: string;
     label: string;
     type: DietaryTagOption["type"];
+};
+
+const normalizeMemberRole = (value: unknown): MemberRole => {
+    return String(value ?? "").trim() === "parent" ? "parent" : "enfant";
 };
 
 const MODULES: { id: ModuleKey; label: string; desc: string; icon: string }[] = [
@@ -182,6 +194,29 @@ const buildMemberShareText = (member: CreatedMemberCredential): string => {
         + "Connecte-toi puis modifie ton mot de passe dès la première connexion.";
 };
 
+
+const resolveActiveHouseholdRole = (rawUser: unknown): MemberRole => {
+    const user = (rawUser ?? {}) as {
+        household_id?: unknown;
+        role?: unknown;
+        households?: {
+            id?: unknown;
+            role?: unknown;
+            pivot?: { role?: unknown } | null;
+        }[];
+    };
+    const households = Array.isArray(user.households) ? user.households : [];
+    const parsedHouseholdId = Number(user.household_id ?? 0);
+    const activeHouseholdId = Number.isFinite(parsedHouseholdId) && parsedHouseholdId > 0
+        ? Math.trunc(parsedHouseholdId)
+        : null;
+    const activeHousehold = activeHouseholdId
+        ? households.find((household) => Number(household?.id ?? 0) === activeHouseholdId)
+        : households[0];
+
+    return normalizeMemberRole(activeHousehold?.pivot?.role ?? activeHousehold?.role ?? user.role);
+};
+
 export default function SetupHousehold() {
     const router = useRouter();
     const insets = useSafeAreaInsets();
@@ -277,6 +312,15 @@ export default function SetupHousehold() {
     const [memberName, setMemberName] = useState("");
     const [memberEmail, setMemberEmail] = useState("");
     const [memberRole, setMemberRole] = useState<MemberRole>("enfant");
+    const [membersExpanded, setMembersExpanded] = useState(!isEditMode);
+    const [managedMembers, setManagedMembers] = useState<ManagedHouseholdMember[]>([]);
+    const [managedRoleDrafts, setManagedRoleDrafts] = useState<Record<number, MemberRole>>({});
+    const [canManageMembers, setCanManageMembers] = useState(false);
+    const [membersLoading, setMembersLoading] = useState(false);
+    const [addingManagedMember, setAddingManagedMember] = useState(false);
+    const [updatingManagedMemberId, setUpdatingManagedMemberId] = useState<number | null>(null);
+    const [deletingManagedMemberId, setDeletingManagedMemberId] = useState<number | null>(null);
+    const [generatedCredentialsByMemberId, setGeneratedCredentialsByMemberId] = useState<Record<number, CreatedMemberCredential>>({});
     const [activeUser, setActiveUser] = useState<{ name?: string; email?: string } | null>(null);
     const visibleModules = isMealsScope
         ? MODULES.filter((module) => module.id === "meals")
@@ -304,6 +348,10 @@ export default function SetupHousehold() {
     const toggleMealSection = (section: "recipes" | "polls") => {
         setMealExpandedSections((prev) => ({ ...prev, [section]: !prev[section] }));
     };
+
+    useEffect(() => {
+        setMembersExpanded(!isEditMode);
+    }, [isEditMode]);
 
     const updateMealOption = (option: "recipes" | "polls" | "shopping_list", value: boolean) => {
         setMealOptions((prev) => ({ ...prev, [option]: value }));
@@ -506,15 +554,230 @@ export default function SetupHousehold() {
         }
     };
 
+    const loadManagedMembers = useCallback(async () => {
+        if (!isEditMode) {
+            return;
+        }
+
+        setMembersLoading(true);
+        try {
+            const response = await apiFetch("/household/members");
+            const membersRaw = Array.isArray(response?.members) ? response.members : [];
+
+            const normalizedMembers = membersRaw
+                .map((rawMember): ManagedHouseholdMember | null => {
+                    const parsedId = Number(rawMember?.id ?? 0);
+                    if (!Number.isFinite(parsedId) || parsedId <= 0) {
+                        return null;
+                    }
+
+                    return {
+                        id: Math.trunc(parsedId),
+                        name: String(rawMember?.name ?? "").trim() || "Membre",
+                        email: String(rawMember?.email ?? "").trim(),
+                        role: normalizeMemberRole(rawMember?.role),
+                        must_change_password: Boolean(rawMember?.must_change_password),
+                    };
+                })
+                .filter((member): member is ManagedHouseholdMember => member !== null);
+
+            const nextRoleDrafts: Record<number, MemberRole> = {};
+            normalizedMembers.forEach((member) => {
+                nextRoleDrafts[member.id] = member.role;
+            });
+
+            setManagedMembers(normalizedMembers);
+            setManagedRoleDrafts(nextRoleDrafts);
+            setCanManageMembers(Boolean(response?.permissions?.can_manage_members));
+        } catch (error: any) {
+            Alert.alert("Membres", error?.message || "Impossible de charger les membres du foyer.");
+        } finally {
+            setMembersLoading(false);
+        }
+    }, [isEditMode]);
+
+    const updateManagedRoleDraft = (memberId: number, role: MemberRole) => {
+        setManagedRoleDrafts((prev) => ({
+            ...prev,
+            [memberId]: role,
+        }));
+    };
+
+    const shareManagedCredential = async (credential: CreatedMemberCredential, key: string) => {
+        setSendingMemberKey(key);
+        try {
+            await Share.share({
+                message: buildMemberShareText(credential),
+            });
+        } catch (shareError) {
+            console.error("Erreur partage accès membre:", shareError);
+            Alert.alert("Partage", "Impossible d'ouvrir le partage pour ce membre.");
+        } finally {
+            setSendingMemberKey(null);
+        }
+    };
+
+    const onAddManagedMember = async () => {
+        const cleanName = memberName.trim();
+        const cleanEmail = memberEmail.trim();
+
+        if (!cleanName) {
+            Alert.alert("Membres", "Le nom du membre est obligatoire.");
+            return;
+        }
+
+        setAddingManagedMember(true);
+        try {
+            const response = await apiFetch("/household/members", {
+                method: "POST",
+                body: JSON.stringify({
+                    name: cleanName,
+                    role: memberRole,
+                    ...(cleanEmail ? { email: cleanEmail } : {}),
+                }),
+            });
+
+            const memberId = Number(response?.member?.id ?? 0);
+            const normalizedMemberId = Number.isFinite(memberId) && memberId > 0 ? Math.trunc(memberId) : null;
+            const credential: CreatedMemberCredential = {
+                id: normalizedMemberId ?? undefined,
+                name: String(response?.member?.name ?? cleanName),
+                generated_email: String(response?.generated_email ?? ""),
+                generated_password: String(response?.generated_password ?? ""),
+                share_text: String(response?.share_text ?? ""),
+            };
+
+            if (normalizedMemberId) {
+                setGeneratedCredentialsByMemberId((prev) => ({
+                    ...prev,
+                    [normalizedMemberId]: credential,
+                }));
+            }
+
+            setMemberName("");
+            setMemberEmail("");
+            setMemberRole("enfant");
+            await loadManagedMembers();
+
+            if (normalizedMemberId) {
+                await shareManagedCredential(credential, `managed-${normalizedMemberId}`);
+            }
+        } catch (error: any) {
+            Alert.alert("Erreur", error?.message || "Impossible d'ajouter ce membre.");
+        } finally {
+            setAddingManagedMember(false);
+        }
+    };
+
+    const onUpdateManagedMemberRole = async (member: ManagedHouseholdMember) => {
+        const nextRole = managedRoleDrafts[member.id] ?? member.role;
+
+        setUpdatingManagedMemberId(member.id);
+        try {
+            await apiFetch(`/household/members/${member.id}`, {
+                method: "PATCH",
+                body: JSON.stringify({
+                    role: nextRole,
+                }),
+            });
+
+            await loadManagedMembers();
+            Alert.alert("Membres", "Rôle mis à jour.");
+        } catch (error: any) {
+            Alert.alert("Erreur", error?.message || "Impossible de mettre à jour ce membre.");
+        } finally {
+            setUpdatingManagedMemberId(null);
+        }
+    };
+
+    const onDeleteManagedMember = (member: ManagedHouseholdMember) => {
+        Alert.alert(
+            "Supprimer le membre",
+            `Confirmer la suppression de ${member.name} ?`,
+            [
+                { text: "Annuler", style: "cancel" },
+                {
+                    text: "Supprimer",
+                    style: "destructive",
+                    onPress: () => {
+                        void (async () => {
+                            setDeletingManagedMemberId(member.id);
+                            try {
+                                await apiFetch(`/household/members/${member.id}`, {
+                                    method: "DELETE",
+                                });
+
+                                setGeneratedCredentialsByMemberId((prev) => {
+                                    const next = { ...prev };
+                                    delete next[member.id];
+                                    return next;
+                                });
+                                await loadManagedMembers();
+                                Alert.alert("Membres", "Membre supprimé du foyer.");
+                            } catch (error: any) {
+                                Alert.alert("Erreur", error?.message || "Impossible de supprimer ce membre.");
+                            } finally {
+                                setDeletingManagedMemberId(null);
+                            }
+                        })();
+                    },
+                },
+            ]
+        );
+    };
+
+    const onShareManagedMemberAccess = async (member: ManagedHouseholdMember) => {
+        if (!member.must_change_password) {
+            return;
+        }
+
+        const key = `managed-${member.id}`;
+        const cachedCredential = generatedCredentialsByMemberId[member.id];
+        if (cachedCredential?.generated_password && cachedCredential.generated_password.trim().length > 0) {
+            await shareManagedCredential(cachedCredential, key);
+            return;
+        }
+
+        setSendingMemberKey(key);
+        try {
+            const response = await apiFetch(`/household/members/${member.id}/temporary-access`, {
+                method: "POST",
+            });
+
+            const credential: CreatedMemberCredential = {
+                id: member.id,
+                name: String(response?.member?.name ?? member.name),
+                generated_email: String(response?.generated_email ?? member.email),
+                generated_password: String(response?.generated_password ?? ""),
+                share_text: String(response?.share_text ?? ""),
+            };
+
+            setGeneratedCredentialsByMemberId((prev) => ({
+                ...prev,
+                [member.id]: credential,
+            }));
+
+            await Share.share({
+                message: buildMemberShareText(credential),
+            });
+        } catch (error: any) {
+            Alert.alert("Erreur", error?.message || "Impossible de partager les accès de ce membre.");
+        } finally {
+            setSendingMemberKey(null);
+        }
+    };
+
     useEffect(() => {
         const loadSetupState = async () => {
             try {
                 const userStr = await SecureStore.getItemAsync("user");
                 let hasHousehold = false;
+                let activeRole: MemberRole = "enfant";
 
                 if (userStr) {
                     const user = JSON.parse(userStr);
                     hasHousehold = !!user.household_id || (Array.isArray(user.households) && user.households.length > 0);
+                    activeRole = resolveActiveHouseholdRole(user);
                     setAlreadyConfigured(hasHousehold);
                     setActiveUser({
                         name: typeof user.name === "string" ? user.name : undefined,
@@ -524,8 +787,16 @@ export default function SetupHousehold() {
 
                 if (isEditMode) {
                     if (!hasHousehold) {
-                        Alert.alert("Configuration", "Aucun foyer n'est configuré pour ce compte.");
+                        Alert.alert("Configuration", "Aucun foyer n'est configur? pour ce compte.");
                         router.replace("/(tabs)/home");
+                        return;
+                    }
+                    if (activeRole !== "parent") {
+                        Alert.alert(
+                            "Acc?s restreint",
+                            "Seul un parent peut modifier la configuration du foyer. Utilise les param?tres utilisateur pour ton compte."
+                        );
+                        router.replace("/settings");
                         return;
                     }
 
@@ -615,8 +886,17 @@ export default function SetupHousehold() {
                         currency: typeof budget?.settings?.currency === "string" ? budget.settings.currency : "EUR",
                         notes: typeof budget?.settings?.notes === "string" ? budget.settings.notes : "",
                     });
+                    await loadManagedMembers();
                 }
-            } catch (error) {
+            } catch (error: any) {
+                if (isEditMode && Number(error?.status) === 403) {
+                    Alert.alert(
+                        "Acc?s restreint",
+                        "Seul un parent peut modifier la configuration du foyer. Utilise les param?tres utilisateur pour ton compte."
+                    );
+                    router.replace("/settings");
+                    return;
+                }
                 console.error("Erreur lecture user:", error);
             } finally {
                 setInitialLoading(false);
@@ -624,7 +904,7 @@ export default function SetupHousehold() {
         };
 
         loadSetupState();
-    }, [isEditMode, isTasksScope, loadDietaryTags, router]);
+    }, [isEditMode, isTasksScope, loadDietaryTags, loadManagedMembers, router]);
 
     const addMember = () => {
         const cleanName = memberName.trim();
@@ -1005,93 +1285,225 @@ export default function SetupHousehold() {
                     </View>
                 )}
 
-                {!isEditMode && !isCalendarScope && (
-                <View style={styles.section}>
-                    <Text style={[styles.sectionTitle, { color: theme.text }]}>Membres du foyer</Text>
+                {!isMealsScope && !isTasksScope && !isCalendarScope && (
+                    <View style={styles.section}>
+                        <TouchableOpacity
+                            style={[styles.membersHeaderRow, { backgroundColor: theme.card, borderColor: theme.icon }]}
+                            onPress={() => setMembersExpanded((prev) => !prev)}
+                        >
+                            <Text style={[styles.sectionTitle, { color: theme.text, marginBottom: 0 }]}>Membres du foyer</Text>
+                            <MaterialCommunityIcons
+                                name={membersExpanded ? "chevron-down" : "chevron-right"}
+                                size={24}
+                                color={theme.textSecondary}
+                            />
+                        </TouchableOpacity>
 
-                    <View style={[styles.activeUserCard, { backgroundColor: theme.card }]}>
-                        <Text style={[styles.activeUserLabel, { color: theme.textSecondary }]}>
-                            Utilisateur actif (Parent)
-                        </Text>
-                        <Text style={[styles.activeUserName, { color: theme.text }]}>
-                            {activeUser?.name || "Parent"}
-                        </Text>
-                        {activeUser?.email ? (
-                            <Text style={[styles.activeUserEmail, { color: theme.textSecondary }]}>
-                                {activeUser.email}
-                            </Text>
+                        {membersExpanded ? (
+                            <View style={{ marginTop: 10 }}>
+                                {!isEditMode && (
+                                    <>
+                                        <View style={[styles.activeUserCard, { backgroundColor: theme.card }]}>
+                                            <Text style={[styles.activeUserLabel, { color: theme.textSecondary }]}>
+                                                Utilisateur actif (Parent)
+                                            </Text>
+                                            <Text style={[styles.activeUserName, { color: theme.text }]}>
+                                                {activeUser?.name || "Parent"}
+                                            </Text>
+                                            {activeUser?.email ? (
+                                                <Text style={[styles.activeUserEmail, { color: theme.textSecondary }]}>
+                                                    {activeUser.email}
+                                                </Text>
+                                            ) : null}
+                                        </View>
+
+                                        {members.length > 0 && (
+                                            <View style={{ marginTop: 10, marginBottom: 10, gap: 8 }}>
+                                                {members.map((member, index) => (
+                                                    <View key={`${member.name}-${index}`} style={[styles.memberCard, { backgroundColor: theme.card }]}>
+                                                        <View style={{ flex: 1 }}>
+                                                            <Text style={[styles.memberName, { color: theme.text }]}>{member.name}</Text>
+                                                            <Text style={[styles.memberMeta, { color: theme.textSecondary }]}>
+                                                                Rôle: {member.role}
+                                                                {member.email ? ` | ${member.email}` : ""}
+                                                            </Text>
+                                                        </View>
+                                                        <TouchableOpacity onPress={() => removeMember(index)}>
+                                                            <MaterialCommunityIcons name="trash-can-outline" size={22} color={theme.textSecondary} />
+                                                        </TouchableOpacity>
+                                                    </View>
+                                                ))}
+                                            </View>
+                                        )}
+                                    </>
+                                )}
+
+                                {isEditMode ? (
+                                    <>
+                                        {membersLoading ? (
+                                            <ActivityIndicator size="small" color={theme.tint} />
+                                        ) : (
+                                            <View style={{ gap: 8, marginBottom: 12 }}>
+                                                {managedMembers.map((member) => {
+                                                    const nextRole = managedRoleDrafts[member.id] ?? member.role;
+                                                    const isUpdating = updatingManagedMemberId === member.id;
+                                                    const isDeleting = deletingManagedMemberId === member.id;
+                                                    const shareKey = `managed-${member.id}`;
+                                                    const isSharing = sendingMemberKey === shareKey;
+
+                                                    return (
+                                                        <View key={member.id} style={[styles.memberCard, { backgroundColor: theme.card }]}>
+                                                            <View style={{ flex: 1 }}>
+                                                                <Text style={[styles.memberName, { color: theme.text }]}>{member.name}</Text>
+                                                                <Text style={[styles.memberMeta, { color: theme.textSecondary }]}>
+                                                                    {member.email || "Email non défini"}
+                                                                </Text>
+                                                                <Text style={[styles.memberMeta, { color: theme.textSecondary }]}>
+                                                                    {member.must_change_password
+                                                                        ? "Mot de passe temporaire non changé."
+                                                                        : "Mot de passe changé."}
+                                                                </Text>
+
+                                                                <View style={[styles.roleRow, { marginTop: 8, marginBottom: 8 }]}>
+                                                                    <TouchableOpacity
+                                                                        onPress={() => updateManagedRoleDraft(member.id, "parent")}
+                                                                        style={[
+                                                                            styles.roleChip,
+                                                                            { borderColor: theme.icon, backgroundColor: theme.background },
+                                                                            nextRole === "parent" && { borderColor: theme.tint, backgroundColor: theme.tint + "20" },
+                                                                        ]}
+                                                                    >
+                                                                        <Text style={[styles.roleChipText, { color: theme.text }]}>Parent</Text>
+                                                                    </TouchableOpacity>
+                                                                    <TouchableOpacity
+                                                                        onPress={() => updateManagedRoleDraft(member.id, "enfant")}
+                                                                        style={[
+                                                                            styles.roleChip,
+                                                                            { borderColor: theme.icon, backgroundColor: theme.background },
+                                                                            nextRole === "enfant" && { borderColor: theme.tint, backgroundColor: theme.tint + "20" },
+                                                                        ]}
+                                                                    >
+                                                                        <Text style={[styles.roleChipText, { color: theme.text }]}>Enfant</Text>
+                                                                    </TouchableOpacity>
+                                                                </View>
+
+                                                                {canManageMembers ? (
+                                                                    <View style={styles.memberActionRow}>
+                                                                        <TouchableOpacity
+                                                                            onPress={() => {
+                                                                                void onUpdateManagedMemberRole(member);
+                                                                            }}
+                                                                            style={[styles.memberActionBtn, { backgroundColor: theme.tint, opacity: isUpdating ? 0.7 : 1 }]}
+                                                                            disabled={isUpdating || isDeleting}
+                                                                        >
+                                                                            <Text style={styles.memberActionBtnText}>
+                                                                                {isUpdating ? "Mise à jour..." : "Mettre à jour"}
+                                                                            </Text>
+                                                                        </TouchableOpacity>
+
+                                                                        <TouchableOpacity
+                                                                            onPress={() => onDeleteManagedMember(member)}
+                                                                            style={[styles.memberActionBtn, { backgroundColor: theme.background, borderColor: theme.icon, borderWidth: 1, opacity: isDeleting ? 0.7 : 1 }]}
+                                                                            disabled={isUpdating || isDeleting}
+                                                                        >
+                                                                            <Text style={[styles.memberActionBtnText, { color: theme.text }]}>
+                                                                                {isDeleting ? "Suppression..." : "Supprimer"}
+                                                                            </Text>
+                                                                        </TouchableOpacity>
+
+                                                                        {member.must_change_password && (
+                                                                            <TouchableOpacity
+                                                                                onPress={() => {
+                                                                                    void onShareManagedMemberAccess(member);
+                                                                                }}
+                                                                                style={[styles.memberActionBtn, { backgroundColor: theme.background, borderColor: theme.tint, borderWidth: 1, opacity: isSharing ? 0.7 : 1 }]}
+                                                                                disabled={isSharing}
+                                                                            >
+                                                                                <Text style={[styles.memberActionBtnText, { color: theme.tint }]}>
+                                                                                    {isSharing ? "Partage..." : "Partager les accès"}
+                                                                                </Text>
+                                                                            </TouchableOpacity>
+                                                                        )}
+                                                                    </View>
+                                                                ) : null}
+                                                            </View>
+                                                        </View>
+                                                    );
+                                                })}
+                                            </View>
+                                        )}
+                                    </>
+                                ) : null}
+
+                                {!isEditMode || canManageMembers ? (
+                                    <View style={[styles.memberEditor, { backgroundColor: theme.card }]}>
+                                        <TextInput
+                                            style={[styles.input, { backgroundColor: theme.background, color: theme.text, marginBottom: 12 }]}
+                                            placeholder="Nom du membre"
+                                            placeholderTextColor={theme.textSecondary}
+                                            value={memberName}
+                                            onChangeText={setMemberName}
+                                        />
+
+                                        <TextInput
+                                            style={[styles.input, { backgroundColor: theme.background, color: theme.text, marginBottom: 12 }]}
+                                            placeholder="Email (optionnel)"
+                                            placeholderTextColor={theme.textSecondary}
+                                            keyboardType="email-address"
+                                            autoCapitalize="none"
+                                            value={memberEmail}
+                                            onChangeText={setMemberEmail}
+                                        />
+
+                                        <View style={styles.roleRow}>
+                                            <TouchableOpacity
+                                                onPress={() => setMemberRole("parent")}
+                                                style={[
+                                                    styles.roleChip,
+                                                    { borderColor: theme.icon, backgroundColor: theme.background },
+                                                    memberRole === "parent" && { borderColor: theme.tint, backgroundColor: theme.tint + "20" },
+                                                ]}
+                                            >
+                                                <Text style={[styles.roleChipText, { color: theme.text }]}>Parent</Text>
+                                            </TouchableOpacity>
+
+                                            <TouchableOpacity
+                                                onPress={() => setMemberRole("enfant")}
+                                                style={[
+                                                    styles.roleChip,
+                                                    { borderColor: theme.icon, backgroundColor: theme.background },
+                                                    memberRole === "enfant" && { borderColor: theme.tint, backgroundColor: theme.tint + "20" },
+                                                ]}
+                                            >
+                                                <Text style={[styles.roleChipText, { color: theme.text }]}>Enfant</Text>
+                                            </TouchableOpacity>
+                                        </View>
+
+                                        <TouchableOpacity
+                                            onPress={() => {
+                                                if (isEditMode) {
+                                                    void onAddManagedMember();
+                                                } else {
+                                                    addMember();
+                                                }
+                                            }}
+                                            style={[styles.addButton, { backgroundColor: theme.background, opacity: addingManagedMember ? 0.7 : 1 }]}
+                                            disabled={isEditMode && addingManagedMember}
+                                        >
+                                            <MaterialCommunityIcons name="plus" size={20} color={theme.tint} />
+                                            <Text style={[styles.addButtonText, { color: theme.tint }]}>
+                                                {isEditMode && addingManagedMember ? "Ajout..." : "Ajouter ce membre"}
+                                            </Text>
+                                        </TouchableOpacity>
+                                    </View>
+                                ) : (
+                                    <Text style={[styles.memberMeta, { color: theme.textSecondary }]}>
+                                        Seul un parent peut gérer les membres du foyer.
+                                    </Text>
+                                )}
+                            </View>
                         ) : null}
                     </View>
-
-                    {members.length > 0 && (
-                        <View style={{ marginTop: 10, marginBottom: 10, gap: 8 }}>
-                            {members.map((member, index) => (
-                                <View key={`${member.name}-${index}`} style={[styles.memberCard, { backgroundColor: theme.card }]}> 
-                                    <View style={{ flex: 1 }}>
-                                        <Text style={[styles.memberName, { color: theme.text }]}>{member.name}</Text>
-                                        <Text style={[styles.memberMeta, { color: theme.textSecondary }]}> 
-                                            Role: {member.role}
-                                            {member.email ? ` | ${member.email}` : ""}
-                                        </Text>
-                                    </View>
-                                    <TouchableOpacity onPress={() => removeMember(index)}>
-                                        <MaterialCommunityIcons name="trash-can-outline" size={22} color={theme.textSecondary} />
-                                    </TouchableOpacity>
-                                </View>
-                            ))}
-                        </View>
-                    )}
-
-                    <View style={[styles.memberEditor, { backgroundColor: theme.card }]}> 
-                        <TextInput
-                            style={[styles.input, { backgroundColor: theme.background, color: theme.text, marginBottom: 12 }]}
-                            placeholder="Nom du membre"
-                            placeholderTextColor={theme.textSecondary}
-                            value={memberName}
-                            onChangeText={setMemberName}
-                        />
-
-                        <TextInput
-                            style={[styles.input, { backgroundColor: theme.background, color: theme.text, marginBottom: 12 }]}
-                            placeholder="Email (optionnel)"
-                            placeholderTextColor={theme.textSecondary}
-                            keyboardType="email-address"
-                            autoCapitalize="none"
-                            value={memberEmail}
-                            onChangeText={setMemberEmail}
-                        />
-
-                        <View style={styles.roleRow}>
-                            <TouchableOpacity
-                                onPress={() => setMemberRole("parent")}
-                                style={[
-                                    styles.roleChip,
-                                    { borderColor: theme.icon, backgroundColor: theme.background },
-                                    memberRole === "parent" && { borderColor: theme.tint, backgroundColor: theme.tint + "20" },
-                                ]}
-                            >
-                                <Text style={[styles.roleChipText, { color: theme.text }]}>Parent</Text>
-                            </TouchableOpacity>
-
-                            <TouchableOpacity
-                                onPress={() => setMemberRole("enfant")}
-                                style={[
-                                    styles.roleChip,
-                                    { borderColor: theme.icon, backgroundColor: theme.background },
-                                    memberRole === "enfant" && { borderColor: theme.tint, backgroundColor: theme.tint + "20" },
-                                ]}
-                            >
-                                <Text style={[styles.roleChipText, { color: theme.text }]}>Enfant</Text>
-                            </TouchableOpacity>
-                        </View>
-
-                        <TouchableOpacity onPress={addMember} style={[styles.addButton, { backgroundColor: theme.background }]}> 
-                            <MaterialCommunityIcons name="plus" size={20} color={theme.tint} />
-                            <Text style={[styles.addButtonText, { color: theme.tint }]}>Ajouter ce membre</Text>
-                        </TouchableOpacity>
-                    </View>
-
-                </View>
                 )}
 
                 <View style={styles.section}>
@@ -1754,6 +2166,33 @@ const styles = StyleSheet.create({
     activeUserLabel: { fontSize: 12, fontWeight: "600" },
     activeUserName: { fontSize: 15, fontWeight: "700", marginTop: 2 },
     activeUserEmail: { fontSize: 12, marginTop: 2 },
+    membersHeaderRow: {
+        borderRadius: 12,
+        borderWidth: 1,
+        paddingHorizontal: 12,
+        paddingVertical: 10,
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "space-between",
+    },
+    memberActionRow: {
+        flexDirection: "row",
+        flexWrap: "wrap",
+        gap: 8,
+        marginTop: 4,
+    },
+    memberActionBtn: {
+        minHeight: 36,
+        paddingHorizontal: 10,
+        borderRadius: 10,
+        alignItems: "center",
+        justifyContent: "center",
+    },
+    memberActionBtnText: {
+        color: "white",
+        fontSize: 12,
+        fontWeight: "700",
+    },
 
     memberEditor: { borderRadius: 12, padding: 12 },
     roleRow: { flexDirection: "row", gap: 8, marginBottom: 6 },

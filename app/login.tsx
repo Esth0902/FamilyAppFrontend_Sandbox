@@ -7,8 +7,6 @@ import {
     StyleSheet,
     Alert,
     ActivityIndicator,
-    KeyboardAvoidingView,
-    Platform,
     useColorScheme,
 } from "react-native";
 import { useRouter } from "expo-router";
@@ -16,6 +14,7 @@ import * as SecureStore from "expo-secure-store";
 import { API_BASE_URL } from "@/src/api/client";
 import { Colors } from "@/constants/theme";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
+import { normalizeStoredUser, persistStoredUser, type StoredUser } from "@/src/session/user-cache";
 
 const parseJsonSafe = async (response: Response) => {
     const text = await response.text();
@@ -72,7 +71,10 @@ export default function Login() {
             }
 
             if (data?.user) {
-                await SecureStore.setItemAsync("user", JSON.stringify(data.user));
+                const normalizedUser = normalizeStoredUser(data.user as StoredUser);
+                if (normalizedUser) {
+                    await persistStoredUser(normalizedUser);
+                }
             }
 
             if (data?.user?.must_change_password) {
@@ -90,10 +92,7 @@ export default function Login() {
     };
 
     return (
-        <KeyboardAvoidingView
-            behavior={Platform.OS === "ios" ? "padding" : "height"}
-            style={[styles.container, { backgroundColor: theme.background }]}
-        >
+        <View style={[styles.container, { backgroundColor: theme.background }]}>
             <View style={styles.content}>
 
                 <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
@@ -108,7 +107,7 @@ export default function Login() {
                 </View>
 
                 <View style={styles.form}>
-                    <Text style={[styles.label, { color: theme.text }]}>Email</Text>
+                    <Text style={[styles.label, { color: theme.text }]}>E-mail</Text>
                     <TextInput
                         style={[styles.input, { backgroundColor: theme.card, color: theme.text, borderColor: theme.icon }]}
                         placeholder="Ex: parent@famille.com"
@@ -164,7 +163,7 @@ export default function Login() {
                     )}
                 </View>
             </View>
-        </KeyboardAvoidingView>
+        </View>
     );
 }
 
@@ -175,7 +174,8 @@ const styles = StyleSheet.create({
     content: {
         flex: 1,
         padding: 24,
-        justifyContent: "center",
+        paddingTop: 120,
+        justifyContent: "flex-start",
     },
     backButton: {
         position: 'absolute',

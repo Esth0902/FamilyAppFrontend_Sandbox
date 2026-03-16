@@ -12,6 +12,7 @@ import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { Colors } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import { apiFetch } from "@/src/api/client";
+import { useStoredUserState } from "@/src/session/user-cache";
 
 type MealOptionKey = "polls" | "recipes" | "shopping_list";
 
@@ -68,6 +69,8 @@ export default function MealScreen() {
     const router = useRouter();
     const colorScheme = useColorScheme();
     const themeColors = Colors[colorScheme ?? "light"];
+    const { role } = useStoredUserState();
+    const canManageHouseholdConfig = role === "parent";
 
     const [loadingConfig, setLoadingConfig] = useState(true);
     const [mealsEnabled, setMealsEnabled] = useState(true);
@@ -116,6 +119,8 @@ export default function MealScreen() {
         }
         return menuOptions.filter((option) => mealOptions[option.settingKey]);
     }, [mealOptions, mealsEnabled, menuOptions]);
+
+    const skeletonCards = useMemo(() => [0, 1, 2], []);
 
     useFocusEffect(
         useCallback(() => {
@@ -185,12 +190,14 @@ export default function MealScreen() {
             <View style={[styles.header, { backgroundColor: themeColors.background }]}>
                 <View style={styles.headerTopRow}>
                     <Text style={[styles.headerTitle, { color: themeColors.text }]}>Repas & Cuisine</Text>
-                    <TouchableOpacity
-                        onPress={() => router.push("/householdSetup?mode=edit&scope=meals")}
-                        style={[styles.settingsButton, { borderColor: themeColors.icon }]}
-                    >
-                        <MaterialCommunityIcons name="cog-outline" size={20} color={themeColors.tint} />
-                    </TouchableOpacity>
+                    {canManageHouseholdConfig ? (
+                        <TouchableOpacity
+                            onPress={() => router.push("/householdSetup?mode=edit&scope=meals")}
+                            style={[styles.settingsButton, { borderColor: themeColors.icon }]}
+                        >
+                            <MaterialCommunityIcons name="cog-outline" size={20} color={themeColors.tint} />
+                        </TouchableOpacity>
+                    ) : null}
                 </View>
                 <Text style={[styles.headerSubtitle, { color: themeColors.icon }]}>
                     Gère l&apos;alimentation de ton foyer
@@ -199,11 +206,28 @@ export default function MealScreen() {
 
             <View style={styles.menuGrid}>
                 {loadingConfig ? (
-                    <View style={[styles.emptyStateCard, { backgroundColor: colorScheme === "dark" ? "#1E1E1E" : "#FFF" }]}>
-                        <ActivityIndicator size="small" color={themeColors.tint} />
-                        <Text style={[styles.emptyStateText, { color: themeColors.icon }]}>
-                            Chargement de la configuration repas...
-                        </Text>
+                    <View style={styles.skeletonList}>
+                        {skeletonCards.map((item) => (
+                            <View
+                                key={`meal-skeleton-${item}`}
+                                style={[styles.skeletonCard, { backgroundColor: colorScheme === "dark" ? "#1E1E1E" : "#FFF" }]}
+                            >
+                                <View style={[styles.skeletonAccent, { backgroundColor: themeColors.icon + "33" }]} />
+                                <View style={styles.skeletonBody}>
+                                    <View style={[styles.skeletonIcon, { backgroundColor: themeColors.icon + "22" }]} />
+                                    <View style={styles.skeletonTextWrap}>
+                                        <View style={[styles.skeletonTitle, { backgroundColor: themeColors.icon + "28" }]} />
+                                        <View style={[styles.skeletonSubtitle, { backgroundColor: themeColors.icon + "1F" }]} />
+                                    </View>
+                                </View>
+                            </View>
+                        ))}
+                        <View style={styles.skeletonLoadingRow}>
+                            <ActivityIndicator size="small" color={themeColors.tint} />
+                            <Text style={[styles.skeletonLoadingText, { color: themeColors.icon }]}>
+                                Chargement de la configuration repas...
+                            </Text>
+                        </View>
                     </View>
                 ) : visibleMenuOptions.length > 0 ? (
                     visibleMenuOptions.map((option) => (
@@ -278,6 +302,59 @@ const styles = StyleSheet.create({
     },
     menuGrid: {
         padding: 20,
+    },
+    skeletonList: {
+        gap: 14,
+    },
+    skeletonCard: {
+        borderRadius: 15,
+        overflow: "hidden",
+        flexDirection: "row",
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.08,
+        shadowRadius: 6,
+        elevation: 2,
+    },
+    skeletonAccent: {
+        width: 6,
+    },
+    skeletonBody: {
+        flex: 1,
+        flexDirection: "row",
+        alignItems: "center",
+        padding: 18,
+        gap: 12,
+    },
+    skeletonIcon: {
+        width: 52,
+        height: 52,
+        borderRadius: 12,
+    },
+    skeletonTextWrap: {
+        flex: 1,
+        gap: 8,
+    },
+    skeletonTitle: {
+        height: 14,
+        borderRadius: 7,
+        width: "60%",
+    },
+    skeletonSubtitle: {
+        height: 12,
+        borderRadius: 6,
+        width: "90%",
+    },
+    skeletonLoadingRow: {
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 8,
+        marginTop: 4,
+    },
+    skeletonLoadingText: {
+        fontSize: 13,
+        fontWeight: "500",
     },
     card: {
         borderRadius: 15,

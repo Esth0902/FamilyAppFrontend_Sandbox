@@ -6,62 +6,59 @@ import {
     ActivityIndicator,
     TouchableOpacity,
     useColorScheme,
+    Image,
 } from "react-native";
 
 import { useRouter, useFocusEffect } from "expo-router";
-import { API_BASE_URL } from "@/src/api/client";
+import { apiFetch } from "@/src/api/client";
 import * as SecureStore from "expo-secure-store";
 import { Colors } from "@/constants/theme";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
-
-type Household = {
-    id: number;
-    name: string;
-};
-
-type StoredUser = {
-    id: number;
-    name: string;
-    email: string;
-    households?: Household[];
-};
+import {
+    clearStoredUser,
+    persistStoredUser,
+    refreshStoredUserFromStorage,
+    useStoredUserState,
+} from "@/src/session/user-cache";
 
 export default function ConnectedHome() {
     const router = useRouter();
     const colorScheme = useColorScheme();
     const theme = Colors[colorScheme ?? "light"];
+    const { user } = useStoredUserState();
 
-    const [user, setUser] = useState<StoredUser | null>(null);
     const [loading, setLoading] = useState(true);
 
     useFocusEffect(
         useCallback(() => {
             const fetchUserData = async () => {
+                setLoading(true);
                 try {
                     const token = await SecureStore.getItemAsync("authToken");
 
-                    if (token) {
-                        const response = await fetch(`${API_BASE_URL}/me`, {
-                            headers: { Authorization: `Bearer ${token}` },
-                        });
+                    if (!token) {
+                        await refreshStoredUserFromStorage();
+                        return;
+                    }
 
-                        if (response.ok) {
-                            const data = await response.json();
+                    try {
+                        const data = await apiFetch("/me");
+                        if (data?.user) {
                             const userToSave = {
                                 ...data.user,
-                                household_id: data.user.households && data.user.households.length > 0
-                                    ? data.user.households[0].id
-                                    : null,
+                                household_id: user?.household_id
+                                    ?? (Array.isArray(data.user.households) && data.user.households.length > 0
+                                        ? data.user.households[0].id
+                                        : null),
                             };
-                            setUser(userToSave);
-                            await SecureStore.setItemAsync("user", JSON.stringify(userToSave));
-                        } else {
-                            const raw = await SecureStore.getItemAsync("user");
-                            if (raw) {
-                                setUser(JSON.parse(raw));
-                            }
+                            await persistStoredUser(userToSave);
+                            return;
                         }
+                    } catch (error) {
+                        console.error("Erreur chargement user (/me):", error);
                     }
+
+                    await refreshStoredUserFromStorage();
                 } catch (e) {
                     console.error("Erreur chargement user:", e);
                 } finally {
@@ -70,7 +67,7 @@ export default function ConnectedHome() {
             };
 
             void fetchUserData();
-        }, [])
+        }, [user?.household_id])
     );
 
     const onSetupHouse = () => {
@@ -85,20 +82,15 @@ export default function ConnectedHome() {
         try {
             const token = await SecureStore.getItemAsync("authToken");
             if (token) {
-                fetch(`${API_BASE_URL}/logout`, {
+                apiFetch("/logout", {
                     method: "POST",
-                    headers: {
-                        Accept: "application/json",
-                        "Content-Type": "application/json",
-                        Authorization: `Bearer ${token}`,
-                    },
                 }).catch((e) => console.log("Logout backend error:", e));
             }
         } catch (e) {
             console.error("Erreur logout:", e);
         } finally {
             await SecureStore.deleteItemAsync("authToken");
-            await SecureStore.deleteItemAsync("user");
+            await clearStoredUser();
             router.replace("/");
         }
     };
@@ -111,9 +103,12 @@ export default function ConnectedHome() {
         );
     }
 
-    const activeHousehold = user?.households && user.households.length > 0
-        ? user.households[0]
-        : null;
+    const activeHouseholds = Array.isArray(user?.households) ? user.households : [];
+    const activeHousehold = activeHouseholds.find((household) => household.id === user?.household_id)
+        ?? activeHouseholds[0]
+        ?? null;
+    const activeHouseholdRole = activeHousehold?.pivot?.role ?? activeHousehold?.role ?? user?.role ?? "enfant";
+    const canManageHouseholdConfig = activeHouseholdRole === "parent";
 
     return (
         <View style={[styles.container, { backgroundColor: theme.background }]}>
@@ -151,13 +146,19 @@ export default function ConnectedHome() {
                                     {activeHousehold.name}
                                 </Text>
                                 <View style={styles.cardActionRow}>
-                                    <TouchableOpacity
-                                        onPress={onEditHouseholdConfig}
-                                        style={[styles.householdSettingsButton, { borderColor: theme.icon }]}
-                                    >
-                                        <MaterialCommunityIcons name="cog-outline" size={20} color={theme.tint} />
-                                    </TouchableOpacity>
-                                    <MaterialCommunityIcons name="home-account" size={24} color={theme.tint} />
+                                    {canManageHouseholdConfig ? (
+                                        <TouchableOpacity
+                                            onPress={onEditHouseholdConfig}
+                                            style={[styles.householdSettingsButton, { borderColor: theme.icon }]}
+                                        >
+                                            <MaterialCommunityIcons name="cog-outline" size={20} color={theme.tint} />
+                                        </TouchableOpacity>
+                                    ) : null}
+                                    <Image
+                                        source={require("../../assets/images/logo.png")}
+                                        style={styles.householdLogo}
+                                        resizeMode="contain"
+                                    />
                                 </View>
                             </View>
 
@@ -280,6 +281,11 @@ const styles = StyleSheet.create({
         borderWidth: 1,
         alignItems: "center",
         justifyContent: "center",
+    },
+    householdLogo: {
+        width: 24,
+        height: 24,
+        borderRadius: 6,
     },
     cardTitle: {
         fontSize: 18,

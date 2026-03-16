@@ -36,7 +36,7 @@ export default function ForgotPasswordScreen() {
 
     const onSubmit = async () => {
         if (!email.trim()) {
-            Alert.alert("Réinitialisation", "Merci de renseigner un email.");
+            Alert.alert("Réinitialisation", "Merci de renseigner un e-mail.");
             return;
         }
 
@@ -65,7 +65,7 @@ export default function ForgotPasswordScreen() {
 
             Alert.alert(
                 "Réinitialisation",
-                data?.message || "Si un compte existe, un email de réinitialisation a été envoyé."
+                data?.message || "Si un compte existe, un e-mail de réinitialisation a été envoyé."
             );
             router.replace("/login");
         } catch (error) {
@@ -89,12 +89,12 @@ export default function ForgotPasswordScreen() {
                 <View style={styles.header}>
                     <Text style={[styles.title, { color: theme.text }]}>Mot de passe oublié</Text>
                     <Text style={[styles.subtitle, { color: theme.textSecondary }]}>
-                        Saisis ton email pour recevoir un lien de réinitialisation.
+                        Saisis ton e-mail pour recevoir un lien de réinitialisation.
                     </Text>
                 </View>
 
                 <View style={styles.form}>
-                    <Text style={[styles.label, { color: theme.text }]}>Email</Text>
+                    <Text style={[styles.label, { color: theme.text }]}>E-mail</Text>
                     <TextInput
                         style={[styles.input, { backgroundColor: theme.card, color: theme.text, borderColor: theme.icon }]}
                         placeholder="Ex: parent@famille.com"

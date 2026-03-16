@@ -18,6 +18,7 @@ import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { Colors } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import { apiFetch } from "@/src/api/client";
+import { useStoredUserState } from "@/src/session/user-cache";
 import {
   filterRecipesByQuery,
   isTaskStatus,
@@ -283,6 +284,8 @@ export default function CalendarScreen() {
   const router = useRouter();
   const colorScheme = useColorScheme();
   const theme = Colors[colorScheme ?? "light"];
+  const { role } = useStoredUserState();
+  const canManageHouseholdConfig = role === "parent";
 
   const todayIso = useMemo(() => toIsoDate(new Date()), []);
   const [monthCursor, setMonthCursor] = useState(() => startOfMonth(new Date()));
@@ -1328,15 +1331,17 @@ export default function CalendarScreen() {
           <View style={{ flex: 1 }}>
             <Text style={[styles.headerTitle, { color: theme.text }]}>Calendrier familial</Text>
             <Text style={[styles.headerSubtitle, { color: theme.textSecondary }]}>
-              événements du foyer, partage inter-foyers contrôlé et menu validé de la semaine.
+              Événements du foyer, tâches à effectuer, repas validés et partage inter-foyers.
             </Text>
           </View>
-          <TouchableOpacity
-            onPress={() => router.push("/householdSetup?mode=edit&scope=calendar")}
-            style={[styles.settingsBtn, { borderColor: theme.icon }]}
-          >
-            <MaterialCommunityIcons name="cog-outline" size={20} color={theme.tint} />
-          </TouchableOpacity>
+          {canManageHouseholdConfig ? (
+            <TouchableOpacity
+              onPress={() => router.push("/householdSetup?mode=edit&scope=calendar")}
+              style={[styles.settingsBtn, { borderColor: theme.icon }]}
+            >
+              <MaterialCommunityIcons name="cog-outline" size={20} color={theme.tint} />
+            </TouchableOpacity>
+          ) : null}
         </View>
       </View>
 
@@ -1346,19 +1351,21 @@ export default function CalendarScreen() {
           <Text style={[styles.bodyText, { color: theme.textSecondary }]}>
             Active le module calendrier dans la configuration du foyer pour afficher l&apos;agenda partagé.
           </Text>
-          <TouchableOpacity
-            onPress={() => router.push("/householdSetup?mode=edit&scope=calendar")}
-            style={[styles.primaryBtn, { backgroundColor: theme.tint }]}
-          >
-            <Text style={styles.primaryBtnText}>Configurer le foyer</Text>
-          </TouchableOpacity>
+          {canManageHouseholdConfig ? (
+            <TouchableOpacity
+              onPress={() => router.push("/householdSetup?mode=edit&scope=calendar")}
+              style={[styles.primaryBtn, { backgroundColor: theme.tint }]}
+            >
+              <Text style={styles.primaryBtnText}>Configurer le foyer</Text>
+            </TouchableOpacity>
+          ) : null}
         </View>
       ) : (
         <>
           <View style={styles.statsRow}>
             <View style={[styles.statCard, { backgroundColor: theme.card }]}>
               <Text style={[styles.statValue, { color: theme.text }]}>{stats.events}</Text>
-              <Text style={[styles.statLabel, { color: theme.textSecondary }]}>événements</Text>
+              <Text style={[styles.statLabel, { color: theme.textSecondary }]}>Événements</Text>
             </View>
             <View style={[styles.statCard, { backgroundColor: theme.card }]}>
               <Text style={[styles.statValue, { color: theme.text }]}>{stats.shared}</Text>
@@ -2839,8 +2846,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
 });
-
-
 
 
 

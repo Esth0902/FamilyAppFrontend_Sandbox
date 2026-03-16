@@ -131,7 +131,7 @@ export default function Register() {
                         onChangeText={setName}
                     />
 
-                    <Text style={[styles.label, { color: theme.text }]}>Email</Text>
+                    <Text style={[styles.label, { color: theme.text }]}>E-mail</Text>
                     <TextInput
                         style={[styles.input, { backgroundColor: theme.card, color: theme.text, borderColor: theme.icon }]}
                         placeholder="Ex: parent@famille.com"

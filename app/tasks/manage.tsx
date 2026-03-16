@@ -857,12 +857,14 @@ export default function TasksScreen() {
               {moduleSubtitle}
             </Text>
           </View>
-          <TouchableOpacity
-            onPress={() => router.push("/householdSetup?mode=edit&scope=tasks")}
-            style={[styles.settingsBtn, { borderColor: theme.icon }]}
-          >
-            <MaterialCommunityIcons name="cog-outline" size={20} color={theme.tint} />
-          </TouchableOpacity>
+          {currentUserRole === "parent" ? (
+            <TouchableOpacity
+              onPress={() => router.push("/householdSetup?mode=edit&scope=tasks")}
+              style={[styles.settingsBtn, { borderColor: theme.icon }]}
+            >
+              <MaterialCommunityIcons name="cog-outline" size={20} color={theme.tint} />
+            </TouchableOpacity>
+          ) : null}
         </View>
       </View>
 
@@ -872,12 +874,14 @@ export default function TasksScreen() {
           <Text style={{ color: theme.textSecondary, lineHeight: 20 }}>
             Active le module tâches dans la configuration du foyer pour commencer.
           </Text>
-          <TouchableOpacity
-            onPress={() => router.push("/householdSetup?mode=edit&scope=tasks")}
-            style={[styles.primaryBtn, { backgroundColor: theme.tint }]}
-          >
-            <Text style={styles.primaryBtnText}>Configurer le foyer</Text>
-          </TouchableOpacity>
+          {currentUserRole === "parent" ? (
+            <TouchableOpacity
+              onPress={() => router.push("/householdSetup?mode=edit&scope=tasks")}
+              style={[styles.primaryBtn, { backgroundColor: theme.tint }]}
+            >
+              <Text style={styles.primaryBtnText}>Configurer le foyer</Text>
+            </TouchableOpacity>
+          ) : null}
         </View>
       ) : (
         <>
@@ -1903,5 +1907,3 @@ const styles = StyleSheet.create({
     alignSelf: "flex-end",
   },
 });
-
-
