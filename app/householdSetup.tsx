@@ -188,7 +188,7 @@ const buildMemberShareText = (member: CreatedMemberCredential): string => {
     }
 
     return `Bonjour ${name} !\n\n`
-        + "Ton compte FamilyApp est prêt.\n"
+        + "Ton compte FamilyFlow est prêt.\n"
         + `Email : ${email}\n`
         + `Mot de passe temporaire : ${password}\n\n`
         + "Connecte-toi puis modifie ton mot de passe dès la première connexion.";
@@ -484,7 +484,7 @@ export default function SetupHousehold() {
     const createDietaryTag = async () => {
         const label = dietaryTagSearch.trim();
         if (label.length < 2) {
-            Alert.alert("Dietary tags", "Le tag doit contenir au moins 2 caracteres.");
+            Alert.alert("Dietary tags", "Le tag doit contenir au moins 2 caractères.");
             return;
         }
 
@@ -531,8 +531,8 @@ export default function SetupHousehold() {
             const closestTag = error?.data?.closest_tag;
             if (error?.status === 409 && closestTag?.key) {
                 Alert.alert(
-                    "Tag similaire detecte",
-                    `${closestTag.label} existe déjà. Je l'ai sélectionné à la place.`,
+                    "Tag similaire détecté",
+                    `${closestTag.label} existe déjà et a été sélectionné.`,
                 );
                 setSelectedMealDietaryTags((prev) =>
                     prev.includes(String(closestTag.key)) ? prev : [...prev, String(closestTag.key)]
@@ -562,21 +562,22 @@ export default function SetupHousehold() {
         setMembersLoading(true);
         try {
             const response = await apiFetch("/household/members");
-            const membersRaw = Array.isArray(response?.members) ? response.members : [];
+            const membersRaw: unknown[] = Array.isArray(response?.members) ? response.members : [];
 
             const normalizedMembers = membersRaw
-                .map((rawMember): ManagedHouseholdMember | null => {
-                    const parsedId = Number(rawMember?.id ?? 0);
+                .map((rawMember: unknown): ManagedHouseholdMember | null => {
+                    const member = (rawMember ?? {}) as Record<string, unknown>;
+                    const parsedId = Number(member.id ?? 0);
                     if (!Number.isFinite(parsedId) || parsedId <= 0) {
                         return null;
                     }
 
                     return {
                         id: Math.trunc(parsedId),
-                        name: String(rawMember?.name ?? "").trim() || "Membre",
-                        email: String(rawMember?.email ?? "").trim(),
-                        role: normalizeMemberRole(rawMember?.role),
-                        must_change_password: Boolean(rawMember?.must_change_password),
+                        name: String(member.name ?? "").trim() || "Membre",
+                        email: String(member.email ?? "").trim(),
+                        role: normalizeMemberRole(member.role),
+                        must_change_password: Boolean(member.must_change_password),
                     };
                 })
                 .filter((member): member is ManagedHouseholdMember => member !== null);
@@ -610,7 +611,7 @@ export default function SetupHousehold() {
                 message: buildMemberShareText(credential),
             });
         } catch (shareError) {
-            console.error("Erreur partage accès membre:", shareError);
+            console.error("Erreur de partage des accès membre:", shareError);
             Alert.alert("Partage", "Impossible d'ouvrir le partage pour ce membre.");
         } finally {
             setSendingMemberKey(null);
@@ -787,14 +788,14 @@ export default function SetupHousehold() {
 
                 if (isEditMode) {
                     if (!hasHousehold) {
-                        Alert.alert("Configuration", "Aucun foyer n'est configur? pour ce compte.");
+                        Alert.alert("Configuration", "Aucun foyer n'est configuré pour ce compte.");
                         router.replace("/(tabs)/home");
                         return;
                     }
                     if (activeRole !== "parent") {
                         Alert.alert(
-                            "Acc?s restreint",
-                            "Seul un parent peut modifier la configuration du foyer. Utilise les param?tres utilisateur pour ton compte."
+                            "Accès restreint",
+                            "Seul un parent peut modifier la configuration du foyer. Utilise les paramètres utilisateur pour ton compte."
                         );
                         router.replace("/settings");
                         return;
@@ -891,8 +892,8 @@ export default function SetupHousehold() {
             } catch (error: any) {
                 if (isEditMode && Number(error?.status) === 403) {
                     Alert.alert(
-                        "Acc?s restreint",
-                        "Seul un parent peut modifier la configuration du foyer. Utilise les param?tres utilisateur pour ton compte."
+                        "Accès restreint",
+                        "Seul un parent peut modifier la configuration du foyer. Utilise les paramètres utilisateur pour ton compte."
                     );
                     router.replace("/settings");
                     return;
@@ -934,7 +935,7 @@ export default function SetupHousehold() {
                 message: buildMemberShareText(member),
             });
         } catch (shareError) {
-            console.error("Erreur partage accès membre:", shareError);
+            console.error("Erreur de partage d'accès membre:", shareError);
             Alert.alert("Partage", "Impossible d'ouvrir le partage pour ce membre.");
         } finally {
             setSendingMemberKey(null);
@@ -970,7 +971,7 @@ export default function SetupHousehold() {
         }
         const parsedMaxVotes = Number(maxVotesPerUser);
         if (!Number.isInteger(parsedMaxVotes) || parsedMaxVotes < 1 || parsedMaxVotes > 20) {
-            Alert.alert("Sondages", "Le nombre max de votes doit être entre 1 et 20.");
+            Alert.alert("Sondages", "Le nombre maximum de votes doit être entre 1 et 20.");
             return;
         }
         const parsedPollTime = parseTimeToHHMM(pollTime);
@@ -1146,7 +1147,7 @@ export default function SetupHousehold() {
         return (
             <View style={[styles.centerContainer, { backgroundColor: theme.background, padding: 24 }]}> 
                 <View style={[styles.lockCard, { backgroundColor: theme.card }]}> 
-                    <MaterialCommunityIcons name="home-check" size={42} color={theme.tint} />
+                    <MaterialCommunityIcons name="home" size={42} color={theme.tint} />
                     <Text style={[styles.lockTitle, { color: theme.text }]}>Foyer déjà configuré</Text>
                     <Text style={[styles.lockText, { color: theme.textSecondary }]}>La configuration initiale est terminée.</Text>
                     <TouchableOpacity
@@ -1356,12 +1357,12 @@ export default function SetupHousehold() {
                                                             <View style={{ flex: 1 }}>
                                                                 <Text style={[styles.memberName, { color: theme.text }]}>{member.name}</Text>
                                                                 <Text style={[styles.memberMeta, { color: theme.textSecondary }]}>
-                                                                    {member.email || "Email non défini"}
+                                                                    {member.email || "E-mail non défini"}
                                                                 </Text>
                                                                 <Text style={[styles.memberMeta, { color: theme.textSecondary }]}>
                                                                     {member.must_change_password
-                                                                        ? "Mot de passe temporaire non changé."
-                                                                        : "Mot de passe changé."}
+                                                                        ? "Mot de passe temporaire à modifier"
+                                                                        : "Accès actif"}
                                                                 </Text>
 
                                                                 <View style={[styles.roleRow, { marginTop: 8, marginBottom: 8 }]}>
@@ -2406,4 +2407,3 @@ const styles = StyleSheet.create({
     },
     submitButtonText: { color: "white", fontSize: 18, fontWeight: "bold" },
 });
-

@@ -19,8 +19,8 @@ import { apiFetch } from "@/src/api/client";
 
 type BudgetRecurrence = "weekly" | "monthly";
 type BudgetRole = "parent" | "enfant";
-type TransactionType = "allocation" | "bonus" | "pénalité" | "avance";
-type TransactionStatus = "en attente" | "approuvé" | "rejeté";
+type TransactionType = "allocation" | "bonus" | "penalty" | "advance";
+type TransactionStatus = "pending" | "approved" | "rejected";
 
 type BudgetSetting = {
   user_id: number;
@@ -120,6 +120,19 @@ const resetDayLabel = (recurrence: BudgetRecurrence, resetDay: number): string =
   return WEEK_LABELS[Math.max(0, Math.min(6, resetDay - 1))] ?? `Jour ${resetDay}`;
 };
 
+const transactionTypeLabel = (type: TransactionType): string => {
+  if (type === "advance") return "Avance";
+  if (type === "penalty") return "Pénalité";
+  if (type === "bonus") return "Bonus";
+  return "Allocation";
+};
+
+const transactionStatusLabel = (status: TransactionStatus): string => {
+  if (status === "pending") return "En attente";
+  if (status === "approved") return "Approuvé";
+  return "Rejeté";
+};
+
 export default function BudgetTabScreen() {
   const router = useRouter();
   const colorScheme = useColorScheme();
@@ -216,15 +229,15 @@ export default function BudgetTabScreen() {
       return;
     }
     if (resetDay === null || !Number.isInteger(resetDay)) {
-      Alert.alert("Budget", "Le jour de reset doit être un entier.");
+      Alert.alert("Budget", "Le jour de réinitialisation doit être un entier.");
       return;
     }
     if (recurrenceInput === "weekly" && (resetDay < 1 || resetDay > 7)) {
-      Alert.alert("Budget", "En hebdo, le jour de reset doit être entre 1 et 7.");
+      Alert.alert("Budget", "En hebdo, le jour de réinitialisation doit être entre 1 et 7.");
       return;
     }
     if (recurrenceInput === "monthly" && (resetDay < 1 || resetDay > 31)) {
-      Alert.alert("Budget", "En mensuel, le jour de reset doit être entre 1 et 31.");
+      Alert.alert("Budget", "En mensuel, le jour de réinitialisation doit être entre 1 et 31.");
       return;
     }
     if (maxAdvance === null || maxAdvance < 0) {
@@ -403,7 +416,7 @@ export default function BudgetTabScreen() {
                     <Text style={[styles.childName, { color: theme.text }]}>{child.child.name}</Text>
                     <Text style={[styles.cardText, { color: theme.textSecondary }]}>
                       {child.setting
-                        ? `${formatMoney(child.setting.base_amount, currency)} · ${recurrenceLabel(child.setting.recurrence)} · reset ${resetDayLabel(child.setting.recurrence, child.setting.reset_day)}`
+                        ? `${formatMoney(child.setting.base_amount, currency)} · ${recurrenceLabel(child.setting.recurrence)} · réinitialisation ${resetDayLabel(child.setting.recurrence, child.setting.reset_day)}`
                         : "Configuration budget absente"}
                     </Text>
                     <Text style={[styles.cardText, { color: theme.textSecondary }]}>
@@ -448,7 +461,7 @@ export default function BudgetTabScreen() {
                       </View>
 
                       <Text style={[styles.fieldLabel, { color: theme.text }]}>
-                        {recurrenceInput === "weekly" ? "Jour de reset (1 à 7)" : "Jour de reset (1 à 31)"}
+                        {recurrenceInput === "weekly" ? "Jour de réinitialisation (1 à 7)" : "Jour de réinitialisation (1 à 31)"}
                       </Text>
                       <TextInput
                         value={resetDayInput}
@@ -567,10 +580,10 @@ export default function BudgetTabScreen() {
             <Text style={[styles.cardTitle, { color: theme.text }]}>Mon argent de poche</Text>
             {myBudget.setting ? (
               <Text style={[styles.cardText, { color: theme.textSecondary }]}>
-                {formatMoney(myBudget.setting.base_amount, currency)} · {recurrenceLabel(myBudget.setting.recurrence)} · reset {resetDayLabel(myBudget.setting.recurrence, myBudget.setting.reset_day)}
+                {formatMoney(myBudget.setting.base_amount, currency)} · {recurrenceLabel(myBudget.setting.recurrence)} · réinitialisation {resetDayLabel(myBudget.setting.recurrence, myBudget.setting.reset_day)}
               </Text>
             ) : (
-              <Text style={[styles.cardText, { color: theme.textSecondary }]}>Ton budget n'a pas encore été configuré.</Text>
+              <Text style={[styles.cardText, { color: theme.textSecondary }]}>Ton budget n&apos;a pas encore été configuré.</Text>
             )}
             <Text style={[styles.cardText, { color: theme.textSecondary }]}>
               Période {formatPeriod(myBudget.period.start, myBudget.period.end)}
@@ -615,7 +628,7 @@ export default function BudgetTabScreen() {
                 <View key={`tx-${transaction.id}`} style={[styles.transactionRow, { borderColor: theme.icon + "55" }]}>
                   <Text style={[styles.childName, { color: theme.text }]}>{formatMoney(transaction.signed_amount, currency)}</Text>
                   <Text style={[styles.cardText, { color: theme.textSecondary }]}>
-                    {transaction.type} · {transaction.status} · {formatDateTime(transaction.created_at)}
+                    {transactionTypeLabel(transaction.type)} · {transactionStatusLabel(transaction.status)} · {formatDateTime(transaction.created_at)}
                   </Text>
                   {transaction.comment ? (
                     <Text style={[styles.cardText, { color: theme.textSecondary }]}>{transaction.comment}</Text>
