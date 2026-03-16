@@ -233,22 +233,22 @@ export default function MealScreen() {
                     visibleMenuOptions.map((option) => (
                         <TouchableOpacity
                             key={option.id}
-                            style={[styles.card, { backgroundColor: colorScheme === "dark" ? "#1E1E1E" : "#FFF" }]}
+                            style={[styles.card, { backgroundColor: themeColors.card, borderColor: themeColors.icon }]}
                             onPress={() => router.push(option.route)}
-                            activeOpacity={0.7}
+                            activeOpacity={0.8}
                         >
                             <View style={[styles.cardAccent, { backgroundColor: option.color }]} />
                             <View style={styles.cardContent}>
                                 <View style={[styles.iconContainer, { backgroundColor: option.color + "15" }]}>
-                                    <MaterialCommunityIcons name={option.icon} size={28} color={option.color} />
+                                    <MaterialCommunityIcons name={option.icon} size={24} color={option.color} />
                                 </View>
                                 <View style={styles.textContainer}>
                                     <Text style={[styles.cardTitle, { color: themeColors.text }]}>{option.title}</Text>
-                                    <Text style={[styles.cardDescription, { color: themeColors.icon }]}>
+                                    <Text style={[styles.cardDescription, { color: themeColors.textSecondary }]}>
                                         {option.description}
                                     </Text>
                                 </View>
-                                <MaterialCommunityIcons name="chevron-right" size={20} color={themeColors.icon} />
+                                <MaterialCommunityIcons name="chevron-right" size={20} color={themeColors.textSecondary} />
                             </View>
                         </TouchableOpacity>
                     ))
@@ -301,7 +301,9 @@ const styles = StyleSheet.create({
         marginTop: 4,
     },
     menuGrid: {
-        padding: 20,
+        paddingHorizontal: 16,
+        paddingTop: 4,
+        gap: 10,
     },
     skeletonList: {
         gap: 14,
@@ -358,14 +360,14 @@ const styles = StyleSheet.create({
     },
     card: {
         borderRadius: 15,
-        marginBottom: 16,
         overflow: "hidden",
         flexDirection: "row",
+        borderWidth: 1,
         shadowColor: "#000",
         shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 8,
-        elevation: 3,
+        shadowOpacity: 0.08,
+        shadowRadius: 6,
+        elevation: 2,
     },
     cardAccent: {
         width: 6,
@@ -375,27 +377,27 @@ const styles = StyleSheet.create({
         flex: 1,
         flexDirection: "row",
         alignItems: "center",
-        padding: 18,
+        padding: 14,
+        gap: 10,
     },
     iconContainer: {
-        width: 52,
-        height: 52,
-        borderRadius: 12,
+        width: 44,
+        height: 44,
+        borderRadius: 10,
         justifyContent: "center",
         alignItems: "center",
-        marginRight: 15,
     },
     textContainer: {
         flex: 1,
     },
     cardTitle: {
-        fontSize: 17,
+        fontSize: 15,
         fontWeight: "700",
         marginBottom: 2,
     },
     cardDescription: {
-        fontSize: 13,
-        lineHeight: 18,
+        fontSize: 12,
+        lineHeight: 17,
     },
     emptyStateCard: {
         borderRadius: 15,

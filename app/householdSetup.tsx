@@ -20,6 +20,8 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Colors } from "@/constants/theme";
 import * as SecureStore from "expo-secure-store";
 import { apiFetch } from "@/src/api/client";
+import { subscribeToHouseholdRealtime } from "@/src/realtime/client";
+import { persistStoredUser } from "@/src/session/user-cache";
 
 type ModuleKey = "meals" | "tasks" | "budget" | "calendar";
 type MemberRole = "parent" | "enfant";
@@ -69,6 +71,16 @@ type DietaryTagDetail = {
 const normalizeMemberRole = (value: unknown): MemberRole => {
     return String(value ?? "").trim() === "parent" ? "parent" : "enfant";
 };
+const compareMembersByRoleThenName = <T extends { role: MemberRole; name: string }>(a: T, b: T): number => {
+    if (a.role !== b.role) {
+        return a.role === "parent" ? -1 : 1;
+    }
+    return a.name.localeCompare(b.name, "fr", { sensitivity: "base" });
+};
+const normalizeMemberIdentity = (value?: string): string => {
+    return String(value ?? "").trim().toLocaleLowerCase("fr");
+};
+const toggleMemberRole = (role: MemberRole): MemberRole => (role === "parent" ? "enfant" : "parent");
 
 const MODULES: { id: ModuleKey; label: string; desc: string; icon: string }[] = [
     { id: "meals", label: "Repas & Courses", desc: "Menus et liste partagée.", icon: "food-apple-outline" },
@@ -222,11 +234,13 @@ export default function SetupHousehold() {
     const insets = useSafeAreaInsets();
     const params = useLocalSearchParams<{ mode?: string; scope?: string }>();
     const isEditMode = params.mode === "edit";
+    const isCreateMode = params.mode === "create";
     const isMealsScope = params.scope === "meals";
     const isTasksScope = params.scope === "tasks";
     const isCalendarScope = params.scope === "calendar";
     const colorScheme = useColorScheme();
     const theme = Colors[colorScheme ?? "light"];
+    const memberItemBackground = `${theme.tint}${colorScheme === "dark" ? "20" : "12"}`;
 
     const [loading, setLoading] = useState(false);
     const [initialLoading, setInitialLoading] = useState(true);
@@ -313,9 +327,11 @@ export default function SetupHousehold() {
     const [memberEmail, setMemberEmail] = useState("");
     const [memberRole, setMemberRole] = useState<MemberRole>("enfant");
     const [membersExpanded, setMembersExpanded] = useState(!isEditMode);
+    const [modulesExpanded, setModulesExpanded] = useState(!isEditMode);
     const [managedMembers, setManagedMembers] = useState<ManagedHouseholdMember[]>([]);
     const [managedRoleDrafts, setManagedRoleDrafts] = useState<Record<number, MemberRole>>({});
     const [canManageMembers, setCanManageMembers] = useState(false);
+    const [managedHouseholdId, setManagedHouseholdId] = useState<number | null>(null);
     const [membersLoading, setMembersLoading] = useState(false);
     const [addingManagedMember, setAddingManagedMember] = useState(false);
     const [updatingManagedMemberId, setUpdatingManagedMemberId] = useState<number | null>(null);
@@ -351,6 +367,10 @@ export default function SetupHousehold() {
 
     useEffect(() => {
         setMembersExpanded(!isEditMode);
+    }, [isEditMode]);
+
+    useEffect(() => {
+        setModulesExpanded(!isEditMode);
     }, [isEditMode]);
 
     const updateMealOption = (option: "recipes" | "polls" | "shopping_list", value: boolean) => {
@@ -590,6 +610,8 @@ export default function SetupHousehold() {
             setManagedMembers(normalizedMembers);
             setManagedRoleDrafts(nextRoleDrafts);
             setCanManageMembers(Boolean(response?.permissions?.can_manage_members));
+            const parsedHouseholdId = Number(response?.household?.id ?? 0);
+            setManagedHouseholdId(Number.isFinite(parsedHouseholdId) && parsedHouseholdId > 0 ? Math.trunc(parsedHouseholdId) : null);
         } catch (error: any) {
             Alert.alert("Membres", error?.message || "Impossible de charger les membres du foyer.");
         } finally {
@@ -597,11 +619,50 @@ export default function SetupHousehold() {
         }
     }, [isEditMode]);
 
+    useEffect(() => {
+        if (!isEditMode || !canManageMembers || managedHouseholdId === null || managedHouseholdId <= 0) {
+            return () => { };
+        }
+
+        let unsubscribeRealtime: (() => void) | null = null;
+        const setupRealtime = async () => {
+            unsubscribeRealtime = await subscribeToHouseholdRealtime(managedHouseholdId, (message) => {
+                const module = String(message?.module ?? "");
+                const type = String(message?.type ?? "");
+                if (module !== "household" || type !== "member_invite_responded") {
+                    return;
+                }
+
+                const status = String((message?.payload ?? {}).status ?? "");
+                if (status !== "accepted") {
+                    return;
+                }
+
+                void loadManagedMembers();
+            });
+        };
+
+        void setupRealtime();
+
+        return () => {
+            if (unsubscribeRealtime) {
+                unsubscribeRealtime();
+            }
+        };
+    }, [canManageMembers, isEditMode, loadManagedMembers, managedHouseholdId]);
+
     const updateManagedRoleDraft = (memberId: number, role: MemberRole) => {
         setManagedRoleDrafts((prev) => ({
             ...prev,
             [memberId]: role,
         }));
+    };
+    const toggleDraftMemberRoleAtIndex = (memberIndex: number) => {
+        setMembers((prev) => prev.map((member, index) => (
+            index === memberIndex
+                ? { ...member, role: toggleMemberRole(member.role) }
+                : member
+        )));
     };
 
     const shareManagedCredential = async (credential: CreatedMemberCredential, key: string) => {
@@ -638,6 +699,24 @@ export default function SetupHousehold() {
                 }),
             });
 
+            const invitationStatus = String(response?.invitation?.status ?? "");
+            const invitedEmail = String(response?.invitation?.invited_email ?? cleanEmail);
+            const isInvitationPending = invitationStatus === "pending";
+
+            if (isInvitationPending) {
+                setMemberName("");
+                setMemberEmail("");
+                setMemberRole("enfant");
+
+                Alert.alert(
+                    "Invitation envoyée",
+                    invitedEmail
+                        ? `${invitedEmail} recevra une demande pour rejoindre le foyer.`
+                        : `${cleanName} recevra une demande pour rejoindre le foyer.`
+                );
+                return;
+            }
+
             const memberId = Number(response?.member?.id ?? 0);
             const normalizedMemberId = Number.isFinite(memberId) && memberId > 0 ? Math.trunc(memberId) : null;
             const credential: CreatedMemberCredential = {
@@ -670,8 +749,8 @@ export default function SetupHousehold() {
         }
     };
 
-    const onUpdateManagedMemberRole = async (member: ManagedHouseholdMember) => {
-        const nextRole = managedRoleDrafts[member.id] ?? member.role;
+    const onUpdateManagedMemberRole = async (member: ManagedHouseholdMember, forcedRole?: MemberRole) => {
+        const nextRole = forcedRole ?? managedRoleDrafts[member.id] ?? member.role;
 
         setUpdatingManagedMemberId(member.id);
         try {
@@ -689,6 +768,25 @@ export default function SetupHousehold() {
         } finally {
             setUpdatingManagedMemberId(null);
         }
+    };
+    const confirmManagedMemberRoleToggle = (member: ManagedHouseholdMember) => {
+        const currentRole = managedRoleDrafts[member.id] ?? member.role;
+        const nextRole = toggleMemberRole(currentRole);
+
+        Alert.alert(
+            `${member.name}`,
+            `Modifier le rôle ?`,
+            [
+                { text: "Annuler", style: "cancel" },
+                {
+                    text: "Enregistrer",
+                    onPress: () => {
+                        updateManagedRoleDraft(member.id, nextRole);
+                        void onUpdateManagedMemberRole(member, nextRole);
+                    },
+                },
+            ]
+        );
     };
 
     const onDeleteManagedMember = (member: ManagedHouseholdMember) => {
@@ -1083,11 +1181,25 @@ export default function SetupHousehold() {
                     body: JSON.stringify(payload),
                 });
 
-                const userStr = await SecureStore.getItemAsync("user");
-                if (userStr && response?.household?.id) {
-                    const userData = JSON.parse(userStr);
-                    userData.household_id = response.household.id;
-                    await SecureStore.setItemAsync("user", JSON.stringify(userData));
+                const createdHouseholdId = Number(response?.household?.id ?? 0);
+                if (createdHouseholdId > 0) {
+                    try {
+                        const meResponse = await apiFetch("/me");
+                        if (meResponse?.user) {
+                            await persistStoredUser({
+                                ...meResponse.user,
+                                household_id: createdHouseholdId,
+                            });
+                        }
+                    } catch (refreshError) {
+                        console.error("Erreur rafraichissement profil apres creation foyer:", refreshError);
+                        const userStr = await SecureStore.getItemAsync("user");
+                        if (userStr) {
+                            const userData = JSON.parse(userStr);
+                            userData.household_id = createdHouseholdId;
+                            await SecureStore.setItemAsync("user", JSON.stringify(userData));
+                        }
+                    }
                 }
 
                 const createdMembers: CreatedMemberCredential[] = Array.isArray(response?.created_members)
@@ -1134,6 +1246,37 @@ export default function SetupHousehold() {
     const canSuggestCreateDietaryTag =
         normalizedSearch.length >= 2 &&
         !availableDietaryTags.some((tag) => tag.label.toLowerCase() === normalizedSearch || tag.key.toLowerCase() === normalizedSearch);
+    const sortedDraftMembers = useMemo(
+        () => members
+            .map((member, index) => ({ member, index }))
+            .sort((a, b) => compareMembersByRoleThenName(a.member, b.member)),
+        [members]
+    );
+    const orderedManagedMembers = useMemo(() => {
+        const activeEmail = normalizeMemberIdentity(activeUser?.email);
+        const activeName = normalizeMemberIdentity(activeUser?.name);
+        let detectedActiveMember: ManagedHouseholdMember | null = null;
+        const remainingMembers: ManagedHouseholdMember[] = [];
+
+        managedMembers.forEach((member) => {
+            const memberEmail = normalizeMemberIdentity(member.email);
+            const memberName = normalizeMemberIdentity(member.name);
+            const matchesActiveMember =
+                (activeEmail.length > 0 && memberEmail.length > 0 && memberEmail === activeEmail)
+                || (activeName.length > 0 && memberName === activeName);
+
+            if (!detectedActiveMember && matchesActiveMember) {
+                detectedActiveMember = member;
+                return;
+            }
+
+            remainingMembers.push(member);
+        });
+
+        remainingMembers.sort(compareMembersByRoleThenName);
+
+        return detectedActiveMember ? [detectedActiveMember, ...remainingMembers] : remainingMembers;
+    }, [activeUser?.email, activeUser?.name, managedMembers]);
 
     if (initialLoading) {
         return (
@@ -1143,7 +1286,7 @@ export default function SetupHousehold() {
         );
     }
 
-    if (alreadyConfigured && !isEditMode && createdMembersForShare.length === 0) {
+    if (alreadyConfigured && !isEditMode && !isCreateMode && createdMembersForShare.length === 0) {
         return (
             <View style={[styles.centerContainer, { backgroundColor: theme.background, padding: 24 }]}> 
                 <View style={[styles.lockCard, { backgroundColor: theme.card }]}> 
@@ -1275,36 +1418,40 @@ export default function SetupHousehold() {
             <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
                 {!isMealsScope && !isTasksScope && !isCalendarScope && (
                     <View style={styles.section}>
-                        <Text style={[styles.sectionTitle, { color: theme.text }]}>Nom du foyer</Text>
-                        <TextInput
-                            style={[styles.input, { backgroundColor: theme.card, color: theme.text }]}
-                            value={houseName}
-                            onChangeText={setHouseName}
-                            placeholder="Ex: La Tribu"
-                            placeholderTextColor={theme.textSecondary}
-                        />
+                        <View style={[styles.collapsibleSectionCard, { backgroundColor: theme.card, borderColor: theme.icon }]}>
+                            <View style={styles.collapsibleSectionHeader}>
+                                <Text style={[styles.sectionTitle, { color: theme.text, marginBottom: 0 }]}>Nom du foyer</Text>
+                            </View>
+                            <View style={styles.collapsibleSectionBody}>
+                                <TextInput
+                                    style={[styles.input, { backgroundColor: theme.background, color: theme.text, marginBottom: 0 }]}
+                                    value={houseName}
+                                    onChangeText={setHouseName}
+                                    placeholder="Ex: La Tribu"
+                                    placeholderTextColor={theme.textSecondary}
+                                />
+                            </View>
+                        </View>
                     </View>
                 )}
 
                 {!isMealsScope && !isTasksScope && !isCalendarScope && (
                     <View style={styles.section}>
-                        <TouchableOpacity
-                            style={[styles.membersHeaderRow, { backgroundColor: theme.card, borderColor: theme.icon }]}
-                            onPress={() => setMembersExpanded((prev) => !prev)}
-                        >
-                            <Text style={[styles.sectionTitle, { color: theme.text, marginBottom: 0 }]}>Membres du foyer</Text>
-                            <MaterialCommunityIcons
-                                name={membersExpanded ? "chevron-down" : "chevron-right"}
-                                size={24}
-                                color={theme.textSecondary}
-                            />
-                        </TouchableOpacity>
+                        <View style={[styles.collapsibleSectionCard, { backgroundColor: theme.card, borderColor: theme.icon }]}>
+                            <TouchableOpacity style={styles.collapsibleSectionHeader} onPress={() => setMembersExpanded((prev) => !prev)}>
+                                <Text style={[styles.sectionTitle, { color: theme.text, marginBottom: 0 }]}>Membres du foyer</Text>
+                                <MaterialCommunityIcons
+                                    name={membersExpanded ? "chevron-down" : "chevron-right"}
+                                    size={24}
+                                    color={theme.textSecondary}
+                                />
+                            </TouchableOpacity>
 
-                        {membersExpanded ? (
-                            <View style={{ marginTop: 10 }}>
+                            {membersExpanded ? (
+                                <View style={styles.collapsibleSectionBody}>
                                 {!isEditMode && (
                                     <>
-                                        <View style={[styles.activeUserCard, { backgroundColor: theme.card }]}>
+                                        <View style={[styles.activeUserCard, { backgroundColor: memberItemBackground }]}>
                                             <Text style={[styles.activeUserLabel, { color: theme.textSecondary }]}>
                                                 Utilisateur actif (Parent)
                                             </Text>
@@ -1318,16 +1465,36 @@ export default function SetupHousehold() {
                                             ) : null}
                                         </View>
 
-                                        {members.length > 0 && (
+                                        {sortedDraftMembers.length > 0 && (
                                             <View style={{ marginTop: 10, marginBottom: 10, gap: 8 }}>
-                                                {members.map((member, index) => (
-                                                    <View key={`${member.name}-${index}`} style={[styles.memberCard, { backgroundColor: theme.card }]}>
+                                                {sortedDraftMembers.map(({ member, index }) => (
+                                                    <View key={`${member.name}-${index}`} style={[styles.memberCard, { backgroundColor: memberItemBackground }]}>
                                                         <View style={{ flex: 1 }}>
-                                                            <Text style={[styles.memberName, { color: theme.text }]}>{member.name}</Text>
-                                                            <Text style={[styles.memberMeta, { color: theme.textSecondary }]}>
-                                                                Rôle: {member.role}
-                                                                {member.email ? ` | ${member.email}` : ""}
-                                                            </Text>
+                                                            <View style={styles.memberTitleRow}>
+                                                                <Text style={[styles.memberName, { color: theme.text }]}>{member.name}</Text>
+                                                                <TouchableOpacity
+                                                                    style={[
+                                                                        styles.memberRoleBadge,
+                                                                        member.role === "parent"
+                                                                            ? { borderColor: theme.tint, backgroundColor: `${theme.tint}22` }
+                                                                            : { borderColor: theme.icon, backgroundColor: `${theme.icon}22` },
+                                                                    ]}
+                                                                    onPress={() => toggleDraftMemberRoleAtIndex(index)}
+                                                                    activeOpacity={0.75}
+                                                                >
+                                                                    <Text
+                                                                        style={[
+                                                                            styles.memberRoleBadgeText,
+                                                                            { color: member.role === "parent" ? theme.tint : theme.textSecondary },
+                                                                        ]}
+                                                                    >
+                                                                        {member.role === "parent" ? "Parent" : "Enfant"}
+                                                                    </Text>
+                                                                </TouchableOpacity>
+                                                            </View>
+                                                            {member.email ? (
+                                                                <Text style={[styles.memberMeta, { color: theme.textSecondary }]}>{member.email}</Text>
+                                                            ) : null}
                                                         </View>
                                                         <TouchableOpacity onPress={() => removeMember(index)}>
                                                             <MaterialCommunityIcons name="trash-can-outline" size={22} color={theme.textSecondary} />
@@ -1345,7 +1512,7 @@ export default function SetupHousehold() {
                                             <ActivityIndicator size="small" color={theme.tint} />
                                         ) : (
                                             <View style={{ gap: 8, marginBottom: 12 }}>
-                                                {managedMembers.map((member) => {
+                                                {orderedManagedMembers.map((member) => {
                                                     const nextRole = managedRoleDrafts[member.id] ?? member.role;
                                                     const isUpdating = updatingManagedMemberId === member.id;
                                                     const isDeleting = deletingManagedMemberId === member.id;
@@ -1353,9 +1520,31 @@ export default function SetupHousehold() {
                                                     const isSharing = sendingMemberKey === shareKey;
 
                                                     return (
-                                                        <View key={member.id} style={[styles.memberCard, { backgroundColor: theme.card }]}>
+                                                        <View key={member.id} style={[styles.memberCard, { backgroundColor: memberItemBackground }]}>
                                                             <View style={{ flex: 1 }}>
-                                                                <Text style={[styles.memberName, { color: theme.text }]}>{member.name}</Text>
+                                                                <View style={styles.memberTitleRow}>
+                                                                    <Text style={[styles.memberName, { color: theme.text }]}>{member.name}</Text>
+                                                                    <TouchableOpacity
+                                                                        style={[
+                                                                            styles.memberRoleBadge,
+                                                                            nextRole === "parent"
+                                                                                ? { borderColor: theme.tint, backgroundColor: `${theme.tint}22` }
+                                                                                : { borderColor: theme.icon, backgroundColor: `${theme.icon}22` },
+                                                                        ]}
+                                                                        onPress={() => confirmManagedMemberRoleToggle(member)}
+                                                                        activeOpacity={0.75}
+                                                                        disabled={!canManageMembers || isUpdating || isDeleting}
+                                                                    >
+                                                                        <Text
+                                                                            style={[
+                                                                                styles.memberRoleBadgeText,
+                                                                                { color: nextRole === "parent" ? theme.tint : theme.textSecondary },
+                                                                            ]}
+                                                                        >
+                                                                            {nextRole === "parent" ? "Parent" : "Enfant"}
+                                                                        </Text>
+                                                                    </TouchableOpacity>
+                                                                </View>
                                                                 <Text style={[styles.memberMeta, { color: theme.textSecondary }]}>
                                                                     {member.email || "E-mail non défini"}
                                                                 </Text>
@@ -1365,50 +1554,15 @@ export default function SetupHousehold() {
                                                                         : "Accès actif"}
                                                                 </Text>
 
-                                                                <View style={[styles.roleRow, { marginTop: 8, marginBottom: 8 }]}>
-                                                                    <TouchableOpacity
-                                                                        onPress={() => updateManagedRoleDraft(member.id, "parent")}
-                                                                        style={[
-                                                                            styles.roleChip,
-                                                                            { borderColor: theme.icon, backgroundColor: theme.background },
-                                                                            nextRole === "parent" && { borderColor: theme.tint, backgroundColor: theme.tint + "20" },
-                                                                        ]}
-                                                                    >
-                                                                        <Text style={[styles.roleChipText, { color: theme.text }]}>Parent</Text>
-                                                                    </TouchableOpacity>
-                                                                    <TouchableOpacity
-                                                                        onPress={() => updateManagedRoleDraft(member.id, "enfant")}
-                                                                        style={[
-                                                                            styles.roleChip,
-                                                                            { borderColor: theme.icon, backgroundColor: theme.background },
-                                                                            nextRole === "enfant" && { borderColor: theme.tint, backgroundColor: theme.tint + "20" },
-                                                                        ]}
-                                                                    >
-                                                                        <Text style={[styles.roleChipText, { color: theme.text }]}>Enfant</Text>
-                                                                    </TouchableOpacity>
-                                                                </View>
-
                                                                 {canManageMembers ? (
                                                                     <View style={styles.memberActionRow}>
-                                                                        <TouchableOpacity
-                                                                            onPress={() => {
-                                                                                void onUpdateManagedMemberRole(member);
-                                                                            }}
-                                                                            style={[styles.memberActionBtn, { backgroundColor: theme.tint, opacity: isUpdating ? 0.7 : 1 }]}
-                                                                            disabled={isUpdating || isDeleting}
-                                                                        >
-                                                                            <Text style={styles.memberActionBtnText}>
-                                                                                {isUpdating ? "Mise à jour..." : "Mettre à jour"}
-                                                                            </Text>
-                                                                        </TouchableOpacity>
-
                                                                         <TouchableOpacity
                                                                             onPress={() => onDeleteManagedMember(member)}
                                                                             style={[styles.memberActionBtn, { backgroundColor: theme.background, borderColor: theme.icon, borderWidth: 1, opacity: isDeleting ? 0.7 : 1 }]}
                                                                             disabled={isUpdating || isDeleting}
                                                                         >
                                                                             <Text style={[styles.memberActionBtnText, { color: theme.text }]}>
-                                                                                {isDeleting ? "Suppression..." : "Supprimer"}
+                                                                                {isDeleting ? "Supp..." : "Supprimer"}
                                                                             </Text>
                                                                         </TouchableOpacity>
 
@@ -1418,10 +1572,10 @@ export default function SetupHousehold() {
                                                                                     void onShareManagedMemberAccess(member);
                                                                                 }}
                                                                                 style={[styles.memberActionBtn, { backgroundColor: theme.background, borderColor: theme.tint, borderWidth: 1, opacity: isSharing ? 0.7 : 1 }]}
-                                                                                disabled={isSharing}
+                                                                                disabled={isSharing || isUpdating || isDeleting}
                                                                             >
                                                                                 <Text style={[styles.memberActionBtnText, { color: theme.tint }]}>
-                                                                                    {isSharing ? "Partage..." : "Partager les accès"}
+                                                                                    {isSharing ? "Partage..." : "Partager"}
                                                                                 </Text>
                                                                             </TouchableOpacity>
                                                                         )}
@@ -1437,7 +1591,7 @@ export default function SetupHousehold() {
                                 ) : null}
 
                                 {!isEditMode || canManageMembers ? (
-                                    <View style={[styles.memberEditor, { backgroundColor: theme.card }]}>
+                                    <View style={[styles.memberEditor, { backgroundColor: memberItemBackground }]}>
                                         <TextInput
                                             style={[styles.input, { backgroundColor: theme.background, color: theme.text, marginBottom: 12 }]}
                                             placeholder="Nom du membre"
@@ -1505,21 +1659,32 @@ export default function SetupHousehold() {
                             </View>
                         ) : null}
                     </View>
+                </View>
                 )}
 
                 <View style={styles.section}>
-                    <Text style={[styles.sectionTitle, { color: theme.text }]}>
+                    <View style={[styles.collapsibleSectionCard, { backgroundColor: theme.card, borderColor: theme.icon }]}>
+                        <TouchableOpacity style={styles.collapsibleSectionHeader} onPress={() => setModulesExpanded((prev) => !prev)}>
+                            <Text style={[styles.sectionTitle, { color: theme.text, marginBottom: 0 }]}>
                         {isMealsScope
                             ? "Repas & courses"
                             : isTasksScope
                                 ? "Tâches ménagères"
                                 : isCalendarScope
                                     ? "Calendrier"
-                                : "Modules et sous-config"}
-                    </Text>
+                                : "Configuration des modules"}
+                            </Text>
+                            <MaterialCommunityIcons
+                                name={modulesExpanded ? "chevron-down" : "chevron-right"}
+                                size={24}
+                                color={theme.textSecondary}
+                            />
+                        </TouchableOpacity>
 
-                    {visibleModules.map((module) => (
-                        <View key={module.id} style={[styles.moduleContainer, { backgroundColor: theme.card }]}> 
+                        {modulesExpanded ? (
+                            <View style={styles.collapsibleSectionBody}>
+                                {visibleModules.map((module) => (
+                                    <View key={module.id} style={[styles.moduleContainer, { backgroundColor: theme.background }]}> 
                             <View style={styles.moduleCard}> 
                                 <View style={[styles.moduleIcon, { backgroundColor: theme.background }]}> 
                                     <MaterialCommunityIcons name={module.icon as any} size={24} color={theme.tint} />
@@ -2054,7 +2219,10 @@ export default function SetupHousehold() {
                                 </View>
                             )}
                         </View>
-                    ))}
+                                ))}
+                            </View>
+                        ) : null}
+                    </View>
                 </View>
 
                 <TouchableOpacity
@@ -2161,49 +2329,58 @@ const styles = StyleSheet.create({
 
     activeUserCard: {
         borderRadius: 12,
-        padding: 12,
-        marginBottom: 10,
+        padding: 10,
+        marginBottom: 8,
     },
-    activeUserLabel: { fontSize: 12, fontWeight: "600" },
-    activeUserName: { fontSize: 15, fontWeight: "700", marginTop: 2 },
-    activeUserEmail: { fontSize: 12, marginTop: 2 },
-    membersHeaderRow: {
+    activeUserLabel: { fontSize: 11, fontWeight: "600" },
+    activeUserName: { fontSize: 14, fontWeight: "700", marginTop: 2 },
+    activeUserEmail: { fontSize: 11, marginTop: 1 },
+    collapsibleSectionCard: {
         borderRadius: 12,
         borderWidth: 1,
+        overflow: "hidden",
+    },
+    collapsibleSectionHeader: {
         paddingHorizontal: 12,
         paddingVertical: 10,
         flexDirection: "row",
         alignItems: "center",
         justifyContent: "space-between",
+        gap: 12,
+    },
+    collapsibleSectionBody: {
+        paddingHorizontal: 12,
+        paddingBottom: 12,
+        paddingTop: 10,
     },
     memberActionRow: {
         flexDirection: "row",
         flexWrap: "wrap",
-        gap: 8,
-        marginTop: 4,
+        gap: 6,
+        marginTop: 2,
     },
     memberActionBtn: {
-        minHeight: 36,
-        paddingHorizontal: 10,
-        borderRadius: 10,
+        minHeight: 30,
+        paddingHorizontal: 8,
+        borderRadius: 8,
         alignItems: "center",
         justifyContent: "center",
     },
     memberActionBtnText: {
         color: "white",
-        fontSize: 12,
+        fontSize: 11,
         fontWeight: "700",
     },
 
-    memberEditor: { borderRadius: 12, padding: 12 },
-    roleRow: { flexDirection: "row", gap: 8, marginBottom: 6 },
+    memberEditor: { borderRadius: 12, padding: 10 },
+    roleRow: { flexDirection: "row", gap: 6, marginBottom: 4 },
     roleChip: {
         borderWidth: 1,
         borderRadius: 10,
-        paddingHorizontal: 12,
-        paddingVertical: 8,
+        paddingHorizontal: 10,
+        paddingVertical: 6,
     },
-    roleChipText: { fontSize: 13, fontWeight: "600" },
+    roleChipText: { fontSize: 12, fontWeight: "600" },
 
     inlineRow: { flexDirection: "row", gap: 8, marginBottom: 10 },
     smallChip: {
@@ -2315,13 +2492,29 @@ const styles = StyleSheet.create({
 
     memberCard: {
         borderRadius: 12,
-        padding: 12,
+        padding: 10,
         flexDirection: "row",
         alignItems: "center",
-        gap: 10,
+        gap: 8,
     },
-    memberName: { fontSize: 15, fontWeight: "700" },
-    memberMeta: { fontSize: 12, marginTop: 2 },
+    memberTitleRow: {
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: 8,
+    },
+    memberRoleBadge: {
+        borderWidth: 1,
+        borderRadius: 999,
+        paddingHorizontal: 8,
+        paddingVertical: 2,
+    },
+    memberRoleBadgeText: {
+        fontSize: 10,
+        fontWeight: "700",
+    },
+    memberName: { fontSize: 14, fontWeight: "700" },
+    memberMeta: { fontSize: 11, marginTop: 2 },
     templateCard: {
         borderRadius: 12,
         padding: 10,

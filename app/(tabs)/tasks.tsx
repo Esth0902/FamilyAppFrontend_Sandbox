@@ -16,7 +16,7 @@ import { useColorScheme } from "@/hooks/use-color-scheme";
 import { apiFetch } from "@/src/api/client";
 import { addDays, toIsoDate } from "@/src/utils/date";
 
-type TaskStatus = "à faire" | "réalisée" | "annulée";
+type TaskStatus = "Ã  faire" | "rÃ©alisÃ©e" | "annulÃ©e";
 type TaskModuleKey = "planned" | "schedule" | "routines";
 
 type TaskModuleCard = {
@@ -37,9 +37,43 @@ type BoardPayload = {
     role: "parent" | "enfant";
   };
   instances: {
+    due_date?: string;
     status: TaskStatus;
     validated_by_parent: boolean;
+    assignee?: {
+      id: number;
+      name?: string;
+    };
+    assignees?: {
+      id: number;
+      name?: string;
+    }[];
   }[];
+};
+
+const isoWeekDayFromDate = (date: Date) => {
+  const day = date.getDay();
+  return day === 0 ? 7 : day;
+};
+
+const weekStartFromDate = (date: Date) => {
+  const normalized = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  return addDays(normalized, 1 - isoWeekDayFromDate(normalized));
+};
+
+const isInstanceAssignedToUser = (
+  instance: BoardPayload["instances"][number],
+  userId: number
+) => {
+  if (!Number.isInteger(userId) || userId <= 0) {
+    return false;
+  }
+
+  if (Array.isArray(instance.assignees) && instance.assignees.length > 0) {
+    return instance.assignees.some((assignee) => Number(assignee?.id ?? 0) === userId);
+  }
+
+  return Number(instance.assignee?.id ?? 0) === userId;
 };
 
 export default function TasksTabScreen() {
@@ -54,30 +88,36 @@ export default function TasksTabScreen() {
   const [currentUserRole, setCurrentUserRole] = useState<"parent" | "enfant">("enfant");
   const [stats, setStats] = useState({ todo: 0, done: 0, validated: 0 });
 
-  const rangeFrom = useMemo(() => toIsoDate(new Date()), []);
-  const rangeTo = useMemo(() => toIsoDate(addDays(new Date(), 13)), []);
-
   const loadBoard = useCallback(async () => {
     setLoading(true);
     try {
+      const weekStart = weekStartFromDate(new Date());
+      const rangeFrom = toIsoDate(weekStart);
+      const rangeTo = toIsoDate(addDays(weekStart, 6));
       const payload = await apiFetch(`/tasks/board?from=${rangeFrom}&to=${rangeTo}`) as BoardPayload;
       const instances = Array.isArray(payload?.instances) ? payload.instances : [];
 
       setTasksEnabled(Boolean(payload?.tasks_enabled));
       setCanManageTemplates(Boolean(payload?.can_manage_templates));
       setCanManageInstances(Boolean(payload?.can_manage_instances));
-      setCurrentUserRole(payload?.current_user?.role === "parent" ? "parent" : "enfant");
+      const nextRole = payload?.current_user?.role === "parent" ? "parent" : "enfant";
+      const nextUserId = Number.isInteger(payload?.current_user?.id) ? Number(payload.current_user?.id) : null;
+      setCurrentUserRole(nextRole);
+      const visibleInstances = nextRole === "parent"
+        ? instances
+        : (nextUserId !== null ? instances.filter((instance) => isInstanceAssignedToUser(instance, nextUserId)) : []);
+
       setStats({
-        todo: instances.filter((instance) => instance.status === "à faire").length,
-        done: instances.filter((instance) => instance.status === "réalisée").length,
-        validated: instances.filter((instance) => instance.validated_by_parent).length,
+        todo: visibleInstances.filter((instance) => instance.status === "à faire").length,
+        done: visibleInstances.filter((instance) => instance.status === "réalisée").length,
+        validated: visibleInstances.filter((instance) => instance.validated_by_parent).length,
       });
     } catch (error: any) {
-      Alert.alert("Tâches", error?.message || "Impossible de charger les tâches.");
+      Alert.alert("TÃ¢ches", error?.message || "Impossible de charger les tÃ¢ches.");
     } finally {
       setLoading(false);
     }
-  }, [rangeFrom, rangeTo]);
+  }, []);
 
   useFocusEffect(
     useCallback(() => {
@@ -88,24 +128,24 @@ export default function TasksTabScreen() {
   const menuOptions = useMemo<TaskModuleCard[]>(() => [
     {
       id: "planned",
-      title: "Tâches planifiées",
-      description: "Suivi des tâches prévues et de leur statut",
+      title: "TÃ¢ches planifiÃ©es",
+      description: "Suivi des tÃ¢ches prÃ©vues et de leur statut",
       icon: "calendar-check-outline",
       color: colorScheme === "dark" ? "#4DABFF" : theme.tint,
       enabled: true,
     },
     {
       id: "schedule",
-      title: "Planifier une tâche ponctuelle",
-      description: "Créer une tâche ponctuelle et l'attribuer à un membre du foyer",
+      title: "Planifier une tÃ¢che ponctuelle",
+      description: "CrÃ©er une tÃ¢che ponctuelle et l'attribuer Ã  un membre du foyer",
       icon: "calendar-plus",
       color: "#7ED321",
       enabled: canManageTemplates || canManageInstances,
     },
     {
       id: "routines",
-      title: "Gérer les routines",
-      description: "Créer et modifier des tâches réutilisables",
+      title: "GÃ©rer les routines",
+      description: "CrÃ©er et modifier des tÃ¢ches rÃ©utilisables",
       icon: "playlist-edit",
       color: "#F5A623",
       enabled: canManageTemplates,
@@ -130,7 +170,7 @@ export default function TasksTabScreen() {
     <ScrollView style={[styles.container, { backgroundColor: theme.background }]} contentContainerStyle={styles.content}>
       <View style={styles.header}>
         <View style={styles.headerTopRow}>
-          <Text style={[styles.headerTitle, { color: theme.text }]}>Tâches du foyer</Text>
+          <Text style={[styles.headerTitle, { color: theme.text }]}>TÃ¢ches du foyer</Text>
           {canManageHouseholdConfig ? (
             <TouchableOpacity
               onPress={() => router.push("/householdSetup?mode=edit&scope=tasks")}
@@ -140,14 +180,14 @@ export default function TasksTabScreen() {
             </TouchableOpacity>
           ) : null}
         </View>
-        <Text style={[styles.headerSubtitle, { color: theme.textSecondary }]}>Choisis un espace pour gérer les tâches</Text>
+        <Text style={[styles.headerSubtitle, { color: theme.textSecondary }]}>GÃ¨re les tÃ¢ches assignÃ©es aux membres du foyer</Text>
       </View>
 
       {!tasksEnabled ? (
         <View style={[styles.emptyCard, { backgroundColor: theme.card }]}>
-          <Text style={[styles.emptyTitle, { color: theme.text }]}>Module désactivé</Text>
+          <Text style={[styles.emptyTitle, { color: theme.text }]}>Module dÃ©sactivÃ©</Text>
           <Text style={{ color: theme.textSecondary, lineHeight: 20 }}>
-            Active le module tâches dans la configuration du foyer pour commencer.
+            Active le module tÃ¢ches dans la configuration du foyer pour commencer.
           </Text>
           {canManageHouseholdConfig ? (
             <TouchableOpacity
@@ -163,15 +203,15 @@ export default function TasksTabScreen() {
           <View style={styles.statsRow}>
             <View style={[styles.statCard, { backgroundColor: theme.card }]}>
               <Text style={[styles.statValue, { color: theme.text }]}>{stats.todo}</Text>
-              <Text style={[styles.statLabel, { color: theme.textSecondary }]}>À faire</Text>
+              <Text style={[styles.statLabel, { color: theme.textSecondary }]}>Ã€ faire</Text>
             </View>
             <View style={[styles.statCard, { backgroundColor: theme.card }]}>
               <Text style={[styles.statValue, { color: theme.text }]}>{stats.done}</Text>
-              <Text style={[styles.statLabel, { color: theme.textSecondary }]}>Réalisées</Text>
+              <Text style={[styles.statLabel, { color: theme.textSecondary }]}>RÃ©alisÃ©es</Text>
             </View>
             <View style={[styles.statCard, { backgroundColor: theme.card }]}>
               <Text style={[styles.statValue, { color: theme.text }]}>{stats.validated}</Text>
-              <Text style={[styles.statLabel, { color: theme.textSecondary }]}>Validées</Text>
+              <Text style={[styles.statLabel, { color: theme.textSecondary }]}>ValidÃ©es</Text>
             </View>
           </View>
 

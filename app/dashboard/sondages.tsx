@@ -204,7 +204,7 @@ export default function DashboardPollsScreen() {
         <TouchableOpacity onPress={() => router.replace("/dashboard")}>
           <MaterialCommunityIcons name="arrow-left" size={24} color={theme.text} />
         </TouchableOpacity>
-        <Text style={[styles.headerTitle, { color: theme.text }]}>Mes sondages</Text>
+        <Text style={[styles.headerTitle, { color: theme.text }]}>Sondages</Text>
       </View>
 
       <ScrollView contentContainerStyle={styles.content}>
@@ -254,7 +254,7 @@ export default function DashboardPollsScreen() {
               </View>
             ))
           ) : null : (
-            <Text style={[styles.emptyText, { color: theme.textSecondary }]}>Aucune recette votée.</Text>
+            <Text style={[styles.emptyText, { color: theme.textSecondary }]}>Aucune recette n&apos;a reçu de vote.</Text>
           )}
         </View>
       </ScrollView>
@@ -327,4 +327,3 @@ const styles = StyleSheet.create({
   favoriteTitle: { fontWeight: "700", fontSize: 14 },
   favoriteMeta: { fontSize: 12, marginTop: 2 },
 });
-

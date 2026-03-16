@@ -9,14 +9,17 @@ import {
   resolvePublicReverbScheme,
 } from "@/src/config/public-env";
 
-export type HouseholdRealtimeMessage = {
+export type RealtimeMessage = {
   module?: string;
   type?: string;
   payload?: Record<string, unknown>;
   emitted_at?: string;
 };
 
-type RealtimeCallback = (message: HouseholdRealtimeMessage) => void;
+export type HouseholdRealtimeMessage = RealtimeMessage;
+export type UserRealtimeMessage = RealtimeMessage;
+
+type RealtimeCallback = (message: RealtimeMessage) => void;
 type RealtimeErrorCallback = (error: unknown) => void;
 
 type PusherInstance = any;
@@ -169,24 +172,20 @@ const getOrCreatePusher = async (): Promise<PusherInstance | null> => {
   return pusherInitPromise;
 };
 
-export const subscribeToHouseholdRealtime = async (
-  householdId: number,
+const subscribeToRealtimeChannel = async (
+  channelName: string,
+  eventName: string,
   onMessage: RealtimeCallback,
   onError?: RealtimeErrorCallback
 ): Promise<() => void> => {
-  if (!Number.isFinite(householdId) || householdId <= 0) {
-    return () => {};
-  }
-
   const pusher = await getOrCreatePusher();
   if (!pusher) {
     return () => {};
   }
 
-  const channelName = `private-household.${householdId}`;
   const channel = pusher.subscribe(channelName);
 
-  const realtimeHandler = (message: HouseholdRealtimeMessage) => {
+  const realtimeHandler = (message: RealtimeMessage) => {
     onMessage(message);
   };
 
@@ -214,18 +213,44 @@ export const subscribeToHouseholdRealtime = async (
     }
   };
 
-  channel.bind("household.realtime", realtimeHandler);
+  channel.bind(eventName, realtimeHandler);
   channel.bind("pusher:subscription_succeeded", subscribedHandler);
   channel.bind("pusher:subscription_error", errorHandler);
   pusher.connection.bind("error", connectionErrorHandler);
 
   return () => {
-    channel.unbind("household.realtime", realtimeHandler);
+    channel.unbind(eventName, realtimeHandler);
     channel.unbind("pusher:subscription_succeeded", subscribedHandler);
     channel.unbind("pusher:subscription_error", errorHandler);
     pusher.connection.unbind("error", connectionErrorHandler);
     pusher.unsubscribe(channelName);
   };
+};
+
+export const subscribeToHouseholdRealtime = async (
+  householdId: number,
+  onMessage: (message: HouseholdRealtimeMessage) => void,
+  onError?: RealtimeErrorCallback
+): Promise<() => void> => {
+  if (!Number.isFinite(householdId) || householdId <= 0) {
+    return () => {};
+  }
+
+  const channelName = `private-household.${householdId}`;
+  return subscribeToRealtimeChannel(channelName, "household.realtime", onMessage, onError);
+};
+
+export const subscribeToUserRealtime = async (
+  userId: number,
+  onMessage: (message: UserRealtimeMessage) => void,
+  onError?: RealtimeErrorCallback
+): Promise<() => void> => {
+  if (!Number.isFinite(userId) || userId <= 0) {
+    return () => {};
+  }
+
+  const channelName = `private-App.Models.User.${userId}`;
+  return subscribeToRealtimeChannel(channelName, "user.realtime", onMessage, onError);
 };
 
 export const disconnectRealtime = () => {

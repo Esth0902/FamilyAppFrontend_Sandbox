@@ -194,6 +194,10 @@ export default function SettingsScreen() {
         }
     };
 
+    const onCreateNewHousehold = () => {
+        router.push("/householdSetup?mode=create");
+    };
+
     const onSaveProfile = async () => {
         if (!user) {
             return;
@@ -367,6 +371,14 @@ export default function SettingsScreen() {
                         );
                     })
                 )}
+
+                <TouchableOpacity
+                    style={[styles.createHouseholdButton, { borderColor: theme.tint, backgroundColor: `${theme.tint}12` }]}
+                    onPress={onCreateNewHousehold}
+                >
+                    <MaterialCommunityIcons name="home-plus-outline" size={18} color={theme.tint} />
+                    <Text style={[styles.createHouseholdButtonText, { color: theme.tint }]}>Créer un nouveau foyer</Text>
+                </TouchableOpacity>
             </View>
 
             <View style={[styles.card, { backgroundColor: theme.card }]}>
@@ -573,6 +585,20 @@ const styles = StyleSheet.create({
     },
     secondaryInlineButtonText: {
         fontSize: 13,
+        fontWeight: "700",
+    },
+    createHouseholdButton: {
+        borderRadius: 10,
+        borderWidth: 1,
+        paddingVertical: 10,
+        paddingHorizontal: 12,
+        alignItems: "center",
+        justifyContent: "center",
+        flexDirection: "row",
+        gap: 8,
+    },
+    createHouseholdButtonText: {
+        fontSize: 14,
         fontWeight: "700",
     },
     label: {

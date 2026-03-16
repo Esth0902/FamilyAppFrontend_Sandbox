@@ -18,6 +18,7 @@ import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { Colors } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import { apiFetch } from "@/src/api/client";
+import { subscribeToUserRealtime } from "@/src/realtime/client";
 import { useStoredUserState } from "@/src/session/user-cache";
 import {
   filterRecipesByQuery,
@@ -82,6 +83,10 @@ type CalendarTaskInstance = {
     id: number;
     name: string;
   };
+  assignees?: {
+    id: number;
+    name: string;
+  }[];
   permissions: {
     can_toggle: boolean;
     can_validate: boolean;
@@ -222,6 +227,32 @@ const taskStatusColor = (value: string) => {
   if (isTaskStatus(value, TASK_STATUS_DONE)) return "#50BFA5";
   if (isTaskStatus(value, TASK_STATUS_CANCELLED)) return "#D96C6C";
   return "#7C5CFA";
+};
+
+const taskAssigneeNames = (task: CalendarTaskInstance) => {
+  const names = Array.isArray(task.assignees)
+    ? task.assignees
+      .map((assignee) => String(assignee?.name ?? "").trim())
+      .filter((name) => name.length > 0)
+    : [];
+
+  if (names.length > 0) {
+    return names.join(", ");
+  }
+
+  return String(task.assignee?.name ?? "").trim();
+};
+
+const isCalendarTaskAssignedToUser = (task: CalendarTaskInstance, userId: number) => {
+  if (!Number.isInteger(userId) || userId <= 0) {
+    return false;
+  }
+
+  if (Array.isArray(task.assignees) && task.assignees.length > 0) {
+    return task.assignees.some((assignee) => assignee.id === userId);
+  }
+
+  return Number(task.assignee?.id ?? 0) === userId;
 };
 
 const formatMonthLabel = (date: Date) =>
@@ -636,6 +667,35 @@ export default function CalendarScreen() {
   );
 
   useEffect(() => {
+    const parsedUserId = Number(taskCurrentUserId ?? 0);
+    if (!Number.isFinite(parsedUserId) || parsedUserId <= 0) {
+      return () => {};
+    }
+
+    let unsubscribeRealtime: (() => void) | null = null;
+
+    const setupRealtime = async () => {
+      unsubscribeRealtime = await subscribeToUserRealtime(parsedUserId, (message) => {
+        const module = String(message?.module ?? "");
+        const type = String(message?.type ?? "");
+        if (module !== "notifications" || type !== "task_reassignment_invite_responded") {
+          return;
+        }
+
+        void loadBoard({ silent: true });
+      });
+    };
+
+    void setupRealtime();
+
+    return () => {
+      if (unsubscribeRealtime) {
+        unsubscribeRealtime();
+      }
+    };
+  }, [loadBoard, taskCurrentUserId]);
+
+  useEffect(() => {
     if (editingEventId === null) {
       setEventDate(selectedDate);
       setEventEndDate(selectedDate);
@@ -706,15 +766,27 @@ export default function CalendarScreen() {
     }, {});
   }, [mealPlan]);
 
+  const visibleTaskInstances = useMemo(() => {
+    if (taskCurrentUserRole === "parent") {
+      return taskInstances;
+    }
+
+    if (taskCurrentUserId === null) {
+      return [];
+    }
+
+    return taskInstances.filter((task) => isCalendarTaskAssignedToUser(task, taskCurrentUserId));
+  }, [taskCurrentUserId, taskCurrentUserRole, taskInstances]);
+
   const taskCountByDay = useMemo(() => {
-    return taskInstances.reduce<Record<string, number>>((acc, task) => {
+    return visibleTaskInstances.reduce<Record<string, number>>((acc, task) => {
       if (!task.due_date) {
         return acc;
       }
       acc[task.due_date] = (acc[task.due_date] ?? 0) + 1;
       return acc;
     }, {});
-  }, [taskInstances]);
+  }, [visibleTaskInstances]);
 
   const selectedDayEvents = useMemo(() => {
     return events
@@ -734,16 +806,16 @@ export default function CalendarScreen() {
   }, [mealPlan, selectedDate]);
 
   const selectedDayTasks = useMemo(() => {
-    return taskInstances
+    return visibleTaskInstances
       .filter((task) => task.due_date === selectedDate)
       .sort((left, right) => {
-        const assigneeCompare = left.assignee.name.localeCompare(right.assignee.name);
+        const assigneeCompare = taskAssigneeNames(left).localeCompare(taskAssigneeNames(right));
         if (assigneeCompare !== 0) {
           return assigneeCompare;
         }
         return left.title.localeCompare(right.title);
       });
-  }, [selectedDate, taskInstances]);
+  }, [selectedDate, visibleTaskInstances]);
 
   const selectedMealRecipe = useMemo(() => {
     return recipeOptions.find((recipe) => recipe.id === mealPlanRecipeId) ?? null;
@@ -1450,11 +1522,17 @@ export default function CalendarScreen() {
           <Modal visible={dayProgramModalVisible} transparent animationType="slide" onRequestClose={() => setDayProgramModalVisible(false)}>
             <View style={styles.modalBackdrop}>
               <View style={[styles.modalCard, { backgroundColor: theme.card }]}>
-                <View style={styles.cardTitleRow}>
-                  <Text style={[styles.cardTitle, { color: theme.text, marginBottom: 0 }]}>
+                <View style={styles.dayProgramHeaderRow}>
+                  <Text
+                    style={[
+                      styles.cardTitle,
+                      styles.dayProgramHeaderTitle,
+                      { color: theme.text, marginBottom: 0 },
+                    ]}
+                  >
                     Programme du {formatFullDateLabel(selectedDate)}
                   </Text>
-                  <View style={styles.modalHeaderActions}>
+                  <View style={styles.dayProgramHeaderActions}>
                     <TouchableOpacity
                       onPress={() => openNewEventModal(selectedDate)}
                       style={[
@@ -1571,7 +1649,7 @@ export default function CalendarScreen() {
                         </Text>
                       </View>
                     </View>
-                    <Text style={[styles.itemMetaText, { color: theme.textSecondary }]}>Assigné à: {task.assignee.name}</Text>
+                    <Text style={[styles.itemMetaText, { color: theme.textSecondary }]}>Assigné à: {taskAssigneeNames(task)}</Text>
                     {task.description ? (
                       <Text style={[styles.bodyText, { color: theme.textSecondary }]}>{task.description}</Text>
                     ) : null}
@@ -2506,6 +2584,26 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 8,
   },
+  dayProgramHeaderRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 8,
+    marginBottom: 10,
+  },
+  dayProgramHeaderTitle: {
+    flex: 1,
+    flexShrink: 1,
+    lineHeight: 22,
+  },
+  dayProgramHeaderActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    gap: 8,
+    flexShrink: 0,
+    alignSelf: "flex-start",
+  },
   modalIconBtn: {
     width: 34,
     height: 34,
@@ -2846,12 +2944,5 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
 });
-
-
-
-
-
-
-
 
 

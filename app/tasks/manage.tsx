@@ -15,6 +15,7 @@ import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { Colors } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import { apiFetch } from "@/src/api/client";
+import { subscribeToUserRealtime } from "@/src/realtime/client";
 
 const STATUS_TODO = "à faire";
 const STATUS_DONE = "réalisée";
@@ -47,7 +48,10 @@ type TaskTemplate = {
   description?: string | null;
   recurrence: "daily" | "weekly" | "monthly" | "once";
   start_date?: string | null;
+  end_date?: string | null;
   recurrence_days?: number[];
+  assignee_user_ids?: number[];
+  rotation_user_ids?: number[];
   is_rotation: boolean;
   rotation_cycle_weeks?: number;
   is_inter_household_alternating?: boolean;
@@ -69,11 +73,18 @@ type TaskInstance = {
     id: number;
     name: string;
   };
+  assignees: {
+    id: number;
+    name: string;
+  }[];
   template: {
     id: number;
     recurrence: string;
     start_date?: string | null;
+    end_date?: string | null;
     recurrence_days?: number[];
+    assignee_user_ids?: number[];
+    rotation_user_ids?: number[];
     is_rotation: boolean;
     rotation_cycle_weeks?: number;
     is_inter_household_alternating?: boolean;
@@ -209,6 +220,18 @@ const formatDateLabel = (isoDate: string) => {
   });
 };
 
+const isTaskInstanceAssignedToUser = (instance: TaskInstance, userId: number) => {
+  if (!Number.isInteger(userId) || userId <= 0) {
+    return false;
+  }
+
+  if (Array.isArray(instance.assignees) && instance.assignees.length > 0) {
+    return instance.assignees.some((assignee) => assignee.id === userId);
+  }
+
+  return instance.assignee.id === userId;
+};
+
 const isTaskModuleKey = (value: unknown): value is TaskModuleKey =>
   value === "planned" || value === "schedule" || value === "routines";
 
@@ -238,11 +261,13 @@ export default function TasksScreen() {
   const [templateDescription, setTemplateDescription] = useState("");
   const [templateRecurrence, setTemplateRecurrence] = useState<"daily" | "weekly" | "monthly" | "once">("weekly");
   const [templateStartDate, setTemplateStartDate] = useState(todayIso);
+  const [templateHasEndDate, setTemplateHasEndDate] = useState(false);
+  const [templateEndDate, setTemplateEndDate] = useState(todayIso);
   const [templateRecurrenceDays, setTemplateRecurrenceDays] = useState<number[]>([initialTemplateDay]);
   const [templateRotation, setTemplateRotation] = useState(false);
   const [templateRotationCycleWeeks, setTemplateRotationCycleWeeks] = useState<1 | 2>(1);
-  const [templateFixedUserId, setTemplateFixedUserId] = useState<number | null>(null);
-  const [templateRotationStartUserId, setTemplateRotationStartUserId] = useState<number | null>(null);
+  const [templateAssigneeUserIds, setTemplateAssigneeUserIds] = useState<number[]>([]);
+  const [templateRotationUserIds, setTemplateRotationUserIds] = useState<number[]>([]);
   const [templateInterHouseholdAlternating, setTemplateInterHouseholdAlternating] = useState(false);
   const [templateInterHouseholdWeekStart, setTemplateInterHouseholdWeekStart] = useState<string>(
     () => toIsoDate(initialWeekStart)
@@ -251,7 +276,7 @@ export default function TasksScreen() {
 
   const [currentUserId, setCurrentUserId] = useState<number | null>(null);
   const [currentUserRole, setCurrentUserRole] = useState<"parent" | "enfant">("enfant");
-  const [selectedAssigneeId, setSelectedAssigneeId] = useState<number | null>(null);
+  const [selectedAssigneeIds, setSelectedAssigneeIds] = useState<number[]>([]);
   const [manualTitle, setManualTitle] = useState("");
   const [manualDescription, setManualDescription] = useState("");
   const [manualDate, setManualDate] = useState(todayIso);
@@ -356,6 +381,54 @@ export default function TasksScreen() {
     }
     return members.filter((member) => member.id === currentUserId);
   }, [currentUserId, currentUserRole, members]);
+  const memberNameById = useMemo(
+    () => new Map(members.map((member) => [member.id, member.name])),
+    [members],
+  );
+
+  const toggleManualAssignee = useCallback((memberId: number) => {
+    setSelectedAssigneeIds((prev) => {
+      if (prev.includes(memberId)) {
+        return prev.filter((id) => id !== memberId);
+      }
+      return [...prev, memberId];
+    });
+  }, []);
+
+  const toggleTemplateAssignee = useCallback((memberId: number) => {
+    setTemplateAssigneeUserIds((prev) => {
+      if (prev.includes(memberId)) {
+        return prev.filter((id) => id !== memberId);
+      }
+      return [...prev, memberId];
+    });
+  }, []);
+
+  const toggleTemplateRotationMember = useCallback((memberId: number) => {
+    setTemplateRotationUserIds((prev) => {
+      if (prev.includes(memberId)) {
+        return prev.filter((id) => id !== memberId);
+      }
+      return [...prev, memberId];
+    });
+  }, []);
+
+  const moveTemplateRotationMember = useCallback((memberId: number, direction: -1 | 1) => {
+    setTemplateRotationUserIds((prev) => {
+      const index = prev.indexOf(memberId);
+      if (index < 0) {
+        return prev;
+      }
+      const targetIndex = index + direction;
+      if (targetIndex < 0 || targetIndex >= prev.length) {
+        return prev;
+      }
+      const next = [...prev];
+      const [moved] = next.splice(index, 1);
+      next.splice(targetIndex, 0, moved);
+      return next;
+    });
+  }, []);
 
   const loadBoard = useCallback(async (options?: { silent?: boolean }) => {
     const silent = options?.silent ?? false;
@@ -393,38 +466,48 @@ export default function TasksScreen() {
   );
 
   useEffect(() => {
+    const parsedUserId = Number(currentUserId ?? 0);
+    if (!Number.isFinite(parsedUserId) || parsedUserId <= 0) {
+      return () => {};
+    }
+
+    let unsubscribeRealtime: (() => void) | null = null;
+
+    const setupRealtime = async () => {
+      unsubscribeRealtime = await subscribeToUserRealtime(parsedUserId, (message) => {
+        const module = String(message?.module ?? "");
+        const type = String(message?.type ?? "");
+        if (module !== "notifications" || type !== "task_reassignment_invite_responded") {
+          return;
+        }
+
+        void loadBoard({ silent: true });
+      });
+    };
+
+    void setupRealtime();
+
+    return () => {
+      if (unsubscribeRealtime) {
+        unsubscribeRealtime();
+      }
+    };
+  }, [currentUserId, loadBoard]);
+
+  useEffect(() => {
     if (!isScheduleModule) {
       return;
     }
 
-    if (currentUserRole === "parent") {
+    if (currentUserRole !== "parent") {
+      if (currentUserId !== null) {
+        setSelectedAssigneeIds([currentUserId]);
+      }
       return;
     }
 
-    if (currentUserId !== null) {
-      setSelectedAssigneeId(currentUserId);
-    }
-  }, [currentUserId, currentUserRole, isScheduleModule]);
-
-  useEffect(() => {
-    if (!isScheduleModule || currentUserRole !== "parent") {
-      return;
-    }
-
-    if (selectedAssigneeId === null && members.length > 0) {
-      setSelectedAssigneeId(members[0].id);
-    }
-  }, [isScheduleModule, currentUserRole, selectedAssigneeId, members]);
-
-  useEffect(() => {
-    if (!isScheduleModule || currentUserRole === "parent") {
-      return;
-    }
-
-    if (selectedAssigneeId !== currentUserId) {
-      setSelectedAssigneeId(currentUserId);
-    }
-  }, [currentUserId, currentUserRole, isScheduleModule, selectedAssigneeId]);
+    setSelectedAssigneeIds((prev) => prev.filter((id) => members.some((member) => member.id === id)));
+  }, [currentUserId, currentUserRole, isScheduleModule, members]);
 
   useEffect(() => {
     const maxDay = manualDayOptions.length;
@@ -537,9 +620,21 @@ export default function TasksScreen() {
     setTemplateStartDate(`${templateStartDateWheelYear}-${pad(templateStartDateWheelMonth)}-${pad(normalizedDay)}`);
   }, [templateStartDateWheelDay, templateStartDateWheelMonth, templateStartDateWheelVisible, templateStartDateWheelYear]);
 
+  const visibleInstances = useMemo(() => {
+    if (currentUserRole === "parent") {
+      return instances;
+    }
+
+    if (currentUserId === null) {
+      return [];
+    }
+
+    return instances.filter((instance) => isTaskInstanceAssignedToUser(instance, currentUserId));
+  }, [currentUserId, currentUserRole, instances]);
+
   const groupedInstances = useMemo(() => {
     const buckets: Record<string, TaskInstance[]> = {};
-    const sorted = [...instances].sort((left, right) => {
+    const sorted = [...visibleInstances].sort((left, right) => {
       if (left.due_date !== right.due_date) {
         return left.due_date.localeCompare(right.due_date);
       }
@@ -558,35 +653,51 @@ export default function TasksScreen() {
     });
 
     return Object.entries(buckets);
-  }, [instances]);
+  }, [visibleInstances]);
 
   const applyTemplateRecurrence = (recurrence: "daily" | "weekly" | "monthly" | "once") => {
     setTemplateRecurrence(recurrence);
-    if (recurrence !== "monthly") {
+    if (recurrence === "once") {
+      setTemplateHasEndDate(false);
+      setTemplateRecurrenceDays([]);
       setTemplateStartDateWheelVisible(false);
+      return;
     }
-    if (recurrence === "monthly" && !isValidIsoDate(templateStartDate)) {
+
+    if (!isValidIsoDate(templateStartDate)) {
       setTemplateStartDate(todayIso);
     }
-    if (recurrence === "daily" && templateRecurrenceDays.length === 0) {
+    if (recurrence === "daily") {
       setTemplateRecurrenceDays([1, 2, 3, 4, 5, 6, 7]);
       return;
     }
-    if (recurrence === "weekly" && templateRecurrenceDays.length === 0) {
-      setTemplateRecurrenceDays([initialTemplateDay]);
+    if (recurrence === "weekly") {
+      const normalized = normalizeRecurrenceDays(templateRecurrenceDays);
+      const weeklyDays = normalized.length === 0 || normalized.length === 7
+        ? [initialTemplateDay]
+        : normalized;
+      setTemplateRecurrenceDays(weeklyDays);
       return;
     }
-    if (recurrence === "monthly" || recurrence === "once") {
+    if (recurrence === "monthly") {
       setTemplateRecurrenceDays([]);
     }
   };
 
   const toggleTemplateRecurrenceDay = (dayValue: number) => {
     setTemplateRecurrenceDays((prev) => {
-      if (prev.includes(dayValue)) {
-        return prev.filter((day) => day !== dayValue);
+      const nextDays = prev.includes(dayValue)
+        ? prev.filter((day) => day !== dayValue)
+        : [...prev, dayValue].sort((a, b) => a - b);
+
+      if (templateRecurrence === "daily" && nextDays.length < 7) {
+        setTemplateRecurrence("weekly");
       }
-      return [...prev, dayValue].sort((a, b) => a - b);
+      if (templateRecurrence === "weekly" && nextDays.length === 7) {
+        setTemplateRecurrence("daily");
+      }
+
+      return nextDays;
     });
   };
 
@@ -606,11 +717,13 @@ export default function TasksScreen() {
     setTemplateDescription("");
     setTemplateRecurrence("weekly");
     setTemplateStartDate(todayIso);
+    setTemplateHasEndDate(false);
+    setTemplateEndDate(todayIso);
     setTemplateRecurrenceDays([initialTemplateDay]);
     setTemplateRotation(false);
     setTemplateRotationCycleWeeks(1);
-    setTemplateFixedUserId(null);
-    setTemplateRotationStartUserId(null);
+    setTemplateAssigneeUserIds([]);
+    setTemplateRotationUserIds([]);
     setTemplateInterHouseholdAlternating(false);
     setTemplateInterHouseholdWeekStart(toIsoDate(weekStartFromDate(new Date())));
     setTemplateStartDateWheelVisible(false);
@@ -622,17 +735,33 @@ export default function TasksScreen() {
     if ((template.recurrence === "daily" || template.recurrence === "weekly") && normalizedDays.length === 0) {
       nextDays = template.recurrence === "daily" ? [1, 2, 3, 4, 5, 6, 7] : [initialTemplateDay];
     }
+    const normalizedAssigneeIds = Array.isArray(template.assignee_user_ids)
+      ? Array.from(new Set(template.assignee_user_ids.filter((id) => Number.isInteger(id) && id > 0)))
+      : [];
+    const normalizedRotationIds = Array.isArray(template.rotation_user_ids)
+      ? Array.from(new Set(template.rotation_user_ids.filter((id) => Number.isInteger(id) && id > 0)))
+      : [];
+    const fallbackMemberIds = Number.isInteger(template.fixed_user_id ?? null) && Number(template.fixed_user_id) > 0
+      ? [Number(template.fixed_user_id)]
+      : [];
+    const resolvedHasEndDate = isValidIsoDate(template.end_date ?? "");
 
     setEditingTemplateId(template.id);
     setTemplateName(template.name);
     setTemplateDescription(template.description ?? "");
     setTemplateRecurrence(template.recurrence);
     setTemplateStartDate(isValidIsoDate(template.start_date ?? "") ? String(template.start_date) : todayIso);
+    setTemplateHasEndDate(resolvedHasEndDate);
+    setTemplateEndDate(resolvedHasEndDate ? String(template.end_date) : todayIso);
     setTemplateRecurrenceDays(nextDays);
     setTemplateRotation(Boolean(template.is_rotation));
     setTemplateRotationCycleWeeks(template.rotation_cycle_weeks === 2 ? 2 : 1);
-    setTemplateFixedUserId(template.is_rotation ? null : (template.fixed_user_id ?? null));
-    setTemplateRotationStartUserId(template.is_rotation ? (template.fixed_user_id ?? null) : null);
+    setTemplateAssigneeUserIds(template.is_rotation
+      ? []
+      : (normalizedAssigneeIds.length > 0 ? normalizedAssigneeIds : fallbackMemberIds));
+    setTemplateRotationUserIds(template.is_rotation
+      ? (normalizedRotationIds.length > 0 ? normalizedRotationIds : fallbackMemberIds)
+      : []);
     setTemplateInterHouseholdAlternating(Boolean(template.is_inter_household_alternating));
     setTemplateInterHouseholdWeekStart(
       weekStartIsoFromIsoDate(
@@ -643,20 +772,57 @@ export default function TasksScreen() {
     );
   };
 
-  const saveTemplate = async () => {
+    const saveTemplate = async () => {
     const cleanName = templateName.trim();
     if (cleanName.length < 2) {
       Alert.alert("Tâches", "Le nom de la routine est obligatoire.");
       return;
     }
 
-    const normalizedDays = normalizeRecurrenceDays(templateRecurrenceDays);
-    if ((templateRecurrence === "daily" || templateRecurrence === "weekly") && normalizedDays.length === 0) {
-      Alert.alert("Tâches", "Choisis au moins un jour pour cette récurrence.");
+    let recurrenceForPayload: "daily" | "weekly" | "monthly" | "once" = templateRecurrence;
+    let normalizedDays = normalizeRecurrenceDays(templateRecurrenceDays);
+    if (recurrenceForPayload === "daily") {
+      normalizedDays = [1, 2, 3, 4, 5, 6, 7];
+    }
+    if (recurrenceForPayload === "weekly") {
+      if (normalizedDays.length === 0) {
+        Alert.alert("Tâches", "Choisis au moins un jour pour cette récurrence.");
+        return;
+      }
+      if (normalizedDays.length === 7) {
+        recurrenceForPayload = "daily";
+        normalizedDays = [1, 2, 3, 4, 5, 6, 7];
+      }
+    }
+
+    if (recurrenceForPayload !== "once" && !isValidIsoDate(templateStartDate)) {
+      Alert.alert("Tâches", "La date de début est invalide (YYYY-MM-DD).");
       return;
     }
-    if (templateRecurrence === "monthly" && !isValidIsoDate(templateStartDate)) {
-      Alert.alert("Tâches", "La date de début mensuelle est invalide (YYYY-MM-DD).");
+
+    let endDatePayload: string | null = null;
+    if (recurrenceForPayload !== "once" && templateHasEndDate) {
+      if (!isValidIsoDate(templateEndDate)) {
+        Alert.alert("Tâches", "La date de fin est invalide (YYYY-MM-DD).");
+        return;
+      }
+      if (templateEndDate < templateStartDate) {
+        Alert.alert("Tâches", "La date de fin doit être postérieure ou égale à la date de début.");
+        return;
+      }
+      endDatePayload = templateEndDate;
+    }
+
+    const normalizedAssigneeIds = Array.from(new Set(templateAssigneeUserIds.filter((id) => Number.isInteger(id) && id > 0)));
+    const normalizedRotationIds = Array.from(new Set(templateRotationUserIds.filter((id) => Number.isInteger(id) && id > 0)));
+
+    if (templateRotation) {
+      if (normalizedRotationIds.length === 0) {
+        Alert.alert("Tâches", "Choisis les membres concernés par la rotation.");
+        return;
+      }
+    } else if (normalizedAssigneeIds.length === 0) {
+      Alert.alert("Tâches", "Choisis au moins un membre pour l'attribution.");
       return;
     }
 
@@ -665,14 +831,17 @@ export default function TasksScreen() {
       const payload = {
         name: cleanName,
         description: templateDescription.trim() || null,
-        recurrence: templateRecurrence,
-        start_date: templateRecurrence === "monthly" ? templateStartDate : null,
-        recurrence_days: templateRecurrence === "daily" || templateRecurrence === "weekly" ? normalizedDays : [],
+        recurrence: recurrenceForPayload,
+        start_date: recurrenceForPayload === "once" ? null : templateStartDate,
+        end_date: recurrenceForPayload === "once" ? null : endDatePayload,
+        recurrence_days: recurrenceForPayload === "daily" || recurrenceForPayload === "weekly" ? normalizedDays : [],
+        assignee_user_ids: templateRotation ? [] : normalizedAssigneeIds,
+        rotation_user_ids: templateRotation ? normalizedRotationIds : [],
         is_rotation: templateRotation,
         rotation_cycle_weeks: templateRotation ? templateRotationCycleWeeks : 1,
         is_inter_household_alternating: templateInterHouseholdAlternating,
         inter_household_week_start: templateInterHouseholdAlternating ? interHouseholdWeekStartIso : null,
-        fixed_user_id: templateRotation ? templateRotationStartUserId : templateFixedUserId,
+        fixed_user_id: null,
       };
 
       if (editingTemplateId) {
@@ -723,7 +892,7 @@ export default function TasksScreen() {
     );
   };
 
-  const createManualTask = async () => {
+    const createManualTask = async () => {
     const cleanTitle = manualTitle.trim();
     if (cleanTitle.length < 2) {
       Alert.alert("Tâches", "Le nom de la tâche est obligatoire.");
@@ -741,16 +910,17 @@ export default function TasksScreen() {
       Alert.alert("Tâches", "La date de fin doit être postérieure ou égale à la date de début.");
       return;
     }
-    if (currentUserRole === "parent" && selectedAssigneeId === null) {
-      Alert.alert("Tâches", "Choisis un membre du foyer.");
+
+    const assigneeIds = currentUserRole === "parent"
+      ? Array.from(new Set(selectedAssigneeIds.filter((id) => Number.isInteger(id) && id > 0)))
+      : (currentUserId !== null ? [currentUserId] : []);
+    if (assigneeIds.length === 0) {
+      Alert.alert("Tâches", "Choisis au moins un membre du foyer.");
       return;
     }
 
     setSaving(true);
     try {
-      const assigneeId = currentUserRole === "parent"
-        ? selectedAssigneeId
-        : currentUserId;
       await apiFetch("/tasks/instances", {
         method: "POST",
         body: JSON.stringify({
@@ -758,7 +928,7 @@ export default function TasksScreen() {
           description: manualDescription.trim() || null,
           due_date: manualDate,
           end_date: manualEndDate,
-          user_id: assigneeId ?? undefined,
+          user_ids: assigneeIds,
         }),
       });
       setManualTitle("");
@@ -766,6 +936,11 @@ export default function TasksScreen() {
       setManualDate(todayIso);
       setManualEndDate(todayIso);
       setManualDateWheelVisible(false);
+      if (currentUserRole === "parent") {
+        setSelectedAssigneeIds([]);
+      } else if (currentUserId !== null) {
+        setSelectedAssigneeIds([currentUserId]);
+      }
       await loadBoard({ silent: true });
     } catch (error: any) {
       Alert.alert("Tâches", error?.message || "Impossible de créer cette tâche.");
@@ -833,6 +1008,57 @@ export default function TasksScreen() {
     }
   };
 
+  const sendReassignmentRequest = async (instance: TaskInstance, invitedUserId: number) => {
+    setSaving(true);
+    try {
+      await apiFetch(`/tasks/instances/${instance.id}/reassignment-request`, {
+        method: "POST",
+        body: JSON.stringify({ invited_user_id: invitedUserId }),
+      });
+      Alert.alert("Tâches", "Demande envoyée.");
+      await loadBoard({ silent: true });
+    } catch (error: any) {
+      Alert.alert("Tâches", error?.message || "Impossible d'envoyer la demande.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const requestInstanceReassignment = (instance: TaskInstance) => {
+    if (currentUserId === null) {
+      return;
+    }
+
+    const assigneeIds = Array.isArray(instance.assignees) && instance.assignees.length > 0
+      ? instance.assignees.map((assignee) => assignee.id)
+      : [instance.assignee.id];
+    if (!assigneeIds.includes(currentUserId)) {
+      return;
+    }
+
+    const availableMembers = members.filter((member) => !assigneeIds.includes(member.id));
+    if (availableMembers.length === 0) {
+      Alert.alert("Tâches", "Aucun autre membre disponible pour une reprise.");
+      return;
+    }
+
+    const options = availableMembers.slice(0, 6).map((member) => ({
+      text: member.name,
+      onPress: () => {
+        void sendReassignmentRequest(instance, member.id);
+      },
+    }));
+
+    Alert.alert(
+      "Demander une reprise",
+      "Qui peut reprendre cette tâche ?",
+      [
+        ...options,
+        { text: "Annuler", style: "cancel" },
+      ],
+    );
+  };
+
   if (loading) {
     return (
       <View style={[styles.center, { backgroundColor: theme.background }]}>
@@ -897,9 +1123,6 @@ export default function TasksScreen() {
 
                 <View style={styles.weekCenter}>
                   <Text style={[styles.weekTitle, { color: theme.text }]}>{activeWeekLabel}</Text>
-                  <Text style={[styles.weekRange, { color: theme.textSecondary }]}>
-                    {rangeFrom} → {rangeTo}
-                  </Text>
                 </View>
 
                 <TouchableOpacity
@@ -920,7 +1143,7 @@ export default function TasksScreen() {
                 ]}
               >
                 <Text style={[styles.weekCurrentBtnText, { color: isCurrentWeek ? theme.textSecondary : theme.tint }]}>
-                  Cette semaine
+                  Revenir à cette semaine
                 </Text>
               </TouchableOpacity>
             </View>
@@ -950,16 +1173,34 @@ export default function TasksScreen() {
                           {template.is_rotation
                             ? ` - Rotation ${template.rotation_cycle_weeks === 2 ? "bihebdo" : "hebdo"}`
                             : ""}
-                          {template.fixed_user_name ? ` - ${template.fixed_user_name}` : ""}
                         </Text>
                         {recurrenceDaysLabel(template.recurrence, template.recurrence_days) ? (
                           <Text style={{ color: theme.textSecondary, fontSize: 12 }}>
                             {recurrenceDaysLabel(template.recurrence, template.recurrence_days)}
                           </Text>
                         ) : null}
-                        {template.recurrence === "monthly" && isValidIsoDate(template.start_date ?? "") ? (
+                        {template.is_rotation && Array.isArray(template.rotation_user_ids) && template.rotation_user_ids.length > 0 ? (
                           <Text style={{ color: theme.textSecondary, fontSize: 12 }}>
-                            {`Début mensuel: ${template.start_date}`}
+                            {`Ordre: ${template.rotation_user_ids
+                              .map((id) => memberNameById.get(id) ?? `#${id}`)
+                              .join("  ->  ")}`}
+                          </Text>
+                        ) : null}
+                        {!template.is_rotation && Array.isArray(template.assignee_user_ids) && template.assignee_user_ids.length > 0 ? (
+                          <Text style={{ color: theme.textSecondary, fontSize: 12 }}>
+                            {`Attribué à: ${template.assignee_user_ids
+                              .map((id) => memberNameById.get(id) ?? `#${id}`)
+                              .join(", ")}`}
+                          </Text>
+                        ) : null}
+                        {template.recurrence !== "once" && isValidIsoDate(template.start_date ?? "") ? (
+                          <Text style={{ color: theme.textSecondary, fontSize: 12 }}>
+                            {`Début: ${template.start_date}`}
+                          </Text>
+                        ) : null}
+                        {template.recurrence !== "once" && isValidIsoDate(template.end_date ?? "") ? (
+                          <Text style={{ color: theme.textSecondary, fontSize: 12 }}>
+                            {`Fin: ${template.end_date}`}
                           </Text>
                         ) : null}
                         {template.is_inter_household_alternating ? (
@@ -1046,21 +1287,13 @@ export default function TasksScreen() {
                             </TouchableOpacity>
                           );
                         })}
-                        {templateRecurrence === "daily" ? (
-                          <TouchableOpacity
-                            onPress={() => setTemplateRecurrenceDays([1, 2, 3, 4, 5, 6, 7])}
-                            style={[styles.recurrenceChip, { borderColor: theme.icon, backgroundColor: theme.background }]}
-                          >
-                            <Text style={{ color: theme.text, fontSize: 12 }}>Tous</Text>
-                          </TouchableOpacity>
-                        ) : null}
                       </View>
                     </>
                   ) : null}
 
-                  {templateRecurrence === "monthly" ? (
+                  {templateRecurrence !== "once" ? (
                     <>
-                      <Text style={[styles.label, { color: theme.text }]}>Date de début mensuelle</Text>
+                      <Text style={[styles.label, { color: theme.text }]}>Date de début</Text>
                       <TouchableOpacity
                         onPress={openTemplateStartDateWheel}
                         style={[styles.pickerFieldBtn, { borderColor: theme.icon, backgroundColor: theme.background }]}
@@ -1194,6 +1427,35 @@ export default function TasksScreen() {
                     </>
                   ) : null}
 
+                  {templateRecurrence !== "once" ? (
+                    <>
+                      <View style={styles.toggleRow}>
+                        <Text style={{ color: theme.text, fontWeight: "600" }}>Date de fin</Text>
+                        <TouchableOpacity
+                          onPress={() => setTemplateHasEndDate((prev) => !prev)}
+                          style={[
+                            styles.switchPill,
+                            { borderColor: theme.icon, backgroundColor: templateHasEndDate ? `${theme.tint}30` : theme.background },
+                          ]}
+                        >
+                          <Text style={{ color: templateHasEndDate ? theme.tint : theme.textSecondary }}>
+                            {templateHasEndDate ? "Définie" : "Aucune"}
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
+
+                      {templateHasEndDate ? (
+                        <TextInput
+                          style={[styles.input, { backgroundColor: theme.background, color: theme.text, borderColor: theme.icon }]}
+                          value={templateEndDate}
+                          onChangeText={setTemplateEndDate}
+                          placeholder="YYYY-MM-DD"
+                          placeholderTextColor={theme.textSecondary}
+                        />
+                      ) : null}
+                    </>
+                  ) : null}
+
                   <View style={styles.toggleRow}>
                     <Text style={{ color: theme.text, fontWeight: "600" }}>Rotation</Text>
                     <TouchableOpacity
@@ -1230,55 +1492,75 @@ export default function TasksScreen() {
                     ))}
                   </View>
 
-                  <Text style={[styles.label, { color: theme.text }]}>Commencer par (optionnel)</Text>
+                  <Text style={[styles.label, { color: theme.text }]}>Membres concernés</Text>
                   <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.memberRow}>
-                    <TouchableOpacity
-                      onPress={() => setTemplateRotationStartUserId(null)}
-                      style={[
-                        styles.memberChip,
-                        { borderColor: theme.icon, backgroundColor: theme.background },
-                        templateRotationStartUserId === null && { borderColor: theme.tint, backgroundColor: `${theme.tint}20` },
-                      ]}
-                    >
-                      <Text style={{ color: theme.text }}>Auto</Text>
-                    </TouchableOpacity>
-                    {members.map((member) => (
-                      <TouchableOpacity
-                        key={`rotation-start-${member.id}`}
-                        onPress={() => setTemplateRotationStartUserId(member.id)}
-                        style={[
-                          styles.memberChip,
-                          { borderColor: theme.icon, backgroundColor: theme.background },
-                          templateRotationStartUserId === member.id && { borderColor: theme.tint, backgroundColor: `${theme.tint}20` },
-                        ]}
-                      >
-                        <Text style={{ color: theme.text }}>{member.name}</Text>
-                      </TouchableOpacity>
-                    ))}
+                    {members.map((member) => {
+                      const selected = templateRotationUserIds.includes(member.id);
+                      return (
+                        <TouchableOpacity
+                          key={`rotation-member-${member.id}`}
+                          onPress={() => toggleTemplateRotationMember(member.id)}
+                          style={[
+                            styles.memberChip,
+                            { borderColor: theme.icon, backgroundColor: theme.background },
+                            selected && { borderColor: theme.tint, backgroundColor: `${theme.tint}20` },
+                          ]}
+                        >
+                          <Text style={{ color: theme.text }}>{member.name}</Text>
+                        </TouchableOpacity>
+                      );
+                    })}
                   </ScrollView>
+
+                  {templateRotationUserIds.length > 0 ? (
+                    <View style={styles.rotationOrderList}>
+                      <Text style={[styles.label, { color: theme.text }]}>Ordre de rotation</Text>
+                      {templateRotationUserIds.map((memberId, index) => {
+                        const member = members.find((candidate) => candidate.id === memberId);
+                        if (!member) {
+                          return null;
+                        }
+
+                        return (
+                          <View
+                            key={`rotation-order-${memberId}`}
+                            style={[styles.rotationOrderItem, { borderColor: theme.icon, backgroundColor: theme.background }]}
+                          >
+                            <Text style={[styles.rotationOrderName, { color: theme.text }]}>{`${index + 1}. ${member.name}`}</Text>
+                            <View style={styles.rotationOrderActions}>
+                              <TouchableOpacity
+                                onPress={() => moveTemplateRotationMember(memberId, -1)}
+                                style={[styles.iconBtn, { borderColor: theme.icon, opacity: index === 0 ? 0.35 : 1 }]}
+                                disabled={index === 0}
+                              >
+                                <MaterialCommunityIcons name="arrow-up" size={18} color={theme.tint} />
+                              </TouchableOpacity>
+                              <TouchableOpacity
+                                onPress={() => moveTemplateRotationMember(memberId, 1)}
+                                style={[styles.iconBtn, { borderColor: theme.icon, opacity: index === templateRotationUserIds.length - 1 ? 0.35 : 1 }]}
+                                disabled={index === templateRotationUserIds.length - 1}
+                              >
+                                <MaterialCommunityIcons name="arrow-down" size={18} color={theme.tint} />
+                              </TouchableOpacity>
+                            </View>
+                          </View>
+                        );
+                      })}
+                    </View>
+                  ) : null}
                 </>
                   ) : (
                 <>
-                  <Text style={[styles.label, { color: theme.text }]}>Membre fixe (optionnel)</Text>
+                  <Text style={[styles.label, { color: theme.text }]}>Attribuer à</Text>
                   <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.memberRow}>
-                    <TouchableOpacity
-                      onPress={() => setTemplateFixedUserId(null)}
-                      style={[
-                        styles.memberChip,
-                        { borderColor: theme.icon, backgroundColor: theme.background },
-                        templateFixedUserId === null && { borderColor: theme.tint, backgroundColor: `${theme.tint}20` },
-                      ]}
-                    >
-                      <Text style={{ color: theme.text }}>Auto</Text>
-                    </TouchableOpacity>
                     {members.map((member) => (
                       <TouchableOpacity
                         key={`fixed-${member.id}`}
-                        onPress={() => setTemplateFixedUserId(member.id)}
+                        onPress={() => toggleTemplateAssignee(member.id)}
                         style={[
                           styles.memberChip,
                           { borderColor: theme.icon, backgroundColor: theme.background },
-                          templateFixedUserId === member.id && { borderColor: theme.tint, backgroundColor: `${theme.tint}20` },
+                          templateAssigneeUserIds.includes(member.id) && { borderColor: theme.tint, backgroundColor: `${theme.tint}20` },
                         ]}
                       >
                         <Text style={{ color: theme.text }}>{member.name}</Text>
@@ -1339,7 +1621,7 @@ export default function TasksScreen() {
                         style={[styles.weekCurrentBtn, { borderColor: theme.icon, backgroundColor: theme.card }]}
                         disabled={saving}
                       >
-                        <Text style={[styles.weekCurrentBtnText, { color: theme.tint }]}>Cette semaine</Text>
+                        <Text style={[styles.weekCurrentBtnText, { color: theme.tint }]}>Revenir à cette semaine</Text>
                       </TouchableOpacity>
                     </View>
                   ) : null}
@@ -1540,11 +1822,11 @@ export default function TasksScreen() {
                   {assignableMembers.map((member) => (
                     <TouchableOpacity
                       key={`manual-assign-${member.id}`}
-                      onPress={() => setSelectedAssigneeId(member.id)}
+                      onPress={() => toggleManualAssignee(member.id)}
                       style={[
                         styles.memberChip,
                         { borderColor: theme.icon, backgroundColor: theme.background },
-                        selectedAssigneeId === member.id && { borderColor: theme.tint, backgroundColor: `${theme.tint}20` },
+                        selectedAssigneeIds.includes(member.id) && { borderColor: theme.tint, backgroundColor: `${theme.tint}20` },
                       ]}
                       disabled={saving}
                     >
@@ -1583,7 +1865,9 @@ export default function TasksScreen() {
                       <View style={{ flex: 1 }}>
                         <Text style={{ color: theme.text, fontWeight: "700" }}>{instance.title}</Text>
                         <Text style={{ color: theme.textSecondary, fontSize: 12 }}>
-                          {instance.assignee.name}
+                          {(Array.isArray(instance.assignees) && instance.assignees.length > 0
+                            ? instance.assignees.map((assignee) => assignee.name).join(", ")
+                            : instance.assignee.name)}
                           {instance.template.recurrence !== "once" ? ` - ${recurrenceLabel(instance.template.recurrence)}` : ""}
                         </Text>
                         {instance.description ? (
@@ -1612,6 +1896,26 @@ export default function TasksScreen() {
                             color={theme.tint}
                           />
                         </TouchableOpacity>
+
+                        {(currentUserId !== null
+                          && (
+                            (Array.isArray(instance.assignees) && instance.assignees.some((assignee) => assignee.id === currentUserId))
+                            || (!Array.isArray(instance.assignees) && instance.assignee.id === currentUserId)
+                          )
+                          && members.some((member) => {
+                            if (Array.isArray(instance.assignees) && instance.assignees.length > 0) {
+                              return !instance.assignees.some((assignee) => assignee.id === member.id);
+                            }
+                            return member.id !== instance.assignee.id;
+                          })) ? (
+                          <TouchableOpacity
+                            onPress={() => requestInstanceReassignment(instance)}
+                            disabled={saving}
+                            style={[styles.iconBtn, { borderColor: theme.icon }]}
+                          >
+                            <MaterialCommunityIcons name="account-switch-outline" size={20} color={theme.tint} />
+                          </TouchableOpacity>
+                        ) : null}
 
                         {instance.permissions.can_validate ? (
                           <TouchableOpacity
@@ -1829,6 +2133,30 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 8,
   },
+  rotationOrderList: {
+    marginBottom: 8,
+    gap: 6,
+  },
+  rotationOrderItem: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+  },
+  rotationOrderName: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  rotationOrderActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
   templateRow: {
     borderWidth: 1,
     borderRadius: 10,
@@ -1907,3 +2235,5 @@ const styles = StyleSheet.create({
     alignSelf: "flex-end",
   },
 });
+
+
