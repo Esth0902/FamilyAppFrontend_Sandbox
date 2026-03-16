@@ -16,7 +16,7 @@ import { useColorScheme } from "@/hooks/use-color-scheme";
 import { apiFetch } from "@/src/api/client";
 import { addDays, toIsoDate } from "@/src/utils/date";
 
-type TaskStatus = "Ã  faire" | "rÃ©alisÃ©e" | "annulÃ©e";
+type TaskStatus = "à faire" | "réalisée" | "annulée";
 type TaskModuleKey = "planned" | "schedule" | "routines";
 
 type TaskModuleCard = {
@@ -113,7 +113,7 @@ export default function TasksTabScreen() {
         validated: visibleInstances.filter((instance) => instance.validated_by_parent).length,
       });
     } catch (error: any) {
-      Alert.alert("TÃ¢ches", error?.message || "Impossible de charger les tÃ¢ches.");
+      Alert.alert("Tâches", error?.message || "Impossible de charger les tâches.");
     } finally {
       setLoading(false);
     }
@@ -128,24 +128,24 @@ export default function TasksTabScreen() {
   const menuOptions = useMemo<TaskModuleCard[]>(() => [
     {
       id: "planned",
-      title: "TÃ¢ches planifiÃ©es",
-      description: "Suivi des tÃ¢ches prÃ©vues et de leur statut",
+      title: "Tâches planifiées",
+      description: "Suivi des tâches prévues et de leur statut",
       icon: "calendar-check-outline",
       color: colorScheme === "dark" ? "#4DABFF" : theme.tint,
       enabled: true,
     },
     {
       id: "schedule",
-      title: "Planifier une tÃ¢che ponctuelle",
-      description: "CrÃ©er une tÃ¢che ponctuelle et l'attribuer Ã  un membre du foyer",
+      title: "Planifier une tâche ponctuelle",
+      description: "Créer une tâche ponctuelle et l'attribuer à un membre du foyer",
       icon: "calendar-plus",
       color: "#7ED321",
       enabled: canManageTemplates || canManageInstances,
     },
     {
       id: "routines",
-      title: "GÃ©rer les routines",
-      description: "CrÃ©er et modifier des tÃ¢ches rÃ©utilisables",
+      title: "Gérer les routines",
+      description: "Créer et modifier des tâches réutilisables",
       icon: "playlist-edit",
       color: "#F5A623",
       enabled: canManageTemplates,
@@ -170,7 +170,7 @@ export default function TasksTabScreen() {
     <ScrollView style={[styles.container, { backgroundColor: theme.background }]} contentContainerStyle={styles.content}>
       <View style={styles.header}>
         <View style={styles.headerTopRow}>
-          <Text style={[styles.headerTitle, { color: theme.text }]}>TÃ¢ches du foyer</Text>
+          <Text style={[styles.headerTitle, { color: theme.text }]}>Tâches du foyer</Text>
           {canManageHouseholdConfig ? (
             <TouchableOpacity
               onPress={() => router.push("/householdSetup?mode=edit&scope=tasks")}
@@ -180,14 +180,14 @@ export default function TasksTabScreen() {
             </TouchableOpacity>
           ) : null}
         </View>
-        <Text style={[styles.headerSubtitle, { color: theme.textSecondary }]}>GÃ¨re les tÃ¢ches assignÃ©es aux membres du foyer</Text>
+        <Text style={[styles.headerSubtitle, { color: theme.textSecondary }]}>Gère les tâches assignées aux membres du foyer</Text>
       </View>
 
       {!tasksEnabled ? (
         <View style={[styles.emptyCard, { backgroundColor: theme.card }]}>
-          <Text style={[styles.emptyTitle, { color: theme.text }]}>Module dÃ©sactivÃ©</Text>
+          <Text style={[styles.emptyTitle, { color: theme.text }]}>Module désactivé</Text>
           <Text style={{ color: theme.textSecondary, lineHeight: 20 }}>
-            Active le module tÃ¢ches dans la configuration du foyer pour commencer.
+            Active le module tâches dans la configuration du foyer pour commencer.
           </Text>
           {canManageHouseholdConfig ? (
             <TouchableOpacity
@@ -203,15 +203,15 @@ export default function TasksTabScreen() {
           <View style={styles.statsRow}>
             <View style={[styles.statCard, { backgroundColor: theme.card }]}>
               <Text style={[styles.statValue, { color: theme.text }]}>{stats.todo}</Text>
-              <Text style={[styles.statLabel, { color: theme.textSecondary }]}>Ã€ faire</Text>
+              <Text style={[styles.statLabel, { color: theme.textSecondary }]}>À faire</Text>
             </View>
             <View style={[styles.statCard, { backgroundColor: theme.card }]}>
               <Text style={[styles.statValue, { color: theme.text }]}>{stats.done}</Text>
-              <Text style={[styles.statLabel, { color: theme.textSecondary }]}>RÃ©alisÃ©es</Text>
+              <Text style={[styles.statLabel, { color: theme.textSecondary }]}>Réalisées</Text>
             </View>
             <View style={[styles.statCard, { backgroundColor: theme.card }]}>
               <Text style={[styles.statValue, { color: theme.text }]}>{stats.validated}</Text>
-              <Text style={[styles.statLabel, { color: theme.textSecondary }]}>ValidÃ©es</Text>
+              <Text style={[styles.statLabel, { color: theme.textSecondary }]}>Validées</Text>
             </View>
           </View>
 
