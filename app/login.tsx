@@ -119,27 +119,32 @@ export default function Login() {
                     />
 
                     <Text style={[styles.label, { color: theme.text }]}>Mot de passe</Text>
-                    <TextInput
-                        style={[styles.input, { backgroundColor: theme.card, color: theme.text, borderColor: theme.icon }]}
-                        placeholder="••••••••"
-                        placeholderTextColor={theme.textSecondary}
-                        secureTextEntry={!showPassword}
-                        value={password}
-                        onChangeText={setPassword}
-
-                        
-                    />
-
-                    <TouchableOpacity
-                        onPress={() => setShowPassword((prev) => !prev)}
-                        style={styles.eyeToggle}
-                    >
-                        <MaterialCommunityIcons
-                            name={showPassword ? "eye-off-outline" : "eye-outline"}
-                            size={18}
-                            color={theme.textSecondary}
+                    <View style={styles.passwordFieldContainer}>
+                        <TextInput
+                            style={[
+                                styles.input,
+                                styles.passwordInput,
+                                { backgroundColor: theme.card, color: theme.text, borderColor: theme.icon },
+                            ]}
+                            placeholder="••••••••"
+                            placeholderTextColor={theme.textSecondary}
+                            secureTextEntry={!showPassword}
+                            value={password}
+                            onChangeText={setPassword}
                         />
-                    </TouchableOpacity>
+
+                        <TouchableOpacity
+                            onPress={() => setShowPassword((prev) => !prev)}
+                            style={styles.eyeButton}
+                            accessibilityLabel={showPassword ? "Masquer le mot de passe" : "Afficher le mot de passe"}
+                        >
+                            <MaterialCommunityIcons
+                                name={showPassword ? "eye-off-outline" : "eye-outline"}
+                                size={20}
+                                color={theme.textSecondary}
+                            />
+                        </TouchableOpacity>
+                    </View>
 
                     <TouchableOpacity
                         style={{ alignSelf: 'flex-end', marginBottom: 24 }}
@@ -214,11 +219,21 @@ const styles = StyleSheet.create({
         marginBottom: 16,
         fontSize: 16,
     },
-    eyeToggle: {
-        alignSelf: "flex-end",
-        marginTop: -8,
-        marginBottom: 8,
-        padding: 4,
+    passwordFieldContainer: {
+        position: "relative",
+        marginBottom: 16,
+    },
+    passwordInput: {
+        marginBottom: 0,
+        paddingRight: 48,
+    },
+    eyeButton: {
+        position: "absolute",
+        right: 12,
+        top: 0,
+        bottom: 0,
+        justifyContent: "center",
+        alignItems: "center",
     },
     loginButton: {
         width: '100%',

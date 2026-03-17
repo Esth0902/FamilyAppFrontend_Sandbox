@@ -16,6 +16,7 @@ import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { Colors } from "@/constants/theme";
 import { apiFetch } from "@/src/api/client";
 import {
+    clearStoredUser,
     normalizeStoredUser,
     persistStoredUser,
     switchStoredHousehold,
@@ -43,6 +44,18 @@ type ApiUser = {
     households?: HouseholdMembership[];
 };
 
+type BlockingHouseholdPayload = {
+    household?: {
+        id?: number;
+        name?: string;
+    };
+    candidate_members?: {
+        id?: number;
+        name?: string;
+        role?: string;
+    }[];
+};
+
 const getHouseholdRole = (household: HouseholdMembership): string => {
     return household.pivot?.role ?? household.role ?? "enfant";
 };
@@ -60,6 +73,9 @@ export default function SettingsScreen() {
     const [savingProfile, setSavingProfile] = useState(false);
     const [savingNicknameFor, setSavingNicknameFor] = useState<number | null>(null);
     const [switchingHouseholdFor, setSwitchingHouseholdFor] = useState<number | null>(null);
+    const [leavingHouseholdFor, setLeavingHouseholdFor] = useState<number | null>(null);
+    const [requestingDeletionFor, setRequestingDeletionFor] = useState<number | null>(null);
+    const [deletingAccount, setDeletingAccount] = useState(false);
 
     const [user, setUser] = useState<ApiUser | null>(null);
     const [email, setEmail] = useState("");
@@ -198,6 +214,263 @@ export default function SettingsScreen() {
         router.push("/householdSetup?mode=create");
     };
 
+    const openHouseholdManagement = async (householdId: number) => {
+        if (!Number.isFinite(householdId) || householdId <= 0) {
+            return;
+        }
+
+        try {
+            if (householdId !== activeHouseholdId) {
+                await switchStoredHousehold(householdId);
+                await loadProfile(householdId);
+            }
+            router.push("/householdSetup?mode=edit");
+        } catch (error: any) {
+            Alert.alert("Erreur", error?.message || "Impossible d'ouvrir la gestion des membres.");
+        }
+    };
+
+    const onRequestHouseholdDeletion = async (householdId: number) => {
+        if (!Number.isFinite(householdId) || householdId <= 0) {
+            Alert.alert("Erreur", "Foyer invalide.");
+            return;
+        }
+
+        if (requestingDeletionFor !== null) {
+            return;
+        }
+
+        const previousHouseholdId = activeHouseholdId;
+        const targetHouseholdId = Number(householdId);
+        let switchedTemporarily = false;
+
+        setRequestingDeletionFor(targetHouseholdId);
+        try {
+            if (targetHouseholdId !== activeHouseholdId) {
+                await switchStoredHousehold(targetHouseholdId);
+                switchedTemporarily = true;
+            }
+
+            const response = await apiFetch("/households/delete-request", { method: "POST" });
+            await loadProfile(targetHouseholdId);
+            Alert.alert(
+                "Suppression du foyer",
+                String(response?.message ?? "La demande de suppression a été enregistrée.")
+            );
+        } catch (error: any) {
+            if (switchedTemporarily && previousHouseholdId && previousHouseholdId > 0) {
+                try {
+                    await switchStoredHousehold(previousHouseholdId);
+                } catch {
+                    // no-op: keep original API error for UX clarity
+                }
+            }
+            Alert.alert("Erreur", error?.message || "Impossible de lancer la suppression du foyer.");
+        } finally {
+            setRequestingDeletionFor(null);
+        }
+    };
+
+    const openBlockedParentFlow = (
+        title: string,
+        message: string,
+        fallbackHousehold: HouseholdMembership,
+        blocker?: BlockingHouseholdPayload
+    ) => {
+        const blockedHouseholdId = Number(blocker?.household?.id ?? fallbackHousehold.id);
+
+        Alert.alert(
+            title,
+            message,
+            [
+                { text: "Annuler", style: "cancel" },
+                {
+                    text: "Gérer les membres",
+                    onPress: () => {
+                        void openHouseholdManagement(blockedHouseholdId);
+                    },
+                },
+                {
+                    text: "Supprimer le foyer",
+                    style: "destructive",
+                    onPress: () => {
+                        void onRequestHouseholdDeletion(blockedHouseholdId);
+                    },
+                },
+            ]
+        );
+    };
+
+    const onConfirmLeaveHousehold = async (household: HouseholdMembership) => {
+        if (leavingHouseholdFor !== null) {
+            return;
+        }
+
+        const previousHouseholdId = activeHouseholdId;
+        const targetHouseholdId = Number(household.id);
+        let switchedTemporarily = false;
+
+        setLeavingHouseholdFor(targetHouseholdId);
+        try {
+            if (targetHouseholdId !== activeHouseholdId) {
+                await switchStoredHousehold(targetHouseholdId);
+                switchedTemporarily = true;
+            }
+
+            const response = await apiFetch("/households/leave", { method: "POST" });
+            const updatedUser = response?.user as ApiUser | undefined;
+
+            if (!updatedUser) {
+                await loadProfile(previousHouseholdId);
+                Alert.alert("Foyer", "Vous avez quitté ce foyer.");
+                return;
+            }
+
+            const hasRemainingHouseholds = Array.isArray(updatedUser.households)
+                && updatedUser.households.length > 0;
+            const sanitizedUser: ApiUser = {
+                ...updatedUser,
+                household_id: hasRemainingHouseholds
+                    ? updatedUser.household_id ?? null
+                    : null,
+            };
+
+            const storedState = await persistStoredUser(sanitizedUser as StoredUser);
+            const normalizedUser = storedState.user as ApiUser | null;
+            if (normalizedUser) {
+                hydrateFromUser(normalizedUser);
+            } else {
+                await loadProfile(null);
+            }
+
+            Alert.alert("Foyer", "Vous avez quitté ce foyer.");
+        } catch (error: any) {
+            if (switchedTemporarily && previousHouseholdId && previousHouseholdId > 0) {
+                try {
+                    await switchStoredHousehold(previousHouseholdId);
+                } catch {
+                    // no-op: keep original API error for UX clarity
+                }
+            }
+            const requiredAction = String(error?.data?.required_action ?? "");
+            if (Number(error?.status) === 422 && requiredAction === "define_new_parent_or_delete_household") {
+                const blocker = (error?.data ?? {}) as BlockingHouseholdPayload;
+                openBlockedParentFlow(
+                    "Parent requis",
+                    String(
+                        error?.message
+                        ?? "Ce foyer a besoin d'un parent gestionnaire. Désigne un nouveau parent ou supprime ce foyer."
+                    ),
+                    household,
+                    blocker
+                );
+            } else {
+                Alert.alert("Erreur", error?.message || "Impossible de quitter ce foyer.");
+            }
+        } finally {
+            setLeavingHouseholdFor(null);
+        }
+    };
+
+    const onLeaveHousehold = (household: HouseholdMembership) => {
+        Alert.alert(
+            "Quitter ce foyer",
+            `Tu vas quitter le foyer "${household.name}". Cette action ne peut pas être annulée.`,
+            [
+                { text: "Annuler", style: "cancel" },
+                {
+                    text: "Quitter",
+                    style: "destructive",
+                    onPress: () => {
+                        void onConfirmLeaveHousehold(household);
+                    },
+                },
+            ]
+        );
+    };
+
+    const onConfirmDeleteAccount = async () => {
+        if (deletingAccount) {
+            return;
+        }
+
+        if (!currentPassword.trim()) {
+            Alert.alert("Compte", "Le mot de passe actuel est requis pour supprimer le compte.");
+            return;
+        }
+
+        setDeletingAccount(true);
+        try {
+            await apiFetch("/auth/account", {
+                method: "DELETE",
+                body: JSON.stringify({
+                    current_password: currentPassword,
+                }),
+            });
+
+            await SecureStore.deleteItemAsync("authToken");
+            await clearStoredUser();
+            Alert.alert("Compte", "Votre compte a été supprimé définitivement.");
+            router.replace("/");
+        } catch (error: any) {
+            const requiredAction = String(error?.data?.required_action ?? "");
+            const blocked = Array.isArray(error?.data?.blocked_households)
+                ? (error.data.blocked_households as BlockingHouseholdPayload[])
+                : [];
+
+            if (Number(error?.status) === 422 && requiredAction === "define_new_parent_or_delete_household" && blocked.length > 0) {
+                const firstBlocked = blocked[0];
+                const householdId = Number(firstBlocked?.household?.id ?? 0);
+                const householdName = String(firstBlocked?.household?.name ?? "ce foyer");
+                const suffix = blocked.length > 1
+                    ? `\n\n${blocked.length} foyers sont bloqués au total.`
+                    : "";
+
+                Alert.alert(
+                    "Suppression du compte bloquée",
+                    `${error?.message || "Action impossible pour l'instant."}\n\nFoyer concerné : ${householdName}.${suffix}`,
+                    [
+                        { text: "Annuler", style: "cancel" },
+                        {
+                            text: "Gérer les membres",
+                            onPress: () => {
+                                void openHouseholdManagement(householdId);
+                            },
+                        },
+                        {
+                            text: "Supprimer le foyer",
+                            style: "destructive",
+                            onPress: () => {
+                                void onRequestHouseholdDeletion(householdId);
+                            },
+                        },
+                    ]
+                );
+            } else {
+                Alert.alert("Erreur", error?.message || "Impossible de supprimer le compte.");
+            }
+        } finally {
+            setDeletingAccount(false);
+        }
+    };
+
+    const onDeleteAccount = () => {
+        Alert.alert(
+            "Supprimer le compte",
+            "Cette action est définitive. Ton compte sera supprimé, et tu seras déconnecté immédiatement.",
+            [
+                { text: "Annuler", style: "cancel" },
+                {
+                    text: "Supprimer",
+                    style: "destructive",
+                    onPress: () => {
+                        void onConfirmDeleteAccount();
+                    },
+                },
+            ]
+        );
+    };
+
     const onSaveProfile = async () => {
         if (!user) {
             return;
@@ -298,6 +571,9 @@ export default function SettingsScreen() {
                         const isActiveHousehold = household.id === activeHouseholdId;
                         const canSwitchHousehold = households.length > 1;
                         const isSwitching = switchingHouseholdFor === household.id;
+                        const isLeaving = leavingHouseholdFor === household.id;
+                        const isRequestingDeletion = requestingDeletionFor === household.id;
+                        const canLeaveHousehold = getHouseholdRole(household) === "parent";
 
                         return (
                             <View
@@ -367,6 +643,23 @@ export default function SettingsScreen() {
                                         {isSaving ? "Enregistrement..." : "Mettre à jour le pseudo"}
                                     </Text>
                                 </TouchableOpacity>
+                                {canLeaveHousehold ? (
+                                    <TouchableOpacity
+                                        style={[styles.dangerInlineButton, { borderColor: theme.accentWarm }]}
+                                        onPress={() => {
+                                            onLeaveHousehold(household);
+                                        }}
+                                        disabled={isLeaving || leavingHouseholdFor !== null || isRequestingDeletion}
+                                    >
+                                        <Text style={[styles.dangerInlineButtonText, { color: theme.accentWarm }]}>
+                                            {isLeaving ? "Sortie en cours..." : "Quitter ce foyer"}
+                                        </Text>
+                                    </TouchableOpacity>
+                                ) : (
+                                    <Text style={[styles.leaveHintText, { color: theme.textSecondary }]}>
+                                        Seul un parent peut quitter ce foyer.
+                                    </Text>
+                                )}
                             </View>
                         );
                     })
@@ -475,6 +768,22 @@ export default function SettingsScreen() {
                         {savingProfile ? "Mise à jour..." : "Mettre à jour le profil"}
                     </Text>
                 </TouchableOpacity>
+                <View style={[styles.accountDangerWrap, { borderTopColor: theme.icon }]}> 
+                    <Text style={[styles.accountDangerText, { color: theme.textSecondary }]}> 
+                        Supprime ton compte uniquement si tu as finalisé la gestion de tes foyers.
+                    </Text>
+                    <TouchableOpacity
+                        style={[styles.accountDangerButton, { borderColor: theme.accentWarm }]}
+                        onPress={() => {
+                            void onDeleteAccount();
+                        }}
+                        disabled={deletingAccount}
+                    >
+                        <Text style={[styles.accountDangerButtonText, { color: theme.accentWarm }]}> 
+                            {deletingAccount ? "Suppression du compte..." : "Supprimer mon compte"}
+                        </Text>
+                    </TouchableOpacity>
+                </View>
             </View>
         </ScrollView>
     );
@@ -642,6 +951,23 @@ const styles = StyleSheet.create({
         fontSize: 14,
         fontWeight: "600",
     },
+    dangerInlineButton: {
+        marginTop: 8,
+        borderRadius: 10,
+        borderWidth: 1,
+        paddingVertical: 10,
+        alignItems: "center",
+        justifyContent: "center",
+    },
+    dangerInlineButtonText: {
+        fontSize: 14,
+        fontWeight: "700",
+    },
+    leaveHintText: {
+        marginTop: 8,
+        fontSize: 12,
+        fontWeight: "500",
+    },
     primaryButton: {
         borderRadius: 12,
         paddingVertical: 13,
@@ -653,5 +979,26 @@ const styles = StyleSheet.create({
         color: "#fff",
         fontWeight: "700",
         fontSize: 15,
+    },
+    accountDangerWrap: {
+        borderTopWidth: 1,
+        marginTop: 16,
+        paddingTop: 12,
+    },
+    accountDangerText: {
+        fontSize: 12,
+        lineHeight: 18,
+        marginBottom: 8,
+    },
+    accountDangerButton: {
+        borderRadius: 10,
+        borderWidth: 1,
+        paddingVertical: 10,
+        alignItems: "center",
+        justifyContent: "center",
+    },
+    accountDangerButtonText: {
+        fontSize: 14,
+        fontWeight: "700",
     },
 });
