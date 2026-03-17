@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -14,6 +14,8 @@ import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { Colors } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import { apiFetch } from "@/src/api/client";
+import { subscribeToHouseholdRealtime } from "@/src/realtime/client";
+import { useStoredUserState } from "@/src/session/user-cache";
 import { addDays, toIsoDate } from "@/src/utils/date";
 
 type TaskStatus = "à faire" | "réalisée" | "annulée";
@@ -80,6 +82,7 @@ export default function TasksTabScreen() {
   const router = useRouter();
   const colorScheme = useColorScheme();
   const theme = Colors[colorScheme ?? "light"];
+  const { householdId } = useStoredUserState();
 
   const [loading, setLoading] = useState(true);
   const [tasksEnabled, setTasksEnabled] = useState(false);
@@ -88,8 +91,11 @@ export default function TasksTabScreen() {
   const [currentUserRole, setCurrentUserRole] = useState<"parent" | "enfant">("enfant");
   const [stats, setStats] = useState({ todo: 0, done: 0, validated: 0 });
 
-  const loadBoard = useCallback(async () => {
-    setLoading(true);
+  const loadBoard = useCallback(async (options?: { silent?: boolean }) => {
+    const silent = options?.silent ?? false;
+    if (!silent) {
+      setLoading(true);
+    }
     try {
       const weekStart = weekStartFromDate(new Date());
       const rangeFrom = toIsoDate(weekStart);
@@ -115,15 +121,43 @@ export default function TasksTabScreen() {
     } catch (error: any) {
       Alert.alert("Tâches", error?.message || "Impossible de charger les tâches.");
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
   }, []);
 
   useFocusEffect(
     useCallback(() => {
-      void loadBoard();
+      void loadBoard({ silent: false });
     }, [loadBoard])
   );
+
+  useEffect(() => {
+    if (!householdId) {
+      return;
+    }
+
+    let unsubscribeRealtime: (() => void) | null = null;
+    let active = true;
+
+    const bindRealtime = async () => {
+      unsubscribeRealtime = await subscribeToHouseholdRealtime(householdId, (message) => {
+        if (!active) return;
+        if (message?.module !== "tasks") return;
+        void loadBoard({ silent: true });
+      });
+    };
+
+    void bindRealtime();
+
+    return () => {
+      active = false;
+      if (unsubscribeRealtime) {
+        unsubscribeRealtime();
+      }
+    };
+  }, [householdId, loadBoard]);
 
   const menuOptions = useMemo<TaskModuleCard[]>(() => [
     {

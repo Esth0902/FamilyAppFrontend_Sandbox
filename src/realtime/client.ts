@@ -29,6 +29,33 @@ let pusherInstance: PusherInstance | null = null;
 let pusherToken: string | null = null;
 let pusherInitPromise: Promise<PusherInstance | null> | null = null;
 let pusherCtorPromise: Promise<PusherConstructor | null> | null = null;
+let realtimeListenerIdCounter = 1;
+
+type RealtimeListener = {
+  onMessage: RealtimeCallback;
+  onError?: RealtimeErrorCallback;
+};
+
+type RealtimeSubscriptionEntry = {
+  pusher: PusherInstance;
+  channelName: string;
+  eventName: string;
+  channel: any;
+  listeners: Map<number, RealtimeListener>;
+  realtimeHandler: (message: RealtimeMessage) => void;
+  subscribedHandler: () => void;
+  errorHandler: (error: unknown) => void;
+  connectionErrorHandler: (error: unknown) => void;
+};
+
+const realtimeSubscriptionRegistry = new Map<string, RealtimeSubscriptionEntry>();
+
+const buildSubscriptionKey = (channelName: string, eventName: string) => `${channelName}::${eventName}`;
+
+const clearRealtimeSubscriptionRegistry = () => {
+  realtimeSubscriptionRegistry.clear();
+  realtimeListenerIdCounter = 1;
+};
 
 const loadPusherConstructor = async (): Promise<PusherConstructor | null> => {
   if (!pusherCtorPromise) {
@@ -142,6 +169,7 @@ const getOrCreatePusher = async (): Promise<PusherInstance | null> => {
     if (pusherInstance) {
       pusherInstance.disconnect();
       pusherInstance = null;
+      clearRealtimeSubscriptionRegistry();
     }
 
     const pusher = new Pusher(config.key, {
@@ -183,47 +211,82 @@ const subscribeToRealtimeChannel = async (
     return () => {};
   }
 
-  const channel = pusher.subscribe(channelName);
+  const subscriptionKey = buildSubscriptionKey(channelName, eventName);
+  let subscription = realtimeSubscriptionRegistry.get(subscriptionKey);
 
-  const realtimeHandler = (message: RealtimeMessage) => {
-    onMessage(message);
-  };
+  if (!subscription) {
+    const listeners = new Map<number, RealtimeListener>();
+    const channel = pusher.subscribe(channelName);
 
-  const subscribedHandler = () => {
-    if (__DEV__) {
-      console.log(`[realtime] subscribed to ${channelName}`);
-    }
-  };
+    const realtimeHandler = (message: RealtimeMessage) => {
+      for (const listener of listeners.values()) {
+        listener.onMessage(message);
+      }
+    };
 
-  const errorHandler = (error: unknown) => {
-    if (__DEV__) {
-      console.warn(`[realtime] subscription error on ${channelName}`, error);
-    }
-    if (onError) {
-      onError(error);
-    }
-  };
+    const subscribedHandler = () => {
+      if (__DEV__) {
+        console.log(`[realtime] subscribed to ${channelName}`);
+      }
+    };
 
-  const connectionErrorHandler = (error: unknown) => {
-    if (__DEV__) {
-      console.warn("[realtime] connection error", error);
-    }
-    if (onError) {
-      onError(error);
-    }
-  };
+    const errorHandler = (error: unknown) => {
+      if (__DEV__) {
+        console.warn(`[realtime] subscription error on ${channelName}`, error);
+      }
+      for (const listener of listeners.values()) {
+        listener.onError?.(error);
+      }
+    };
 
-  channel.bind(eventName, realtimeHandler);
-  channel.bind("pusher:subscription_succeeded", subscribedHandler);
-  channel.bind("pusher:subscription_error", errorHandler);
-  pusher.connection.bind("error", connectionErrorHandler);
+    const connectionErrorHandler = (error: unknown) => {
+      if (__DEV__) {
+        console.warn("[realtime] connection error", error);
+      }
+      for (const listener of listeners.values()) {
+        listener.onError?.(error);
+      }
+    };
+
+    channel.bind(eventName, realtimeHandler);
+    channel.bind("pusher:subscription_succeeded", subscribedHandler);
+    channel.bind("pusher:subscription_error", errorHandler);
+    pusher.connection.bind("error", connectionErrorHandler);
+
+    subscription = {
+      pusher,
+      channelName,
+      eventName,
+      channel,
+      listeners,
+      realtimeHandler,
+      subscribedHandler,
+      errorHandler,
+      connectionErrorHandler,
+    };
+    realtimeSubscriptionRegistry.set(subscriptionKey, subscription);
+  }
+
+  const listenerId = realtimeListenerIdCounter++;
+  subscription.listeners.set(listenerId, { onMessage, onError });
 
   return () => {
-    channel.unbind(eventName, realtimeHandler);
-    channel.unbind("pusher:subscription_succeeded", subscribedHandler);
-    channel.unbind("pusher:subscription_error", errorHandler);
-    pusher.connection.unbind("error", connectionErrorHandler);
-    pusher.unsubscribe(channelName);
+    const currentSubscription = realtimeSubscriptionRegistry.get(subscriptionKey);
+    if (!currentSubscription) {
+      return;
+    }
+
+    currentSubscription.listeners.delete(listenerId);
+    if (currentSubscription.listeners.size > 0) {
+      return;
+    }
+
+    currentSubscription.channel.unbind(currentSubscription.eventName, currentSubscription.realtimeHandler);
+    currentSubscription.channel.unbind("pusher:subscription_succeeded", currentSubscription.subscribedHandler);
+    currentSubscription.channel.unbind("pusher:subscription_error", currentSubscription.errorHandler);
+    currentSubscription.pusher.connection.unbind("error", currentSubscription.connectionErrorHandler);
+    currentSubscription.pusher.unsubscribe(currentSubscription.channelName);
+    realtimeSubscriptionRegistry.delete(subscriptionKey);
   };
 };
 
@@ -254,6 +317,7 @@ export const subscribeToUserRealtime = async (
 };
 
 export const disconnectRealtime = () => {
+  clearRealtimeSubscriptionRegistry();
   if (pusherInstance) {
     pusherInstance.disconnect();
     pusherInstance = null;

@@ -40,6 +40,7 @@ export default function RootLayout() {
     const notifiedNotificationIdsRef = useRef<Set<number>>(new Set());
     const router = useRouter();
     const segments = useSegments() as string[];
+    const currentSegment = segments[0] ?? "";
 
     useEffect(() => {
         setIsMounted(true);
@@ -137,9 +138,9 @@ export default function RootLayout() {
                             const inviterName = String(data.inviter_name ?? "").trim() || "Un parent";
                             const householdName = String(data.household_name ?? "").trim() || "ce foyer";
                             const requesterName = String(data.requester_name ?? "").trim() || "Un membre";
-                            const taskName = String(data.task_name ?? "").trim() || "une tache";
+                            const taskName = String(data.task_name ?? "").trim() || "une tâche";
                             const body = notificationType === "household_invite"
-                                ? `${inviterName} vous invite a rejoindre le foyer ${householdName}.`
+                                ? `${inviterName} vous invite à rejoindre le foyer ${householdName}.`
                                 : notificationType === "task_reassignment_invite"
                                     ? `${requesterName} vous demande de reprendre ${taskName}.`
                                     : String(notification?.body ?? "");
@@ -160,54 +161,31 @@ export default function RootLayout() {
 
                 const parsedUserId = Number(user?.id ?? 0);
                 if (Number.isFinite(parsedUserId) && parsedUserId > 0) {
-                    unsubscribeUserRealtime = await subscribeToUserRealtime(parsedUserId, (message) => {
+                    const unsubscribe = await subscribeToUserRealtime(parsedUserId, (message) => {
                         const module = String(message?.module ?? "");
-                        const type = String(message?.type ?? "");
                         if (module !== "notifications") {
                             return;
                         }
 
                         const payload = (message?.payload ?? {}) as Record<string, unknown>;
                         const notificationId = Number(payload.notification_id ?? 0);
-                        if (type === "household_invite_created") {
-                            const inviterName = String(payload.inviter_name ?? "").trim() || "Un parent";
-                            const householdName = String(payload.household_name ?? "").trim() || "ce foyer";
-                            void scheduleLocalNotification(
-                                notificationId,
-                                "Invitation de foyer",
-                                `${inviterName} vous invite a rejoindre le foyer ${householdName}.`,
-                                payload,
-                            );
+                        const title = String(payload.title ?? "").trim();
+                        const body = String(payload.body ?? "").trim();
+
+                        if (notificationId > 0 && title.length > 0 && body.length > 0) {
+                            void scheduleLocalNotification(notificationId, title, body, payload);
                             return;
                         }
 
-                        if (type === "task_reassignment_invite_created") {
-                            const requesterName = String(payload.requester_name ?? "").trim() || "Un membre";
-                            const taskName = String(payload.task_name ?? "").trim() || "une tache";
-                            void scheduleLocalNotification(
-                                notificationId,
-                                "Demande de reprise",
-                                `${requesterName} vous demande de reprendre ${taskName}.`,
-                                payload,
-                            );
-                            return;
-                        }
-
-                        if (type === "task_reassignment_invite_responded") {
-                            const responderName = String(payload.responder_name ?? "").trim() || "Un membre";
-                            const taskName = String(payload.task_name ?? "").trim() || "la tache";
-                            const status = String(payload.status ?? "").trim();
-                            const body = status === "accepted"
-                                ? `${responderName} a accepte de reprendre ${taskName}.`
-                                : `${responderName} a refuse de reprendre ${taskName}.`;
-                            void scheduleLocalNotification(
-                                notificationId,
-                                "Reponse demande de reprise",
-                                body,
-                                payload,
-                            );
-                        }
+                        void pullPendingNotifications();
                     });
+
+                    if (isCancelled) {
+                        unsubscribe();
+                        return;
+                    }
+
+                    unsubscribeUserRealtime = unsubscribe;
                 }
 
                 await pullPendingNotifications();
@@ -262,14 +240,14 @@ export default function RootLayout() {
                 const refreshedToken = await SecureStore.getItemAsync("authToken");
                 const hasToken = !!refreshedToken;
 
-                const isPublicRoute = segments.length === 0
-                    || segments[0] === "login"
-                    || segments[0] === "register"
-                    || segments[0] === "forgot-password"
-                    || segments[0] === "password-reset";
-                const isChangeCredentialsRoute = segments[0] === "change-credentials";
+                const isPublicRoute = currentSegment === ""
+                    || currentSegment === "login"
+                    || currentSegment === "register"
+                    || currentSegment === "forgot-password"
+                    || currentSegment === "password-reset";
+                const isChangeCredentialsRoute = currentSegment === "change-credentials";
 
-                console.log("Check Auth -> Token:", hasToken, "| Segment:", segments[0]);
+                console.log("Check Auth -> Token:", hasToken, "| Segment:", currentSegment);
 
                 if (hasToken) {
                     const mustChangePassword = !!user?.must_change_password;
@@ -287,7 +265,7 @@ export default function RootLayout() {
 
                     const hasHousehold = user?.household_id || (user?.households && user.households.length > 0);
 
-                    if (!hasHousehold && segments[0] !== "householdSetup") {
+                    if (!hasHousehold && currentSegment !== "householdSetup") {
                         router.replace("/householdSetup");
                     } else if (hasHousehold && isPublicRoute) {
                         router.replace("/(tabs)/home");
@@ -304,7 +282,7 @@ export default function RootLayout() {
             console.error("Erreur inattendue dans checkAuth:", err);
         });
 
-    }, [isMounted, segments, router]);
+    }, [currentSegment, isMounted, router]);
 
     if (!isMounted) {
         return (

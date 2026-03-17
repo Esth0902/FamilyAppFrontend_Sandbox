@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -16,6 +16,8 @@ import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { Colors } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import { apiFetch } from "@/src/api/client";
+import { subscribeToHouseholdRealtime } from "@/src/realtime/client";
+import { useStoredUserState } from "@/src/session/user-cache";
 
 type BudgetRecurrence = "weekly" | "monthly";
 type BudgetRole = "parent" | "enfant";
@@ -137,6 +139,7 @@ export default function BudgetTabScreen() {
   const router = useRouter();
   const colorScheme = useColorScheme();
   const theme = Colors[colorScheme ?? "light"];
+  const { householdId } = useStoredUserState();
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -159,8 +162,11 @@ export default function BudgetTabScreen() {
   const [reviewAmounts, setReviewAmounts] = useState<Record<number, string>>({});
   const [reviewComments, setReviewComments] = useState<Record<number, string>>({});
 
-  const loadBoard = useCallback(async () => {
-    setLoading(true);
+  const loadBoard = useCallback(async (options?: { silent?: boolean }) => {
+    const silent = options?.silent ?? false;
+    if (!silent) {
+      setLoading(true);
+    }
     try {
       const payload = await apiFetch("/budget/board") as BudgetBoardPayload;
       setBoard(payload);
@@ -169,15 +175,43 @@ export default function BudgetTabScreen() {
       Alert.alert("Budget", message);
       setBoard(null);
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
   }, []);
 
   useFocusEffect(
     useCallback(() => {
-      void loadBoard();
+      void loadBoard({ silent: false });
     }, [loadBoard])
   );
+
+  useEffect(() => {
+    if (!householdId) {
+      return;
+    }
+
+    let unsubscribeRealtime: (() => void) | null = null;
+    let active = true;
+
+    const bindRealtime = async () => {
+      unsubscribeRealtime = await subscribeToHouseholdRealtime(householdId, (message) => {
+        if (!active) return;
+        if (message?.module !== "budget") return;
+        void loadBoard({ silent: true });
+      });
+    };
+
+    void bindRealtime();
+
+    return () => {
+      active = false;
+      if (unsubscribeRealtime) {
+        unsubscribeRealtime();
+      }
+    };
+  }, [householdId, loadBoard]);
 
   const currency = useMemo(() => (board?.currency || "EUR").toUpperCase(), [board?.currency]);
   const isParent = board?.current_user.role === "parent";

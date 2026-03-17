@@ -15,7 +15,8 @@ import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { Colors } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import { apiFetch } from "@/src/api/client";
-import { subscribeToUserRealtime } from "@/src/realtime/client";
+import { subscribeToHouseholdRealtime, subscribeToUserRealtime } from "@/src/realtime/client";
+import { useStoredUserState } from "@/src/session/user-cache";
 
 const STATUS_TODO = "à faire";
 const STATUS_DONE = "réalisée";
@@ -240,6 +241,7 @@ export default function TasksScreen() {
   const params = useLocalSearchParams<{ module?: string | string[] }>();
   const colorScheme = useColorScheme();
   const theme = Colors[colorScheme ?? "light"];
+  const { householdId } = useStoredUserState();
 
   const todayIso = useMemo(() => toIsoDate(new Date()), []);
   const initialWeekStart = useMemo(() => weekStartFromDate(new Date()), []);
@@ -466,28 +468,74 @@ export default function TasksScreen() {
   );
 
   useEffect(() => {
+    if (!householdId) {
+      return () => {};
+    }
+
+    let unsubscribeRealtime: (() => void) | null = null;
+    let active = true;
+
+    const setupRealtime = async () => {
+      const unsubscribe = await subscribeToHouseholdRealtime(householdId, (message) => {
+        if (!active) return;
+        if (message?.module !== "tasks") return;
+        void loadBoard({ silent: true });
+      });
+
+      if (!active) {
+        unsubscribe();
+        return;
+      }
+
+      unsubscribeRealtime = unsubscribe;
+    };
+
+    void setupRealtime();
+
+    return () => {
+      active = false;
+      if (unsubscribeRealtime) {
+        unsubscribeRealtime();
+      }
+    };
+  }, [householdId, loadBoard]);
+
+  useEffect(() => {
     const parsedUserId = Number(currentUserId ?? 0);
     if (!Number.isFinite(parsedUserId) || parsedUserId <= 0) {
       return () => {};
     }
 
     let unsubscribeRealtime: (() => void) | null = null;
+    let active = true;
 
     const setupRealtime = async () => {
-      unsubscribeRealtime = await subscribeToUserRealtime(parsedUserId, (message) => {
-        const module = String(message?.module ?? "");
-        const type = String(message?.type ?? "");
-        if (module !== "notifications" || type !== "task_reassignment_invite_responded") {
+      const unsubscribe = await subscribeToUserRealtime(parsedUserId, (message) => {
+        if (!active) {
           return;
         }
 
-        void loadBoard({ silent: true });
-      });
+        const module = String(message?.module ?? "");
+        const type = String(message?.type ?? "");
+      if (module !== "notifications" || type !== "task_reassignment_invite_responded") {
+        return;
+      }
+
+      void loadBoard({ silent: true });
+    });
+
+      if (!active) {
+        unsubscribe();
+        return;
+      }
+
+      unsubscribeRealtime = unsubscribe;
     };
 
     void setupRealtime();
 
     return () => {
+      active = false;
       if (unsubscribeRealtime) {
         unsubscribeRealtime();
       }

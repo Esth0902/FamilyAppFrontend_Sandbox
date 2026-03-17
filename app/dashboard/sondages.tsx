@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -14,6 +14,8 @@ import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { Colors } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import { apiFetch } from "@/src/api/client";
+import { subscribeToHouseholdRealtime } from "@/src/realtime/client";
+import { useStoredUserState } from "@/src/session/user-cache";
 
 type DashboardPollOption = {
   id: number;
@@ -86,6 +88,7 @@ export default function DashboardPollsScreen() {
   const router = useRouter();
   const colorScheme = useColorScheme();
   const theme = Colors[colorScheme ?? "light"];
+  const { householdId } = useStoredUserState();
 
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState<DashboardResponse | null>(null);
@@ -94,23 +97,57 @@ export default function DashboardPollsScreen() {
   const [openAllPolls, setOpenAllPolls] = useState(false);
   const [openFavoriteRecipes, setOpenFavoriteRecipes] = useState(false);
 
-  const loadDashboard = useCallback(async () => {
-    setLoading(true);
+  const loadDashboard = useCallback(async (options?: { silent?: boolean }) => {
+    const silent = options?.silent ?? false;
+    if (!silent) {
+      setLoading(true);
+    }
     try {
       const response = await apiFetch("/dashboard");
       setData(response ?? null);
     } catch (error: any) {
       Alert.alert("Dashboard", error?.message || "Impossible de charger le dashboard.");
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
   }, []);
 
   useFocusEffect(
     useCallback(() => {
-      void loadDashboard();
+      void loadDashboard({ silent: false });
     }, [loadDashboard])
   );
+
+  useEffect(() => {
+    if (!householdId) {
+      return;
+    }
+
+    let unsubscribeRealtime: (() => void) | null = null;
+    let active = true;
+
+    const bindRealtime = async () => {
+      unsubscribeRealtime = await subscribeToHouseholdRealtime(householdId, (message) => {
+        if (!active) return;
+        const module = String(message?.module ?? "");
+        if (module !== "meal_poll" && module !== "tasks" && module !== "budget" && module !== "calendar") {
+          return;
+        }
+        void loadDashboard({ silent: true });
+      });
+    };
+
+    void bindRealtime();
+
+    return () => {
+      active = false;
+      if (unsubscribeRealtime) {
+        unsubscribeRealtime();
+      }
+    };
+  }, [householdId, loadDashboard]);
 
   const pollsOpen = data?.polls_open ?? [];
   const pollsClosed = data?.polls_closed ?? [];

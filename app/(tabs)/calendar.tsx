@@ -18,7 +18,7 @@ import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { Colors } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import { apiFetch } from "@/src/api/client";
-import { subscribeToUserRealtime } from "@/src/realtime/client";
+import { subscribeToHouseholdRealtime, subscribeToUserRealtime } from "@/src/realtime/client";
 import { useStoredUserState } from "@/src/session/user-cache";
 import {
   filterRecipesByQuery,
@@ -315,7 +315,7 @@ export default function CalendarScreen() {
   const router = useRouter();
   const colorScheme = useColorScheme();
   const theme = Colors[colorScheme ?? "light"];
-  const { role } = useStoredUserState();
+  const { householdId, role } = useStoredUserState();
   const canManageHouseholdConfig = role === "parent";
 
   const todayIso = useMemo(() => toIsoDate(new Date()), []);
@@ -667,15 +667,56 @@ export default function CalendarScreen() {
   );
 
   useEffect(() => {
+    if (!householdId) {
+      return () => {};
+    }
+
+    let unsubscribeRealtime: (() => void) | null = null;
+    let active = true;
+
+    const setupRealtime = async () => {
+      const unsubscribe = await subscribeToHouseholdRealtime(householdId, (message) => {
+        if (!active) return;
+        const module = String(message?.module ?? "");
+        if (module !== "calendar" && module !== "tasks") {
+          return;
+        }
+        void loadBoard({ silent: true });
+      });
+
+      if (!active) {
+        unsubscribe();
+        return;
+      }
+
+      unsubscribeRealtime = unsubscribe;
+    };
+
+    void setupRealtime();
+
+    return () => {
+      active = false;
+      if (unsubscribeRealtime) {
+        unsubscribeRealtime();
+      }
+    };
+  }, [householdId, loadBoard]);
+
+  useEffect(() => {
     const parsedUserId = Number(taskCurrentUserId ?? 0);
     if (!Number.isFinite(parsedUserId) || parsedUserId <= 0) {
       return () => {};
     }
 
     let unsubscribeRealtime: (() => void) | null = null;
+    let active = true;
 
     const setupRealtime = async () => {
-      unsubscribeRealtime = await subscribeToUserRealtime(parsedUserId, (message) => {
+      const unsubscribe = await subscribeToUserRealtime(parsedUserId, (message) => {
+        if (!active) {
+          return;
+        }
+
         const module = String(message?.module ?? "");
         const type = String(message?.type ?? "");
         if (module !== "notifications" || type !== "task_reassignment_invite_responded") {
@@ -684,11 +725,19 @@ export default function CalendarScreen() {
 
         void loadBoard({ silent: true });
       });
+
+      if (!active) {
+        unsubscribe();
+        return;
+      }
+
+      unsubscribeRealtime = unsubscribe;
     };
 
     void setupRealtime();
 
     return () => {
+      active = false;
       if (unsubscribeRealtime) {
         unsubscribeRealtime();
       }
@@ -2944,5 +2993,3 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
 });
-
-

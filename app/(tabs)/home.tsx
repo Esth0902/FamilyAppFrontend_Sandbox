@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import {
     View,
     Text,
@@ -23,69 +23,155 @@ import {
 } from "@/src/session/user-cache";
 import { subscribeToUserRealtime } from "@/src/realtime/client";
 
-type PendingHouseholdInvite = {
+type PendingNotification = {
     id: number;
-    householdName: string;
-    inviterName: string;
-    invitedRole: "parent" | "enfant";
+    type: string;
+    householdId: number | null;
+    title: string;
+    body: string;
+    data: Record<string, unknown>;
+    createdAt: string | null;
 };
 
-type PendingTaskReassignmentInvite = {
-    id: number;
-    taskName: string;
-    requesterName: string;
-    dueDate: string | null;
-};
-
-const normalizePendingInvites = (
-    rawNotifications: unknown[],
-): {
-    householdInvites: PendingHouseholdInvite[];
-    taskInvites: PendingTaskReassignmentInvite[];
-} => {
-    const householdInvites: PendingHouseholdInvite[] = [];
-    const taskInvites: PendingTaskReassignmentInvite[] = [];
-
-    rawNotifications.forEach((rawNotification) => {
-            const notification = (rawNotification ?? {}) as Record<string, unknown>;
-            const parsedId = Number(notification.id ?? 0);
-            if (!Number.isFinite(parsedId) || parsedId <= 0) {
-                return;
-            }
-
-            const type = String(notification.type ?? "");
-            const data = (notification.data ?? {}) as Record<string, unknown>;
-            const status = String(data.status ?? "pending");
-            if (status !== "pending") {
-                return;
-            }
-
-            if (type === "household_invite") {
-                householdInvites.push({
-                    id: Math.trunc(parsedId),
-                    householdName: String(data.household_name ?? "").trim() || "ce foyer",
-                    inviterName: String(data.inviter_name ?? "").trim() || "Un parent",
-                    invitedRole: String(data.invited_role ?? "") === "parent" ? "parent" : "enfant",
-                });
-                return;
-            }
-
-            if (type === "task_reassignment_invite") {
-                taskInvites.push({
-                    id: Math.trunc(parsedId),
-                    taskName: String(data.task_name ?? "").trim() || "une tâche",
-                    requesterName: String(data.requester_name ?? "").trim() || "Un membre",
-                    dueDate: typeof data.due_date === "string" && data.due_date.trim().length > 0
-                        ? data.due_date.trim()
-                        : null,
-                });
-            }
-        });
-
-    return {
-        householdInvites,
-        taskInvites,
+type NotificationNavigationTarget =
+    | string
+    | {
+        pathname: "/tasks/manage";
+        params: { module: "planned" };
     };
+
+const toPositiveInt = (value: unknown): number | null => {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return null;
+    const normalized = Math.trunc(parsed);
+    return normalized > 0 ? normalized : null;
+};
+
+const normalizePendingNotifications = (
+    rawNotifications: unknown[],
+    activeHouseholdId: number | null
+): PendingNotification[] => {
+    return rawNotifications
+        .map((rawNotification): PendingNotification | null => {
+            const notification = (rawNotification ?? {}) as Record<string, unknown>;
+            const parsedId = toPositiveInt(notification.id);
+            if (!parsedId) {
+                return null;
+            }
+
+            const type = String(notification.type ?? "").trim();
+            const data = (notification.data ?? {}) as Record<string, unknown>;
+            const status = String(data.status ?? "pending").trim();
+            const householdId =
+                toPositiveInt(notification.household_id) ??
+                toPositiveInt(data.household_id) ??
+                null;
+
+            const isCrossHouseholdInvite = type === "household_invite";
+            if (!isCrossHouseholdInvite && activeHouseholdId && householdId && householdId !== activeHouseholdId) {
+                return null;
+            }
+
+            if ((type === "household_invite" || type === "task_reassignment_invite") && status !== "pending") {
+                return null;
+            }
+
+            const inviterName = String(data.inviter_name ?? "").trim() || "Un parent";
+            const householdName = String(data.household_name ?? "").trim() || "ce foyer";
+            const requesterName = String(data.requester_name ?? "").trim() || "Un membre";
+            const taskName = String(data.task_name ?? "").trim() || "cette tâche";
+
+            const fallbackBody = type === "household_invite"
+                ? `${inviterName} vous invite à rejoindre le foyer ${householdName}.`
+                : type === "task_reassignment_invite"
+                    ? `${requesterName} vous demande de reprendre ${taskName}.`
+                    : "Nouvelle notification.";
+
+            return {
+                id: parsedId,
+                type,
+                householdId,
+                title: String(notification.title ?? "FamilyFlow").trim() || "FamilyFlow",
+                body: String(notification.body ?? "").trim() || fallbackBody,
+                data,
+                createdAt: typeof notification.created_at === "string" ? notification.created_at : null,
+            };
+        })
+        .filter((notification): notification is PendingNotification => notification !== null)
+        .sort((left, right) => {
+            const leftDate = left.createdAt ? new Date(left.createdAt).getTime() : 0;
+            const rightDate = right.createdAt ? new Date(right.createdAt).getTime() : 0;
+            return rightDate - leftDate;
+        });
+};
+
+const formatNotificationDate = (isoDate: string | null): string => {
+    if (!isoDate) return "";
+    const parsed = new Date(isoDate);
+    if (Number.isNaN(parsed.getTime())) return "";
+    return parsed.toLocaleString("fr-BE", {
+        day: "2-digit",
+        month: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+    });
+};
+
+const formatDueDate = (rawIsoDate: unknown): string => {
+    if (typeof rawIsoDate !== "string" || rawIsoDate.trim() === "") return "";
+    const parsed = new Date(`${rawIsoDate}T00:00:00`);
+    if (Number.isNaN(parsed.getTime())) return "";
+    return parsed.toLocaleDateString("fr-BE", { day: "2-digit", month: "2-digit", year: "numeric" });
+};
+
+const TASK_NOTIFICATION_TYPES = new Set([
+    "task_assigned",
+    "task_done_validation_needed",
+    "task_validated",
+    "task_cancelled",
+    "task_reassigned",
+    "task_reassignment_invite",
+    "task_reassignment_invite_responded",
+]);
+
+const BUDGET_NOTIFICATION_TYPES = new Set([
+    "budget_payment_validated",
+    "budget_advance_requested",
+    "budget_advance_reviewed",
+]);
+
+const POLL_NOTIFICATION_TYPES = new Set([
+    "poll_opened",
+    "poll_reminder",
+    "poll_closing_soon",
+    "poll_closed_too_late",
+    "poll_needs_validation",
+    "poll_validated",
+    "poll_open_prompt",
+]);
+
+const getNotificationNavigationTarget = (
+    notification: PendingNotification
+): NotificationNavigationTarget | null => {
+    const type = notification.type;
+
+    if (TASK_NOTIFICATION_TYPES.has(type)) {
+        return { pathname: "/tasks/manage", params: { module: "planned" } };
+    }
+
+    if (BUDGET_NOTIFICATION_TYPES.has(type)) {
+        return "/(tabs)/budget";
+    }
+
+    if (POLL_NOTIFICATION_TYPES.has(type)) {
+        return "/meal/poll";
+    }
+
+    if (type === "household_invite" || type === "household_invite_responded") {
+        return "/settings";
+    }
+
+    return null;
 };
 
 export default function ConnectedHome() {
@@ -95,34 +181,37 @@ export default function ConnectedHome() {
     const { user } = useStoredUserState();
 
     const [loading, setLoading] = useState(true);
-    const [pendingInvitations, setPendingInvitations] = useState<PendingHouseholdInvite[]>([]);
-    const [pendingTaskInvitations, setPendingTaskInvitations] = useState<PendingTaskReassignmentInvite[]>([]);
-    const [processingInvitationId, setProcessingInvitationId] = useState<number | null>(null);
-    const [processingTaskInvitationId, setProcessingTaskInvitationId] = useState<number | null>(null);
+    const [pendingNotifications, setPendingNotifications] = useState<PendingNotification[]>([]);
+    const [processingNotificationId, setProcessingNotificationId] = useState<number | null>(null);
+    const firstHouseholdId = toPositiveInt(user?.households?.[0]?.id);
 
-    const refreshPendingInvitations = useCallback(async () => {
+    const activeHouseholdId = useMemo((): number | null => {
+        const householdId = toPositiveInt(user?.household_id);
+        if (householdId) return householdId;
+
+        return firstHouseholdId;
+    }, [firstHouseholdId, user?.household_id]);
+
+    const refreshPendingNotifications = useCallback(async () => {
         try {
             const token = await SecureStore.getItemAsync("authToken");
             if (!token) {
-                setPendingInvitations([]);
-                setPendingTaskInvitations([]);
+                setPendingNotifications([]);
                 return;
             }
 
             const response = await apiFetch("/notifications/pending");
             const rawNotifications: unknown[] = Array.isArray(response?.notifications) ? response.notifications : [];
-            const normalized = normalizePendingInvites(rawNotifications);
-            setPendingInvitations(normalized.householdInvites);
-            setPendingTaskInvitations(normalized.taskInvites);
+            setPendingNotifications(normalizePendingNotifications(rawNotifications, activeHouseholdId));
         } catch (error) {
-            console.error("Erreur chargement invitations en attente:", error);
+            console.error("Erreur chargement notifications en attente:", error);
         }
-    }, []);
+    }, [activeHouseholdId]);
 
     useFocusEffect(
         useCallback(() => {
             let isActive = true;
-            let invitationsTimer: ReturnType<typeof setInterval> | null = null;
+            let notificationsTimer: ReturnType<typeof setInterval> | null = null;
             let unsubscribeRealtime: (() => void) | null = null;
 
             const fetchUserData = async () => {
@@ -133,8 +222,7 @@ export default function ConnectedHome() {
                     if (!token) {
                         if (isActive) {
                             await refreshStoredUserFromStorage();
-                            setPendingInvitations([]);
-                            setPendingTaskInvitations([]);
+                            setPendingNotifications([]);
                         }
                         return;
                     }
@@ -161,7 +249,7 @@ export default function ConnectedHome() {
                     }
 
                     if (isActive) {
-                        await refreshPendingInvitations();
+                        await refreshPendingNotifications();
                     }
                 } catch (e) {
                     console.error("Erreur chargement user:", e);
@@ -180,36 +268,40 @@ export default function ConnectedHome() {
                     return;
                 }
 
-                unsubscribeRealtime = await subscribeToUserRealtime(parsedUserId, (message) => {
+                const unsubscribe = await subscribeToUserRealtime(parsedUserId, (message) => {
                     const module = String(message?.module ?? "");
-                    const type = String(message?.type ?? "");
-                    if (
-                        module === "notifications"
-                        && (type === "household_invite_created" || type === "task_reassignment_invite_created")
-                    ) {
-                        void refreshPendingInvitations();
+                    if (module !== "notifications") {
+                        return;
                     }
+                    void refreshPendingNotifications();
                 });
+
+                if (!isActive) {
+                    unsubscribe();
+                    return;
+                }
+
+                unsubscribeRealtime = unsubscribe;
             };
             void subscribeRealtime();
 
-            invitationsTimer = setInterval(() => {
+            notificationsTimer = setInterval(() => {
                 if (!isActive) {
                     return;
                 }
-                void refreshPendingInvitations();
+                void refreshPendingNotifications();
             }, 60000);
 
             return () => {
                 isActive = false;
-                if (invitationsTimer) {
-                    clearInterval(invitationsTimer);
+                if (notificationsTimer) {
+                    clearInterval(notificationsTimer);
                 }
                 if (unsubscribeRealtime) {
                     unsubscribeRealtime();
                 }
             };
-        }, [refreshPendingInvitations, user?.household_id, user?.id])
+        }, [refreshPendingNotifications, user?.household_id, user?.id])
     );
 
     const onSetupHouse = () => {
@@ -220,43 +312,59 @@ export default function ConnectedHome() {
         router.push("/householdSetup?mode=edit");
     };
 
-    const onRespondToInvitation = async (invite: PendingHouseholdInvite, action: "accept" | "refuse") => {
-        setProcessingInvitationId(invite.id);
+    const onRespondToNotification = async (
+        notification: PendingNotification,
+        action: "accept" | "refuse"
+    ) => {
+        setProcessingNotificationId(notification.id);
         try {
-            const response = await apiFetch(`/notifications/${invite.id}/household-invite-response`, {
-                method: "POST",
-                body: JSON.stringify({ action }),
-            });
+            let response: any = null;
+            if (notification.type === "household_invite") {
+                response = await apiFetch(`/notifications/${notification.id}/household-invite-response`, {
+                    method: "POST",
+                    body: JSON.stringify({ action }),
+                });
+            } else if (notification.type === "task_reassignment_invite") {
+                response = await apiFetch(`/notifications/${notification.id}/task-reassignment-response`, {
+                    method: "POST",
+                    body: JSON.stringify({ action }),
+                });
+            } else {
+                await apiFetch(`/notifications/${notification.id}/read`, { method: "POST" });
+            }
 
-            if (action === "accept" && response?.user) {
+            if (notification.type === "household_invite" && action === "accept" && response?.user) {
                 await persistStoredUser(response.user);
             }
 
-            await refreshPendingInvitations();
+            await refreshPendingNotifications();
         } catch (error: any) {
-            Alert.alert("Invitation", error?.message || "Impossible de traiter cette invitation.");
+            Alert.alert("Notification", error?.message || "Impossible de traiter cette notification.");
         } finally {
-            setProcessingInvitationId(null);
+            setProcessingNotificationId(null);
         }
     };
 
-    const onRespondToTaskInvitation = async (
-        invite: PendingTaskReassignmentInvite,
-        action: "accept" | "refuse",
-    ) => {
-        setProcessingTaskInvitationId(invite.id);
+    const onMarkNotificationRead = async (notification: PendingNotification) => {
+        setProcessingNotificationId(notification.id);
         try {
-            await apiFetch(`/notifications/${invite.id}/task-reassignment-response`, {
-                method: "POST",
-                body: JSON.stringify({ action }),
-            });
-            await refreshPendingInvitations();
+            await apiFetch(`/notifications/${notification.id}/read`, { method: "POST" });
+            await refreshPendingNotifications();
         } catch (error: any) {
-            Alert.alert("Tâches", error?.message || "Impossible de traiter cette demande.");
+            Alert.alert("Notification", error?.message || "Impossible de marquer la notification comme lue.");
         } finally {
-            setProcessingTaskInvitationId(null);
+            setProcessingNotificationId(null);
         }
     };
+
+    const onOpenNotification = useCallback(
+        (notification: PendingNotification) => {
+            const target = getNotificationNavigationTarget(notification);
+            if (!target) return;
+            router.push(target);
+        },
+        [router]
+    );
 
     const onLogout = async () => {
         try {
@@ -375,107 +483,142 @@ export default function ConnectedHome() {
                 </View>
             </View>
 
-            {pendingInvitations.length > 0 && (
+            {pendingNotifications.length > 0 && (
                 <View style={[styles.inviteCard, { backgroundColor: theme.card, borderColor: `${theme.tint}44` }]}>
-                    <Text style={[styles.inviteTitle, { color: theme.text }]}>Nouvelle invitation reçue</Text>
+                    <Text style={[styles.inviteTitle, { color: theme.text }]}>Notifications en attente</Text>
 
-                    {pendingInvitations.map((invite) => {
-                        const isProcessing = processingInvitationId === invite.id;
+                    {pendingNotifications.map((notification) => {
+                        const isProcessing = processingNotificationId === notification.id;
+                        const type = notification.type;
+                        const data = notification.data;
+                        const createdLabel = formatNotificationDate(notification.createdAt);
+
+                        const inviterName = String(data.inviter_name ?? "").trim() || "Un parent";
+                        const householdName = String(data.household_name ?? "").trim() || "ce foyer";
+                        const invitedRole = String(data.invited_role ?? "") === "parent" ? "parent" : "enfant";
+                        const requesterName = String(data.requester_name ?? "").trim() || "Un membre";
+                        const taskName = String(data.task_name ?? "").trim() || "cette tâche";
+                        const dueDate = formatDueDate(data.due_date);
+
+                        const canOpenNotification = getNotificationNavigationTarget(notification) !== null;
 
                         return (
-                            <View
-                                key={`invite-${invite.id}`}
+                            <TouchableOpacity
+                                key={`notif-${notification.id}`}
                                 style={[styles.inviteItem, { backgroundColor: `${theme.tint}12`, borderColor: `${theme.tint}2e` }]}
+                                activeOpacity={canOpenNotification ? 0.86 : 1}
+                                disabled={!canOpenNotification}
+                                onPress={() => {
+                                    onOpenNotification(notification);
+                                }}
                             >
-                                <Text style={[styles.inviteText, { color: theme.text }]}>
-                                    Invitation à rejoindre <Text style={styles.inviteStrong}>{invite.householdName}</Text> de la part de{" "}
-                                    <Text style={styles.inviteStrong}>{invite.inviterName}</Text>.
-                                </Text>
-                                <Text style={[styles.inviteMeta, { color: theme.textSecondary }]}>
-                                    Rôle proposé: {invite.invitedRole === "parent" ? "Parent" : "Enfant"}
-                                </Text>
-
-                                <View style={styles.inviteActions}>
-                                    <TouchableOpacity
-                                        style={[styles.inviteActionBtn, { borderColor: theme.icon, backgroundColor: theme.background }]}
-                                        onPress={() => {
-                                            void onRespondToInvitation(invite, "refuse");
-                                        }}
-                                        disabled={isProcessing}
-                                    >
-                                        <Text style={[styles.inviteActionText, { color: theme.text }]}>
-                                            {isProcessing ? "..." : "Refuser"}
+                                {type === "household_invite" ? (
+                                    <>
+                                        <Text style={[styles.inviteText, { color: theme.text }]}>
+                                            Invitation à rejoindre <Text style={styles.inviteStrong}>{householdName}</Text> de la part de{" "}
+                                            <Text style={styles.inviteStrong}>{inviterName}</Text>.
                                         </Text>
-                                    </TouchableOpacity>
-
-                                    <TouchableOpacity
-                                        style={[styles.inviteActionBtn, { borderColor: theme.tint, backgroundColor: `${theme.tint}18` }]}
-                                        onPress={() => {
-                                            void onRespondToInvitation(invite, "accept");
-                                        }}
-                                        disabled={isProcessing}
-                                    >
-                                        {isProcessing ? (
-                                            <ActivityIndicator size="small" color={theme.tint} />
-                                        ) : (
-                                            <Text style={[styles.inviteActionText, { color: theme.tint }]}>Accepter</Text>
-                                        )}
-                                    </TouchableOpacity>
-                                </View>
-                            </View>
-                        );
-                    })}
-                </View>
-            )}
-
-            {pendingTaskInvitations.length > 0 && (
-                <View style={[styles.inviteCard, { backgroundColor: theme.card, borderColor: `${theme.accentCool}55` }]}>
-                    <Text style={[styles.inviteTitle, { color: theme.text }]}>Demandes de reprise de tâche</Text>
-
-                    {pendingTaskInvitations.map((invite) => {
-                        const isProcessing = processingTaskInvitationId === invite.id;
-
-                        return (
-                            <View
-                                key={`task-invite-${invite.id}`}
-                                style={[styles.inviteItem, { backgroundColor: `${theme.accentCool}12`, borderColor: `${theme.accentCool}2e` }]}
-                            >
-                                <Text style={[styles.inviteText, { color: theme.text }]}>
-                                    <Text style={styles.inviteStrong}>{invite.requesterName}</Text> vous propose de reprendre{" "}
-                                    <Text style={styles.inviteStrong}>{invite.taskName}</Text>.
-                                </Text>
-                                {invite.dueDate ? (
-                                    <Text style={[styles.inviteMeta, { color: theme.textSecondary }]}>Prévue le {invite.dueDate}</Text>
-                                ) : null}
-
-                                <View style={styles.inviteActions}>
-                                    <TouchableOpacity
-                                        style={[styles.inviteActionBtn, { borderColor: theme.icon, backgroundColor: theme.background }]}
-                                        onPress={() => {
-                                            void onRespondToTaskInvitation(invite, "refuse");
-                                        }}
-                                        disabled={isProcessing}
-                                    >
-                                        <Text style={[styles.inviteActionText, { color: theme.text }]}>
-                                            {isProcessing ? "..." : "Refuser"}
+                                        <Text style={[styles.inviteMeta, { color: theme.textSecondary }]}>
+                                            Rôle proposé: {invitedRole === "parent" ? "Parent" : "Enfant"}
                                         </Text>
-                                    </TouchableOpacity>
+                                        {createdLabel ? (
+                                            <Text style={[styles.inviteMeta, { color: theme.textSecondary }]}>Reçue le {createdLabel}</Text>
+                                        ) : null}
+                                        <View style={styles.inviteActions}>
+                                            <TouchableOpacity
+                                                style={[styles.inviteActionBtn, { borderColor: theme.icon, backgroundColor: theme.background }]}
+                                                onPress={() => {
+                                                    void onRespondToNotification(notification, "refuse");
+                                                }}
+                                                disabled={isProcessing}
+                                            >
+                                                <Text style={[styles.inviteActionText, { color: theme.text }]}>
+                                                    {isProcessing ? "..." : "Refuser"}
+                                                </Text>
+                                            </TouchableOpacity>
 
-                                    <TouchableOpacity
-                                        style={[styles.inviteActionBtn, { borderColor: theme.accentCool, backgroundColor: `${theme.accentCool}18` }]}
-                                        onPress={() => {
-                                            void onRespondToTaskInvitation(invite, "accept");
-                                        }}
-                                        disabled={isProcessing}
-                                    >
-                                        {isProcessing ? (
-                                            <ActivityIndicator size="small" color={theme.accentCool} />
-                                        ) : (
-                                            <Text style={[styles.inviteActionText, { color: theme.accentCool }]}>Accepter</Text>
-                                        )}
-                                    </TouchableOpacity>
-                                </View>
-                            </View>
+                                            <TouchableOpacity
+                                                style={[styles.inviteActionBtn, { borderColor: theme.tint, backgroundColor: `${theme.tint}18` }]}
+                                                onPress={() => {
+                                                    void onRespondToNotification(notification, "accept");
+                                                }}
+                                                disabled={isProcessing}
+                                            >
+                                                {isProcessing ? (
+                                                    <ActivityIndicator size="small" color={theme.tint} />
+                                                ) : (
+                                                    <Text style={[styles.inviteActionText, { color: theme.tint }]}>Accepter</Text>
+                                                )}
+                                            </TouchableOpacity>
+                                        </View>
+                                    </>
+                                ) : type === "task_reassignment_invite" ? (
+                                    <>
+                                        <Text style={[styles.inviteText, { color: theme.text }]}>
+                                            <Text style={styles.inviteStrong}>{requesterName}</Text> vous demande de reprendre{" "}
+                                            <Text style={styles.inviteStrong}>{taskName}</Text>.
+                                        </Text>
+                                        {dueDate ? (
+                                            <Text style={[styles.inviteMeta, { color: theme.textSecondary }]}>Échéance: {dueDate}</Text>
+                                        ) : null}
+                                        {createdLabel ? (
+                                            <Text style={[styles.inviteMeta, { color: theme.textSecondary }]}>Reçue le {createdLabel}</Text>
+                                        ) : null}
+                                        <View style={styles.inviteActions}>
+                                            <TouchableOpacity
+                                                style={[styles.inviteActionBtn, { borderColor: theme.icon, backgroundColor: theme.background }]}
+                                                onPress={() => {
+                                                    void onRespondToNotification(notification, "refuse");
+                                                }}
+                                                disabled={isProcessing}
+                                            >
+                                                <Text style={[styles.inviteActionText, { color: theme.text }]}>
+                                                    {isProcessing ? "..." : "Refuser"}
+                                                </Text>
+                                            </TouchableOpacity>
+
+                                            <TouchableOpacity
+                                                style={[styles.inviteActionBtn, { borderColor: theme.tint, backgroundColor: `${theme.tint}18` }]}
+                                                onPress={() => {
+                                                    void onRespondToNotification(notification, "accept");
+                                                }}
+                                                disabled={isProcessing}
+                                            >
+                                                {isProcessing ? (
+                                                    <ActivityIndicator size="small" color={theme.tint} />
+                                                ) : (
+                                                    <Text style={[styles.inviteActionText, { color: theme.tint }]}>Accepter</Text>
+                                                )}
+                                            </TouchableOpacity>
+                                        </View>
+                                    </>
+                                ) : (
+                                    <>
+                                        <Text style={[styles.inviteText, { color: theme.text }]}>
+                                            <Text style={styles.inviteStrong}>{notification.title}</Text>
+                                        </Text>
+                                        <Text style={[styles.inviteMeta, { color: theme.textSecondary }]}>{notification.body}</Text>
+                                        {createdLabel ? (
+                                            <Text style={[styles.inviteMeta, { color: theme.textSecondary }]}>Reçue le {createdLabel}</Text>
+                                        ) : null}
+                                        <View style={styles.inviteActions}>
+                                            <TouchableOpacity
+                                                style={[styles.inviteActionBtn, { borderColor: theme.tint, backgroundColor: `${theme.tint}18` }]}
+                                                onPress={() => {
+                                                    void onMarkNotificationRead(notification);
+                                                }}
+                                                disabled={isProcessing}
+                                            >
+                                                {isProcessing ? (
+                                                    <ActivityIndicator size="small" color={theme.tint} />
+                                                ) : (
+                                                    <Text style={[styles.inviteActionText, { color: theme.tint }]}>Marquer comme lu</Text>
+                                                )}
+                                            </TouchableOpacity>
+                                        </View>
+                                    </>
+                                )}
+                            </TouchableOpacity>
                         );
                     })}
                 </View>
