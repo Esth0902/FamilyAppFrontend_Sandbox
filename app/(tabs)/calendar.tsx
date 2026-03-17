@@ -49,9 +49,20 @@ type CalendarEvent = {
     id?: number | null;
     name?: string | null;
   } | null;
+  my_participation?: {
+    status: "participate" | "not_participate";
+    reason?: string | null;
+    responded_at?: string | null;
+  } | null;
+  participation_overview?: {
+    participate?: { id: number; name: string; reason?: string | null }[];
+    not_participate?: { id: number; name: string; reason?: string | null }[];
+    unanswered?: { id: number; name: string }[];
+  } | null;
   permissions?: {
     can_update: boolean;
     can_delete: boolean;
+    can_confirm_participation?: boolean;
   };
 };
 
@@ -69,6 +80,17 @@ type MealPlanEntry = {
   meal_type: "matin" | "midi" | "soir";
   custom_title?: string | null;
   note?: string | null;
+  my_presence?: {
+    status: "present" | "not_home" | "later";
+    reason?: string | null;
+    responded_at?: string | null;
+  } | null;
+  presence_overview?: {
+    present?: { id: number; name: string; reason?: string | null }[];
+    not_home?: { id: number; name: string; reason?: string | null }[];
+    later?: { id: number; name: string; reason?: string | null }[];
+    unanswered?: { id: number; name: string }[];
+  } | null;
   recipes: MealPlanRecipe[];
 };
 
@@ -114,6 +136,8 @@ type CalendarBoardPayload = {
     can_create_events: boolean;
     can_share_with_other_household: boolean;
     can_manage_meal_plan: boolean;
+    can_confirm_meal_presence?: boolean;
+    can_confirm_event_participation?: boolean;
   };
   events: CalendarEvent[];
   meal_plan: MealPlanEntry[];
@@ -135,6 +159,11 @@ type TaskBoardPayload = {
 };
 
 type CreateEntryType = "event" | "meal_plan" | "task";
+type MealPresenceStatus = "present" | "not_home" | "later";
+type EventParticipationStatus = "participate" | "not_participate";
+type ReasonAction =
+  | { kind: "meal"; mealPlanId: number; status: Extract<MealPresenceStatus, "not_home" | "later"> }
+  | { kind: "event"; eventId: number; status: "not_participate" };
 
 const WEEK_DAYS = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"];
 const WEEK_DAY_SHORT = ["di", "lu", "ma", "me", "je", "ve", "sa"] as const;
@@ -214,6 +243,31 @@ const mealTypeColor = (value: string) => {
   if (value === "midi") return "#4A90E2";
   if (value === "soir") return "#50BFA5";
   return "#7B8794";
+};
+
+const mealPresenceLabel = (value: MealPresenceStatus) => {
+  if (value === "present") return "Je participe";
+  if (value === "not_home") return "Pas à la maison";
+  return "Je mangerai plus tard";
+};
+
+const eventParticipationLabel = (value: EventParticipationStatus) => {
+  if (value === "participate") return "Je participe";
+  return "Je ne participe pas";
+};
+
+const formatMemberList = (members?: { name: string; reason?: string | null }[] | null) => {
+  if (!Array.isArray(members) || members.length === 0) {
+    return "Aucun";
+  }
+
+  return members
+    .map((member) => {
+      const name = String(member?.name ?? "").trim() || "Membre";
+      const reason = String(member?.reason ?? "").trim();
+      return reason.length > 0 ? `${name} (${reason})` : name;
+    })
+    .join(", ");
 };
 
 const taskStatusLabel = (value: string) => {
@@ -389,6 +443,10 @@ export default function CalendarScreen() {
   const [dayProgramModalVisible, setDayProgramModalVisible] = useState(false);
   const [eventModalVisible, setEventModalVisible] = useState(false);
   const [mealPlanModalVisible, setMealPlanModalVisible] = useState(false);
+  const [reasonModalVisible, setReasonModalVisible] = useState(false);
+  const [pendingReasonAction, setPendingReasonAction] = useState<ReasonAction | null>(null);
+  const [reasonInput, setReasonInput] = useState("");
+  const [restoreDayProgramAfterReasonModal, setRestoreDayProgramAfterReasonModal] = useState(false);
   const [shoppingPickerVisible, setShoppingPickerVisible] = useState(false);
   const [shoppingLists, setShoppingLists] = useState<ShoppingListSummary[]>([]);
   const [selectedShoppingListId, setSelectedShoppingListId] = useState<number | null>(null);
@@ -1260,6 +1318,140 @@ export default function CalendarScreen() {
     }
   };
 
+  const submitMealPresence = async (
+    mealPlanId: number,
+    status: MealPresenceStatus,
+    reason?: string | null
+  ): Promise<boolean> => {
+    if (!settings.absence_tracking_enabled) {
+      Alert.alert("Calendrier", "Le suivi des absences est désactivé pour ce foyer.");
+      return false;
+    }
+
+    setSaving(true);
+    try {
+      await apiFetch(`/calendar/meal-plan/${mealPlanId}/attendance`, {
+        method: "POST",
+        body: JSON.stringify({
+          status,
+          reason: reason?.trim() ? reason.trim() : null,
+        }),
+      });
+      await loadBoard({ silent: true });
+      return true;
+    } catch (error: any) {
+      Alert.alert("Calendrier", error?.message || "Impossible d'enregistrer la présence au repas.");
+      return false;
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const submitEventParticipation = async (
+    eventId: number,
+    status: EventParticipationStatus,
+    reason?: string | null
+  ): Promise<boolean> => {
+    setSaving(true);
+    try {
+      await apiFetch(`/calendar/events/${eventId}/participation`, {
+        method: "POST",
+        body: JSON.stringify({
+          status,
+          reason: reason?.trim() ? reason.trim() : null,
+        }),
+      });
+      await loadBoard({ silent: true });
+      return true;
+    } catch (error: any) {
+      Alert.alert("Calendrier", error?.message || "Impossible d'enregistrer la participation à l'événement.");
+      return false;
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const closeReasonModal = () => {
+    if (saving) {
+      return;
+    }
+
+    setReasonModalVisible(false);
+    setPendingReasonAction(null);
+    setReasonInput("");
+    if (restoreDayProgramAfterReasonModal) {
+      setDayProgramModalVisible(true);
+      setRestoreDayProgramAfterReasonModal(false);
+    }
+  };
+
+  const openMealReasonModal = (entry: MealPlanEntry, status: Extract<MealPresenceStatus, "not_home" | "later">) => {
+    const existingReason = entry.my_presence?.status === status ? String(entry.my_presence?.reason ?? "") : "";
+    setPendingReasonAction({ kind: "meal", mealPlanId: entry.id, status });
+    setReasonInput(existingReason);
+    if (dayProgramModalVisible) {
+      setRestoreDayProgramAfterReasonModal(true);
+      setDayProgramModalVisible(false);
+      InteractionManager.runAfterInteractions(() => {
+        setReasonModalVisible(true);
+      });
+      return;
+    }
+    setRestoreDayProgramAfterReasonModal(false);
+    setReasonModalVisible(true);
+  };
+
+  const openEventReasonModal = (event: CalendarEvent) => {
+    const existingReason = event.my_participation?.status === "not_participate"
+      ? String(event.my_participation?.reason ?? "")
+      : "";
+    setPendingReasonAction({ kind: "event", eventId: event.id, status: "not_participate" });
+    setReasonInput(existingReason);
+    if (dayProgramModalVisible) {
+      setRestoreDayProgramAfterReasonModal(true);
+      setDayProgramModalVisible(false);
+      InteractionManager.runAfterInteractions(() => {
+        setReasonModalVisible(true);
+      });
+      return;
+    }
+    setRestoreDayProgramAfterReasonModal(false);
+    setReasonModalVisible(true);
+  };
+
+  const confirmReasonAction = async () => {
+    if (!pendingReasonAction) {
+      return;
+    }
+
+    const trimmedReason = reasonInput.trim();
+    let success = false;
+
+    if (pendingReasonAction.kind === "meal") {
+      success = await submitMealPresence(
+        pendingReasonAction.mealPlanId,
+        pendingReasonAction.status,
+        trimmedReason.length > 0 ? trimmedReason : null
+      );
+    } else {
+      success = await submitEventParticipation(
+        pendingReasonAction.eventId,
+        pendingReasonAction.status,
+        trimmedReason.length > 0 ? trimmedReason : null
+      );
+    }
+
+    if (success) {
+      setReasonModalVisible(false);
+      setPendingReasonAction(null);
+      setReasonInput("");
+      if (restoreDayProgramAfterReasonModal) {
+        setDayProgramModalVisible(true);
+        setRestoreDayProgramAfterReasonModal(false);
+      }
+    }
+  };
+
   const openMealPlanShoppingListPicker = async (entry: MealPlanEntry) => {
     if (!permissions.can_manage_meal_plan) {
       Alert.alert("Calendrier", "Seul un parent peut ajouter un repas à la liste de courses.");
@@ -1635,6 +1827,80 @@ export default function CalendarScreen() {
                     {entry.note ? (
                       <Text style={[styles.bodyText, { color: theme.textSecondary }]}>{entry.note}</Text>
                     ) : null}
+                    {settings.absence_tracking_enabled ? (
+                      <>
+                        <Text style={[styles.itemMetaText, { color: theme.textSecondary }]}>
+                          {entry.my_presence
+                            ? `Votre présence: ${mealPresenceLabel(entry.my_presence.status)}`
+                            : "Votre présence n'est pas encore confirmée."}
+                        </Text>
+                        {entry.my_presence?.reason ? (
+                          <Text style={[styles.bodyText, { color: theme.textSecondary }]}>
+                            Justification: {entry.my_presence.reason}
+                          </Text>
+                        ) : null}
+                        <View style={styles.itemActionsRow}>
+                          <TouchableOpacity
+                            style={[
+                              styles.inlineActionBtn,
+                              { borderColor: theme.icon },
+                              entry.my_presence?.status === "present" && {
+                                borderColor: theme.tint,
+                                backgroundColor: `${theme.tint}16`,
+                              },
+                            ]}
+                            onPress={() => void submitMealPresence(entry.id, "present", null)}
+                            disabled={saving}
+                          >
+                            <Text style={[styles.inlineActionText, { color: theme.text }]}>Je participe</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={[
+                              styles.inlineActionBtn,
+                              { borderColor: theme.icon },
+                              entry.my_presence?.status === "not_home" && {
+                                borderColor: theme.tint,
+                                backgroundColor: `${theme.tint}16`,
+                              },
+                            ]}
+                            onPress={() => openMealReasonModal(entry, "not_home")}
+                            disabled={saving}
+                          >
+                            <Text style={[styles.inlineActionText, { color: theme.text }]}>Pas à la maison</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={[
+                              styles.inlineActionBtn,
+                              { borderColor: theme.icon },
+                              entry.my_presence?.status === "later" && {
+                                borderColor: theme.tint,
+                                backgroundColor: `${theme.tint}16`,
+                              },
+                            ]}
+                            onPress={() => openMealReasonModal(entry, "later")}
+                            disabled={saving}
+                          >
+                            <Text style={[styles.inlineActionText, { color: theme.text }]}>Je mangerai plus tard</Text>
+                          </TouchableOpacity>
+                        </View>
+                        {entry.presence_overview ? (
+                          <View style={styles.inlineSummaryBlock}>
+                            <Text style={[styles.itemMetaText, { color: theme.textSecondary }]}>
+                              Présents: {formatMemberList(entry.presence_overview.present)}
+                            </Text>
+                            <Text style={[styles.itemMetaText, { color: theme.textSecondary }]}>
+                              Pas à la maison: {formatMemberList(entry.presence_overview.not_home)}
+                            </Text>
+                            <Text style={[styles.itemMetaText, { color: theme.textSecondary }]}>
+                              Plus tard: {formatMemberList(entry.presence_overview.later)}
+                            </Text>
+                            <Text style={[styles.itemMetaText, { color: theme.textSecondary }]}>
+                              Sans réponse: {formatMemberList(entry.presence_overview.unanswered)}
+                            </Text>
+                          </View>
+                        ) : null}
+                      </>
+                    ) : null}
                     {permissions.can_manage_meal_plan ? (
                       <View style={styles.itemActionsRow}>
                         <TouchableOpacity
@@ -1784,6 +2050,63 @@ export default function CalendarScreen() {
                         Créé par {event.created_by.name}
                       </Text>
                     ) : null}
+                    {event.permissions?.can_confirm_participation !== false ? (
+                      <>
+                        <Text style={[styles.itemMetaText, { color: theme.textSecondary }]}>
+                          {event.my_participation
+                            ? `Votre réponse: ${eventParticipationLabel(event.my_participation.status)}`
+                            : "Votre participation n'est pas encore confirmée."}
+                        </Text>
+                        {event.my_participation?.reason ? (
+                          <Text style={[styles.bodyText, { color: theme.textSecondary }]}>
+                            Justification: {event.my_participation.reason}
+                          </Text>
+                        ) : null}
+                        <View style={styles.itemActionsRow}>
+                          <TouchableOpacity
+                            style={[
+                              styles.inlineActionBtn,
+                              { borderColor: theme.icon },
+                              event.my_participation?.status === "participate" && {
+                                borderColor: theme.tint,
+                                backgroundColor: `${theme.tint}16`,
+                              },
+                            ]}
+                            onPress={() => void submitEventParticipation(event.id, "participate", null)}
+                            disabled={saving}
+                          >
+                            <Text style={[styles.inlineActionText, { color: theme.text }]}>Je participe</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={[
+                              styles.inlineActionBtn,
+                              { borderColor: theme.icon },
+                              event.my_participation?.status === "not_participate" && {
+                                borderColor: theme.tint,
+                                backgroundColor: `${theme.tint}16`,
+                              },
+                            ]}
+                            onPress={() => openEventReasonModal(event)}
+                            disabled={saving}
+                          >
+                            <Text style={[styles.inlineActionText, { color: theme.text }]}>Je ne participe pas</Text>
+                          </TouchableOpacity>
+                        </View>
+                        {event.participation_overview ? (
+                          <View style={styles.inlineSummaryBlock}>
+                            <Text style={[styles.itemMetaText, { color: theme.textSecondary }]}>
+                              Participe: {formatMemberList(event.participation_overview.participate)}
+                            </Text>
+                            <Text style={[styles.itemMetaText, { color: theme.textSecondary }]}>
+                              Ne participe pas: {formatMemberList(event.participation_overview.not_participate)}
+                            </Text>
+                            <Text style={[styles.itemMetaText, { color: theme.textSecondary }]}>
+                              Sans réponse: {formatMemberList(event.participation_overview.unanswered)}
+                            </Text>
+                          </View>
+                        ) : null}
+                      </>
+                    ) : null}
                     {event.permissions?.can_update || event.permissions?.can_delete ? (
                       <View style={styles.itemActionsRow}>
                         {event.permissions?.can_update ? (
@@ -1817,6 +2140,60 @@ export default function CalendarScreen() {
               )}
             </View>
                 </ScrollView>
+              </View>
+            </View>
+          </Modal>
+          <Modal visible={reasonModalVisible} transparent animationType="fade" onRequestClose={closeReasonModal}>
+            <View style={styles.modalBackdrop}>
+              <View style={[styles.modalCard, { backgroundColor: theme.card }]}>
+                <View style={styles.cardTitleRow}>
+                  <Text style={[styles.cardTitle, { color: theme.text, marginBottom: 0 }]}>
+                    Justification optionnelle
+                  </Text>
+                  <TouchableOpacity onPress={closeReasonModal} disabled={saving}>
+                    <MaterialCommunityIcons name="close" size={22} color={theme.tint} />
+                  </TouchableOpacity>
+                </View>
+
+                <Text style={[styles.bodyText, { color: theme.textSecondary, marginBottom: 8 }]}>
+                  {pendingReasonAction?.kind === "meal"
+                    ? "Ajoutez un motif si vous ne participez pas au repas à la maison."
+                    : "Ajoutez un motif si vous ne participez pas à l'événement."}
+                </Text>
+
+                <TextInput
+                  style={[
+                    styles.input,
+                    styles.inputMultiline,
+                    { backgroundColor: theme.background, color: theme.text, borderColor: theme.icon },
+                  ]}
+                  value={reasonInput}
+                  onChangeText={setReasonInput}
+                  placeholder="Ex: activité extérieure, retour tardif..."
+                  placeholderTextColor={theme.textSecondary}
+                  multiline
+                />
+
+                <View style={styles.modalActions}>
+                  <TouchableOpacity
+                    onPress={closeReasonModal}
+                    style={[styles.secondaryBtn, { borderColor: theme.icon, backgroundColor: theme.background }]}
+                    disabled={saving}
+                  >
+                    <Text style={[styles.secondaryBtnText, { color: theme.text }]}>Annuler</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => void confirmReasonAction()}
+                    style={[styles.primaryBtn, styles.modalPrimaryBtn, { backgroundColor: theme.tint, opacity: saving ? 0.7 : 1 }]}
+                    disabled={saving}
+                  >
+                    {saving ? (
+                      <ActivityIndicator size="small" color="white" />
+                    ) : (
+                      <Text style={styles.primaryBtnText}>Confirmer</Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
               </View>
             </View>
           </Modal>
@@ -2800,6 +3177,10 @@ const styles = StyleSheet.create({
     flexWrap: "wrap",
     gap: 8,
     marginTop: 6,
+  },
+  inlineSummaryBlock: {
+    marginTop: 8,
+    gap: 2,
   },
   inlineActionBtn: {
     flexDirection: "row",
