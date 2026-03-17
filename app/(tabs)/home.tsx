@@ -70,8 +70,13 @@ const TASK_NOTIFICATION_TYPES = new Set([
 
 const BUDGET_NOTIFICATION_TYPES = new Set([
     "budget_payment_validated",
+    "budget_payment_due",
+    "budget_negative_due",
+    "budget_negative_carried_over",
     "budget_advance_requested",
     "budget_advance_reviewed",
+    "budget_reimbursement_requested",
+    "budget_reimbursement_reviewed",
 ]);
 
 const POLL_NOTIFICATION_TYPES = new Set([
@@ -1080,10 +1085,10 @@ const styles = StyleSheet.create({
         gap: 10,
     },
     notificationHeaderRow: {
-        flexDirection: "row",
-        alignItems: "center",
-        justifyContent: "space-between",
-        gap: 10,
+        flexDirection: "column",
+        alignItems: "stretch",
+        justifyContent: "flex-start",
+        gap: 8,
     },
     notificationTitle: {
         fontSize: 15,
@@ -1092,14 +1097,18 @@ const styles = StyleSheet.create({
     markAllReadButton: {
         borderWidth: 1,
         borderRadius: 10,
-        minHeight: 32,
+        minHeight: 36,
         paddingHorizontal: 10,
+        paddingVertical: 6,
+        alignSelf: "stretch",
         alignItems: "center",
         justifyContent: "center",
     },
     markAllReadButtonText: {
         fontSize: 12,
         fontWeight: "700",
+        textAlign: "center",
+        lineHeight: 16,
     },
     emptyNotificationsText: {
         fontSize: 13,

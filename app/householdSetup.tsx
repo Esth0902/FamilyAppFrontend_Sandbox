@@ -55,6 +55,17 @@ type TaskSettingsInput = {
     custody_home_week_start: string;
 };
 
+type BudgetRecurrence = "weekly" | "monthly";
+type BudgetChildSettingDraft = {
+    childId: number;
+    childName: string;
+    baseAmountInput: string;
+    recurrence: BudgetRecurrence;
+    resetDayInput: string;
+    allowAdvances: boolean;
+    maxAdvanceInput: string;
+};
+
 type DietaryTagOption = {
     id: number;
     type: "diet" | "allergen" | "dislike" | "restriction" | "cuisine_rule";
@@ -152,6 +163,14 @@ const parseTimeToHHMM = (value: unknown): string | null => {
 
     return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
 };
+const parseDecimalInput = (value: string): number | null => {
+    const normalized = value.replace(",", ".").trim();
+    if (normalized === "") {
+        return null;
+    }
+    const parsed = Number(normalized);
+    return Number.isFinite(parsed) ? parsed : null;
+};
 const pad2 = (value: number): string => String(value).padStart(2, "0");
 const toIsoDate = (date: Date): string => `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
 const parseIsoDate = (value: string): Date => new Date(`${value}T00:00:00`);
@@ -237,6 +256,7 @@ export default function SetupHousehold() {
     const isCreateMode = params.mode === "create";
     const isMealsScope = params.scope === "meals";
     const isTasksScope = params.scope === "tasks";
+    const isBudgetScope = params.scope === "budget";
     const isCalendarScope = params.scope === "calendar";
     const colorScheme = useColorScheme();
     const theme = Colors[colorScheme ?? "light"];
@@ -258,7 +278,7 @@ export default function SetupHousehold() {
     const [expandedModules, setExpandedModules] = useState<Record<ModuleKey, boolean>>({
         meals: isMealsScope,
         tasks: isTasksScope,
-        budget: false,
+        budget: isBudgetScope,
         calendar: isCalendarScope,
     });
 
@@ -321,6 +341,10 @@ export default function SetupHousehold() {
         currency: "EUR",
         notes: "",
     });
+    const [budgetChildDrafts, setBudgetChildDrafts] = useState<BudgetChildSettingDraft[]>([]);
+    const [budgetSettingsLoading, setBudgetSettingsLoading] = useState(false);
+    const [budgetSettingsError, setBudgetSettingsError] = useState<string | null>(null);
+    const [savingBudgetChildId, setSavingBudgetChildId] = useState<number | null>(null);
 
     const [members, setMembers] = useState<HouseholdMember[]>([]);
     const [memberName, setMemberName] = useState("");
@@ -342,6 +366,8 @@ export default function SetupHousehold() {
         ? MODULES.filter((module) => module.id === "meals")
         : isTasksScope
             ? MODULES.filter((module) => module.id === "tasks")
+            : isBudgetScope
+                ? MODULES.filter((module) => module.id === "budget")
             : isCalendarScope
                 ? MODULES.filter((module) => module.id === "calendar")
             : MODULES;
@@ -379,6 +405,130 @@ export default function SetupHousehold() {
             setMealExpandedSections((prev) => ({ ...prev, [option]: false }));
         }
     };
+    const updateBudgetChildDraft = useCallback((childId: number, patch: Partial<BudgetChildSettingDraft>) => {
+        setBudgetChildDrafts((prev) => prev.map((draft) => (
+            draft.childId === childId
+                ? { ...draft, ...patch }
+                : draft
+        )));
+    }, []);
+
+    const loadBudgetChildDrafts = useCallback(async () => {
+        if (!isEditMode || !isBudgetScope) {
+            setBudgetChildDrafts([]);
+            setBudgetSettingsError(null);
+            return;
+        }
+
+        setBudgetSettingsLoading(true);
+        setBudgetSettingsError(null);
+        try {
+            const response = await apiFetch("/budget/board");
+            const children = Array.isArray(response?.children) ? response.children : [];
+            const drafts = children
+                .map((item: unknown): BudgetChildSettingDraft | null => {
+                    const raw = (item ?? {}) as {
+                        child?: { id?: unknown; name?: unknown };
+                        setting?: {
+                            base_amount?: unknown;
+                            recurrence?: unknown;
+                            reset_day?: unknown;
+                            allow_advances?: unknown;
+                            max_advance_amount?: unknown;
+                        } | null;
+                    };
+                    const childId = Number(raw.child?.id ?? 0);
+                    if (!Number.isFinite(childId) || childId <= 0) {
+                        return null;
+                    }
+
+                    const recurrence = raw.setting?.recurrence === "monthly" ? "monthly" : "weekly";
+                    const resetDayDefault = recurrence === "monthly" ? 1 : 1;
+                    const resetDayRaw = Number(raw.setting?.reset_day ?? resetDayDefault);
+
+                    return {
+                        childId: Math.trunc(childId),
+                        childName: String(raw.child?.name ?? "Enfant").trim() || "Enfant",
+                        baseAmountInput: String(raw.setting?.base_amount ?? 0),
+                        recurrence,
+                        resetDayInput: String(Number.isFinite(resetDayRaw) && resetDayRaw > 0 ? Math.trunc(resetDayRaw) : resetDayDefault),
+                        allowAdvances: Boolean(raw.setting?.allow_advances ?? false),
+                        maxAdvanceInput: String(raw.setting?.max_advance_amount ?? 0),
+                    };
+                })
+                .filter((draft) => draft !== null) as BudgetChildSettingDraft[];
+
+            setBudgetChildDrafts(drafts);
+            if (typeof response?.currency === "string" && response.currency.trim().length > 0) {
+                setBudgetSettings((prev) => ({ ...prev, currency: response.currency }));
+            }
+        } catch (error: any) {
+            const statusCode = Number(error?.status ?? 0);
+            if (statusCode === 403) {
+                setBudgetSettingsError("Le module budget est désactivé pour ce foyer.");
+            } else {
+                setBudgetSettingsError(error?.message || "Impossible de charger les paramètres budget.");
+            }
+            setBudgetChildDrafts([]);
+        } finally {
+            setBudgetSettingsLoading(false);
+        }
+    }, [isBudgetScope, isEditMode]);
+
+    const saveBudgetChildDraft = useCallback(async (draft: BudgetChildSettingDraft) => {
+        const baseAmount = parseDecimalInput(draft.baseAmountInput);
+        const resetDay = Number(draft.resetDayInput);
+        const maxAdvanceAmount = parseDecimalInput(draft.maxAdvanceInput);
+
+        if (baseAmount === null || baseAmount < 0) {
+            Alert.alert("Budget", "Le montant de base doit être un nombre positif.");
+            return;
+        }
+
+        if (!Number.isInteger(resetDay)) {
+            Alert.alert("Budget", "Le jour de réinitialisation doit être un entier.");
+            return;
+        }
+
+        if (draft.recurrence === "weekly" && (resetDay < 1 || resetDay > 7)) {
+            Alert.alert("Budget", "En hebdomadaire, le jour de réinitialisation doit être entre 1 et 7.");
+            return;
+        }
+
+        if (draft.recurrence === "monthly" && (resetDay < 1 || resetDay > 31)) {
+            Alert.alert("Budget", "En mensuel, le jour de réinitialisation doit être entre 1 et 31.");
+            return;
+        }
+
+        if (maxAdvanceAmount === null || maxAdvanceAmount < 0) {
+            Alert.alert("Budget", "Le plafond d'avance doit être un nombre positif.");
+            return;
+        }
+
+        if (draft.allowAdvances && maxAdvanceAmount <= 0) {
+            Alert.alert("Budget", "Le plafond d'avance doit être supérieur à 0 si les avances sont autorisées.");
+            return;
+        }
+
+        setSavingBudgetChildId(draft.childId);
+        try {
+            await apiFetch(`/budget/settings/${draft.childId}`, {
+                method: "PATCH",
+                body: JSON.stringify({
+                    base_amount: baseAmount,
+                    recurrence: draft.recurrence,
+                    reset_day: resetDay,
+                    allow_advances: draft.allowAdvances,
+                    max_advance_amount: draft.allowAdvances ? maxAdvanceAmount : 0,
+                }),
+            });
+            await loadBudgetChildDrafts();
+        } catch (error: any) {
+            Alert.alert("Budget", error?.message || "Impossible d'enregistrer les paramètres de cet enfant.");
+        } finally {
+            setSavingBudgetChildId(null);
+        }
+    }, [loadBudgetChildDrafts]);
 
     useEffect(() => {
         if (!tasksSettings.alternating_custody_enabled) {
@@ -971,7 +1121,7 @@ export default function SetupHousehold() {
                         });
                         setSelectedMealDietaryTagDetails(detailsMap);
                     }
-                    if (!isTasksScope) {
+                    if (!isTasksScope && !isBudgetScope) {
                         await loadDietaryTags("diet");
                     }
                     const parsedCustodyChangeDay =
@@ -1017,7 +1167,11 @@ export default function SetupHousehold() {
         };
 
         loadSetupState();
-    }, [isEditMode, isTasksScope, loadDietaryTags, loadManagedMembers, router]);
+    }, [isBudgetScope, isEditMode, isTasksScope, loadDietaryTags, loadManagedMembers, router]);
+
+    useEffect(() => {
+        void loadBudgetChildDrafts();
+    }, [loadBudgetChildDrafts]);
 
     const addMember = () => {
         const cleanName = memberName.trim();
@@ -1423,6 +1577,8 @@ export default function SetupHousehold() {
                         ? "Paramètres repas"
                         : isTasksScope
                             ? "Paramètres tâches"
+                            : isBudgetScope
+                                ? "Paramètres budget"
                             : isCalendarScope
                                 ? "Paramètres calendrier"
                         : (isEditMode ? "Modifier le foyer" : "Nouveau Foyer")}
@@ -1430,7 +1586,7 @@ export default function SetupHousehold() {
             </View>
 
             <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
-                {!isMealsScope && !isTasksScope && !isCalendarScope && (
+                {!isMealsScope && !isTasksScope && !isBudgetScope && !isCalendarScope && (
                     <View style={styles.section}>
                         <View style={[styles.collapsibleSectionCard, { backgroundColor: theme.card, borderColor: theme.icon }]}>
                             <View style={styles.collapsibleSectionHeader}>
@@ -1449,7 +1605,7 @@ export default function SetupHousehold() {
                     </View>
                 )}
 
-                {!isMealsScope && !isTasksScope && !isCalendarScope && (
+                {!isMealsScope && !isTasksScope && !isBudgetScope && !isCalendarScope && (
                     <View style={styles.section}>
                         <View style={[styles.collapsibleSectionCard, { backgroundColor: theme.card, borderColor: theme.icon }]}>
                             <TouchableOpacity style={styles.collapsibleSectionHeader} onPress={() => setMembersExpanded((prev) => !prev)}>
@@ -1684,6 +1840,8 @@ export default function SetupHousehold() {
                             ? "Repas & courses"
                             : isTasksScope
                                 ? "Tâches ménagères"
+                                : isBudgetScope
+                                    ? "Budget"
                                 : isCalendarScope
                                     ? "Calendrier"
                                 : "Configuration des modules"}
@@ -2214,22 +2372,124 @@ export default function SetupHousehold() {
 
                             {activeModules[module.id] && expandedModules[module.id] && module.id === "budget" && (
                                 <View style={styles.subConfigBox}>
-                                    <Text style={[styles.label, { color: theme.text }]}>Devise</Text>
-                                    <TextInput
-                                        style={[styles.input, { backgroundColor: theme.background, color: theme.text, marginBottom: 8 }]}
-                                        value={budgetSettings.currency}
-                                        onChangeText={(value) => setBudgetSettings((prev) => ({ ...prev, currency: value }))}
-                                        placeholder="EUR"
-                                        placeholderTextColor={theme.textSecondary}
-                                    />
-                                    <Text style={[styles.label, { color: theme.text }]}>Note budget (optionnel)</Text>
-                                    <TextInput
-                                        style={[styles.input, { backgroundColor: theme.background, color: theme.text }]}
-                                        value={budgetSettings.notes}
-                                        onChangeText={(value) => setBudgetSettings((prev) => ({ ...prev, notes: value }))}
-                                        placeholder="Ex: Argent de poche le dimanche"
-                                        placeholderTextColor={theme.textSecondary}
-                                    />
+                                    {isEditMode ? (
+                                        <>
+                                            <Text style={[styles.label, { color: theme.text }]}>Paramètres par enfant</Text>
+                                            <Text style={[styles.memberMeta, { color: theme.textSecondary, marginBottom: 8 }]}>
+                                                Définis ici le montant de base, la récurrence, le jour de réinitialisation et les règles d&apos;avance.
+                                            </Text>
+
+                                            {budgetSettingsLoading ? (
+                                                <ActivityIndicator size="small" color={theme.tint} />
+                                            ) : budgetSettingsError ? (
+                                                <Text style={[styles.memberMeta, { color: theme.accentWarm }]}>{budgetSettingsError}</Text>
+                                            ) : budgetChildDrafts.length === 0 ? (
+                                                <Text style={[styles.memberMeta, { color: theme.textSecondary }]}>
+                                                    Aucun enfant trouvé pour ce foyer.
+                                                </Text>
+                                            ) : (
+                                                <View style={{ gap: 10 }}>
+                                                    {budgetChildDrafts.map((draft) => (
+                                                        <View key={`budget-child-${draft.childId}`} style={[styles.budgetChildCard, { backgroundColor: theme.background, borderColor: theme.icon }]}>
+                                                            <Text style={[styles.memberName, { color: theme.text }]}>{draft.childName}</Text>
+
+                                                            <Text style={[styles.label, { color: theme.text, marginBottom: 4 }]}>Montant de base</Text>
+                                                            <TextInput
+                                                                style={[styles.budgetCompactInput, { backgroundColor: theme.card, color: theme.text }]}
+                                                                keyboardType="decimal-pad"
+                                                                value={draft.baseAmountInput}
+                                                                onChangeText={(value) => updateBudgetChildDraft(draft.childId, { baseAmountInput: value })}
+                                                                placeholder="Ex: 12,00"
+                                                                placeholderTextColor={theme.textSecondary}
+                                                            />
+
+                                                            <Text style={[styles.label, { color: theme.text, marginBottom: 4 }]}>Récurrence</Text>
+                                                            <View style={styles.budgetRecurrenceRow}>
+                                                                <TouchableOpacity
+                                                                    onPress={() => updateBudgetChildDraft(draft.childId, { recurrence: "weekly" })}
+                                                                    style={[
+                                                                        styles.budgetChoiceBtn,
+                                                                        draft.recurrence === "weekly"
+                                                                            ? { backgroundColor: theme.tint, borderColor: theme.tint }
+                                                                            : { borderColor: theme.icon, backgroundColor: theme.card },
+                                                                    ]}
+                                                                >
+                                                                    <Text style={[styles.budgetChoiceText, { color: draft.recurrence === "weekly" ? "#FFFFFF" : theme.text }]}>
+                                                                        Hebdomadaire
+                                                                    </Text>
+                                                                </TouchableOpacity>
+                                                                <TouchableOpacity
+                                                                    onPress={() => updateBudgetChildDraft(draft.childId, { recurrence: "monthly" })}
+                                                                    style={[
+                                                                        styles.budgetChoiceBtn,
+                                                                        draft.recurrence === "monthly"
+                                                                            ? { backgroundColor: theme.tint, borderColor: theme.tint }
+                                                                            : { borderColor: theme.icon, backgroundColor: theme.card },
+                                                                    ]}
+                                                                >
+                                                                    <Text style={[styles.budgetChoiceText, { color: draft.recurrence === "monthly" ? "#FFFFFF" : theme.text }]}>
+                                                                        Mensuelle
+                                                                    </Text>
+                                                                </TouchableOpacity>
+                                                            </View>
+
+                                                            <Text style={[styles.label, { color: theme.text, marginBottom: 4 }]}>
+                                                                {draft.recurrence === "weekly"
+                                                                    ? "Jour de réinitialisation (1 à 7)"
+                                                                    : "Jour de réinitialisation (1 à 31)"}
+                                                            </Text>
+                                                            <TextInput
+                                                                style={[styles.budgetCompactInput, { backgroundColor: theme.card, color: theme.text }]}
+                                                                keyboardType="number-pad"
+                                                                value={draft.resetDayInput}
+                                                                onChangeText={(value) => updateBudgetChildDraft(draft.childId, { resetDayInput: value })}
+                                                                placeholder={draft.recurrence === "weekly" ? "1 à 7" : "1 à 31"}
+                                                                placeholderTextColor={theme.textSecondary}
+                                                            />
+
+                                                            <View style={styles.switchRow}>
+                                                                <Text style={[styles.label, { color: theme.text, marginBottom: 0 }]}>Autoriser les avances</Text>
+                                                                <Switch
+                                                                    value={draft.allowAdvances}
+                                                                    onValueChange={(value) => updateBudgetChildDraft(draft.childId, { allowAdvances: value })}
+                                                                    trackColor={{ false: theme.icon, true: theme.tint }}
+                                                                />
+                                                            </View>
+
+                                                            <Text style={[styles.label, { color: theme.text, marginBottom: 4 }]}>Plafond d&apos;avance</Text>
+                                                            <TextInput
+                                                                style={[styles.budgetCompactInput, { backgroundColor: theme.card, color: theme.text, opacity: draft.allowAdvances ? 1 : 0.65 }]}
+                                                                keyboardType="decimal-pad"
+                                                                value={draft.maxAdvanceInput}
+                                                                editable={draft.allowAdvances}
+                                                                onChangeText={(value) => updateBudgetChildDraft(draft.childId, { maxAdvanceInput: value })}
+                                                                placeholder="Ex: 15,00"
+                                                                placeholderTextColor={theme.textSecondary}
+                                                            />
+
+                                                            <TouchableOpacity
+                                                                onPress={() => {
+                                                                    void saveBudgetChildDraft(draft);
+                                                                }}
+                                                                style={[styles.budgetSaveBtn, { backgroundColor: theme.tint, opacity: savingBudgetChildId === draft.childId ? 0.8 : 1 }]}
+                                                                disabled={savingBudgetChildId === draft.childId}
+                                                            >
+                                                                {savingBudgetChildId === draft.childId ? (
+                                                                    <ActivityIndicator size="small" color="white" />
+                                                                ) : (
+                                                                    <Text style={styles.budgetSaveBtnText}>Enregistrer pour {draft.childName}</Text>
+                                                                )}
+                                                            </TouchableOpacity>
+                                                        </View>
+                                                    ))}
+                                                </View>
+                                            )}
+                                        </>
+                                    ) : (
+                                        <Text style={[styles.memberMeta, { color: theme.textSecondary }]}>
+                                            Les paramètres détaillés par enfant seront disponibles dès que le foyer sera créé.
+                                        </Text>
+                                    )}
                                 </View>
                             )}
                         </View>
@@ -2562,6 +2822,49 @@ const styles = StyleSheet.create({
         paddingHorizontal: 12,
         paddingBottom: 12,
         paddingTop: 2,
+    },
+    budgetChildCard: {
+        borderWidth: 1,
+        borderRadius: 12,
+        padding: 8,
+    },
+    budgetCompactInput: {
+        height: 42,
+        borderRadius: 10,
+        borderWidth: 1,
+        paddingHorizontal: 12,
+        marginBottom: 6,
+        fontSize: 14,
+    },
+    budgetRecurrenceRow: {
+        flexDirection: "row",
+        gap: 8,
+        marginBottom: 6,
+    },
+    budgetChoiceBtn: {
+        flex: 1,
+        minHeight: 36,
+        borderRadius: 10,
+        borderWidth: 1,
+        alignItems: "center",
+        justifyContent: "center",
+        paddingHorizontal: 8,
+    },
+    budgetChoiceText: {
+        fontSize: 12,
+        fontWeight: "700",
+    },
+    budgetSaveBtn: {
+        minHeight: 38,
+        borderRadius: 10,
+        alignItems: "center",
+        justifyContent: "center",
+        paddingHorizontal: 10,
+    },
+    budgetSaveBtnText: {
+        color: "white",
+        fontSize: 13,
+        fontWeight: "700",
     },
     mealFeatureRow: {
         flexDirection: "row",
