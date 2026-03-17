@@ -350,10 +350,10 @@ export default function SetupHousehold() {
     });
 
     const [expandedModules, setExpandedModules] = useState<Record<ModuleKey, boolean>>({
-        meals: isMealsScope,
-        tasks: isTasksScope,
-        budget: isBudgetScope,
-        calendar: isCalendarScope,
+        meals: false,
+        tasks: false,
+        budget: false,
+        calendar: false,
     });
 
     const [mealOptions, setMealOptions] = useState({
