@@ -13,6 +13,7 @@ import { AppAlertHost } from "@/src/components/app-alert-host";
 import { subscribeToUserRealtime } from "@/src/realtime/client";
 import { clearStoredUser, getStoredUser, persistStoredUser, setStoredUserCache } from "@/src/session/user-cache";
 import { installAppAlertInterceptor } from "@/src/utils/app-alert";
+import { installIosTextScale } from "@/src/ui/ios-text-scale";
 
 type NotificationsModule = typeof import("expo-notifications");
 
@@ -34,6 +35,7 @@ if (__DEV__) {
 }
 
 installAppAlertInterceptor();
+installIosTextScale();
 
 export default function RootLayout() {
     const [isMounted, setIsMounted] = useState(false);

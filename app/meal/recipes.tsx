@@ -11,7 +11,8 @@ import {
     KeyboardAvoidingView,
     Modal,
     ScrollView,
-    Platform
+    Platform,
+    Switch,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { Colors } from '@/constants/theme';
@@ -40,6 +41,7 @@ interface Recipe {
     base_servings?: number;
     display_servings?: number;
     is_global?: boolean;
+    is_ai_generated?: boolean;
     is_owned_by_household?: boolean;
     is_in_my_recipes?: boolean;
 }
@@ -112,6 +114,8 @@ export default function RecipesScreen() {
     const [submitting, setSubmitting] = useState(false);
     const [aiSuggestions, setAiSuggestions] = useState<AiSuggestion[]>([]);
     const [previewRecipe, setPreviewRecipe] = useState<AiPreviewRecipe | null>(null);
+    const [useDietaryTags, setUseDietaryTags] = useState(false);
+    const [householdDietaryTags, setHouseholdDietaryTags] = useState<string[]>([]);
     const [selectedRecipe, setSelectedRecipe] = useState<Recipe | null>(null);
     const [formMode, setFormMode] = useState<'create' | 'edit'>('create');
     const [aiIntent, setAiIntent] = useState<'specific' | 'ideas'>('ideas');
@@ -136,12 +140,52 @@ export default function RecipesScreen() {
         try {
             const data = await apiFetch('/recipes?scope=all');
             setRecipes(Array.isArray(data) ? data : []);
+
+            try {
+                const configResponse = await apiFetch('/households/config');
+                const mealsSettings = configResponse?.config?.modules?.meals?.settings ?? {};
+
+                const detailsTags = Array.isArray(mealsSettings?.dietary_tag_details)
+                    ? mealsSettings.dietary_tag_details
+                        .map((tag: any) => String(tag?.label ?? '').trim())
+                        .filter((tag: string) => tag.length > 0)
+                    : [];
+
+                const fallbackTags = Array.isArray(mealsSettings?.dietary_tags)
+                    ? mealsSettings.dietary_tags
+                        .map((tag: any) => String(tag ?? '').trim())
+                        .filter((tag: string) => tag.length > 0)
+                    : [];
+
+                const sourceTags = detailsTags.length > 0 ? detailsTags : fallbackTags;
+                const uniqueTags = sourceTags.filter(
+                    (tag: string, index: number, all: string[]) =>
+                        all.findIndex((value) => value.toLowerCase() === tag.toLowerCase()) === index
+                );
+
+                setHouseholdDietaryTags(uniqueTags);
+                if (uniqueTags.length === 0) {
+                    setUseDietaryTags(false);
+                }
+            } catch (configError: any) {
+                console.error("Erreur chargement tags alimentaires:", configError?.message);
+                setHouseholdDietaryTags([]);
+                setUseDietaryTags(false);
+            }
         } catch (error: any) {
             console.error("Erreur chargement recettes:", error.message);
         } finally {
             setLoading(false);
         }
     };
+
+    const dietaryPreferences = useMemo(() => {
+        if (!useDietaryTags || householdDietaryTags.length === 0) {
+            return '';
+        }
+
+        return `Tags alimentaires du foyer: ${householdDietaryTags.join(', ')}`;
+    }, [householdDietaryTags, useDietaryTags]);
 
     const filteredRecipes = useMemo(() => {
         let filtered = filterRecipesByTitleQuery(recipes, search);
@@ -312,6 +356,8 @@ export default function RecipesScreen() {
     const renderRecipeItem = ({ item }: { item: Recipe }) => {
         const isOwned = item.is_owned_by_household !== false;
         const isGlobal = item.is_global === true;
+        const isAiGenerated = item.is_ai_generated === true;
+        const recipeScopeLabel = isGlobal ? "Globale" : (isAiGenerated ? "IA" : "Perso");
         const isInMine = item.is_in_my_recipes ?? isOwned;
         const canManageRecipe = isParent && isOwned;
         const showHeart = selectedTab === 'all' && (isGlobal || isOwned);
@@ -356,7 +402,7 @@ export default function RecipesScreen() {
                                 }}
                             >
                                 <Text style={{ color: isGlobal ? themeColors.tint : themeColors.icon, fontSize: 11, fontWeight: "700" }}>
-                                    {isGlobal ? "Globale" : "Perso"}
+                                    {recipeScopeLabel}
                                 </Text>
                             </View>
                         </View>
@@ -537,7 +583,12 @@ export default function RecipesScreen() {
         try {
             const response = await apiFetch('/recipes/suggest', {
                 method: 'POST',
-                body: JSON.stringify({ preferences: p, count: 3, intent: aiIntent })
+                body: JSON.stringify({
+                    preferences: p,
+                    dietary_preferences: dietaryPreferences || undefined,
+                    count: 3,
+                    intent: aiIntent,
+                })
             });
 
             if (response.type === 'single' && response.data) {
@@ -572,7 +623,10 @@ export default function RecipesScreen() {
         try {
             const response = await apiFetch('/recipes/preview-ai', {
                 method: 'POST',
-                body: JSON.stringify({ title })
+                body: JSON.stringify({
+                    title,
+                    dietary_preferences: dietaryPreferences || undefined,
+                })
             });
             const normalized = normalizeAiPreviewRecipe(response);
             if (!normalized) {
@@ -636,6 +690,7 @@ export default function RecipesScreen() {
         setAiPrompt('');
         setAiSuggestions([]);
         setPreviewRecipe(null);
+        setUseDietaryTags(false);
         resetForm();
     };
 
@@ -845,6 +900,34 @@ export default function RecipesScreen() {
                                                 : "Décrivez vos envies (ingrédients, régime, temps...) :"
                                             }
                                         </Text>
+
+                                        <View
+                                            style={[
+                                                styles.dietaryToggleRow,
+                                                {
+                                                    borderColor: themeColors.icon + '66',
+                                                    backgroundColor: colorScheme === 'dark' ? '#1E1E1E' : '#F4F6F8',
+                                                },
+                                            ]}
+                                        >
+                                            <View style={{ flex: 1, gap: 3 }}>
+                                                <Text style={{ color: themeColors.text, fontWeight: '700', fontSize: 13 }}>
+                                                    Utiliser les tags alimentaires
+                                                </Text>
+                                                <Text style={{ color: themeColors.icon, fontSize: 12 }}>
+                                                    {householdDietaryTags.length > 0
+                                                        ? `${householdDietaryTags.length} tag(s) seront envoyés à l'IA.`
+                                                        : "Aucun tag alimentaire configuré pour ce foyer."}
+                                                </Text>
+                                            </View>
+                                            <Switch
+                                                value={useDietaryTags && householdDietaryTags.length > 0}
+                                                onValueChange={setUseDietaryTags}
+                                                disabled={householdDietaryTags.length === 0 || submitting}
+                                                trackColor={{ false: '#9CA3AF', true: themeColors.tint }}
+                                                thumbColor={useDietaryTags ? '#FFFFFF' : '#F3F4F6'}
+                                            />
+                                        </View>
 
                                         <TextInput
                                             style={[styles.input, { height: 80, color: themeColors.text, textAlignVertical: 'top' }]}
@@ -1122,6 +1205,16 @@ const styles = StyleSheet.create({
     choiceContainer: { gap: 15, paddingBottom: 20 },
     choiceBtn: { flexDirection: 'row', alignItems: 'center', padding: 20, borderRadius: 15, gap: 15 },
     choiceBtnText: { color: 'white', fontSize: 18, fontWeight: 'bold' },
+    dietaryToggleRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 12,
+        borderWidth: 1,
+        borderRadius: 12,
+        paddingHorizontal: 12,
+        paddingVertical: 10,
+        marginBottom: 12,
+    },
     suggestionItem: { flexDirection: 'row', alignItems: 'center', padding: 15, borderRadius: 12, borderWidth: 1, marginBottom: 10 },
     previewTitle: { fontSize: 22, fontWeight: 'bold', marginBottom: 5 },
     input: { borderRadius: 10, padding: 12, borderWidth: 1, borderColor: '#DDD', marginBottom: 15, fontSize: 16 },

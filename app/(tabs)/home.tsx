@@ -42,7 +42,9 @@ type HouseholdItem = {
 };
 
 type NotificationNavigationTarget =
-    | string
+    | "/(tabs)/budget"
+    | "/meal/poll"
+    | "/settings"
     | {
         pathname: "/tasks/manage";
         params: { module: "planned" };
@@ -51,6 +53,8 @@ type NotificationNavigationTarget =
 const ACTION_REQUIRED_NOTIFICATION_TYPES = new Set([
     "household_invite",
     "task_reassignment_invite",
+    "household_deletion_approval_request",
+    "household_deletion_cancel_window",
 ]);
 
 const TASK_NOTIFICATION_TYPES = new Set([
@@ -133,11 +137,19 @@ const normalizePendingNotifications = (
                 toPositiveInt(data.household_id) ??
                 null;
 
-            if (ACTION_REQUIRED_NOTIFICATION_TYPES.has(type) && status !== "pending") {
+            if (type === "household_deletion_cancel_window" && status !== "scheduled") {
                 return null;
             }
 
-            const inviterName = String(data.inviter_name ?? "").trim() || "Un parent";
+            if (
+                ACTION_REQUIRED_NOTIFICATION_TYPES.has(type)
+                && type !== "household_deletion_cancel_window"
+                && status !== "pending"
+            ) {
+                return null;
+            }
+
+            const inviterName = String(data.inviter_name ?? data.initiator_name ?? "").trim() || "Un parent";
             const householdName = String(data.household_name ?? "").trim() || "ce foyer";
             const requesterName = String(data.requester_name ?? "").trim() || "Un membre";
             const taskName = String(data.task_name ?? "").trim() || "cette tâche";
@@ -146,7 +158,11 @@ const normalizePendingNotifications = (
                 ? `${inviterName} vous invite à rejoindre le foyer ${householdName}.`
                 : type === "task_reassignment_invite"
                     ? `${requesterName} vous demande de reprendre ${taskName} (foyer : ${householdName}).`
-                    : "Nouvelle notification.";
+                    : type === "household_deletion_approval_request"
+                        ? `${inviterName} demande la suppression du foyer ${householdName}.`
+                        : type === "household_deletion_cancel_window"
+                            ? `Le foyer ${householdName} sera supprimé dans 24h.`
+                            : "Nouvelle notification.";
 
             return {
                 id: parsedId,
@@ -405,7 +421,7 @@ export default function ConnectedHome() {
 
     const onRespondToNotification = async (
         notification: PendingNotification,
-        action: "accept" | "refuse"
+        action: "accept" | "refuse" | "cancel"
     ) => {
         setProcessingNotificationId(notification.id);
         try {
@@ -417,6 +433,14 @@ export default function ConnectedHome() {
                 });
             } else if (notification.type === "task_reassignment_invite") {
                 response = await apiFetch(`/notifications/${notification.id}/task-reassignment-response`, {
+                    method: "POST",
+                    body: JSON.stringify({ action }),
+                });
+            } else if (
+                notification.type === "household_deletion_approval_request"
+                || notification.type === "household_deletion_cancel_window"
+            ) {
+                response = await apiFetch(`/notifications/${notification.id}/household-deletion-response`, {
                     method: "POST",
                     body: JSON.stringify({ action }),
                 });
@@ -436,6 +460,33 @@ export default function ConnectedHome() {
             setProcessingNotificationId(null);
         }
     };
+
+    const onLeaveHouseholdFromNotification = useCallback(
+        async (notification: PendingNotification) => {
+            setProcessingNotificationId(notification.id);
+            try {
+                if (notification.householdId && notification.householdId !== activeHouseholdId) {
+                    const switched = await onSwitchHousehold(notification.householdId);
+                    if (!switched) {
+                        return;
+                    }
+                }
+
+                const response = await apiFetch("/households/leave", { method: "POST" });
+                if (response?.user) {
+                    await persistStoredUser(response.user as Record<string, unknown>);
+                }
+
+                await refreshPendingNotifications();
+                Alert.alert("Foyer", "Vous avez quitté ce foyer.");
+            } catch (error: any) {
+                Alert.alert("Foyer", error?.message || "Impossible de quitter ce foyer.");
+            } finally {
+                setProcessingNotificationId(null);
+            }
+        },
+        [activeHouseholdId, onSwitchHousehold, refreshPendingNotifications]
+    );
 
     const onMarkNotificationRead = async (notification: PendingNotification) => {
         setProcessingNotificationId(notification.id);
@@ -529,7 +580,7 @@ export default function ConnectedHome() {
                                 Bonjour{user?.name ? `, ${user.name}` : ""}
                             </Text>
                             <Text style={[styles.subtitle, { color: theme.textSecondary }]}>
-                                {activeHousehold ? `Foyer actif: ${activeHousehold.name}.` : "Bienvenue dans ton espace familial."}
+                                {activeHousehold ? '' : "Bienvenue dans ton espace familial."}
                             </Text>
                         </View>
 
@@ -603,12 +654,15 @@ export default function ConnectedHome() {
                                 const type = notification.type;
                                 const data = notification.data;
                                 const createdLabel = formatNotificationDate(notification.createdAt);
-                                const inviterName = String(data.inviter_name ?? "").trim() || "Un parent";
+                                const inviterName = String(data.inviter_name ?? data.initiator_name ?? "").trim() || "Un parent";
                                 const householdName = String(data.household_name ?? "").trim() || "ce foyer";
                                 const invitedRole = String(data.invited_role ?? "") === "parent" ? "parent" : "enfant";
                                 const requesterName = String(data.requester_name ?? "").trim() || "Un membre";
                                 const taskName = String(data.task_name ?? "").trim() || "cette tâche";
                                 const dueDate = formatDueDate(data.due_date);
+                                const scheduledForLabel = formatNotificationDate(
+                                    typeof data.scheduled_for === "string" ? data.scheduled_for : null
+                                );
                                 const canOpenNotification = getNotificationNavigationTarget(notification) !== null;
 
                                 return (
@@ -700,6 +754,109 @@ export default function ConnectedHome() {
                                                             <ActivityIndicator size="small" color={theme.tint} />
                                                         ) : (
                                                             <Text style={[styles.notificationActionText, { color: theme.tint }]}>Accepter</Text>
+                                                        )}
+                                                    </TouchableOpacity>
+                                                </View>
+                                            </>
+                                        ) : type === "household_deletion_approval_request" ? (
+                                            <>
+                                                <Text style={[styles.notificationText, { color: theme.text }]}>
+                                                    <Text style={styles.notificationStrong}>{inviterName}</Text> demande la suppression du foyer{" "}
+                                                    <Text style={styles.notificationStrong}>{householdName}</Text>.
+                                                </Text>
+                                                {createdLabel ? (
+                                                    <Text style={[styles.notificationMeta, { color: theme.textSecondary }]}>Reçue le {createdLabel}</Text>
+                                                ) : null}
+                                                <View style={styles.notificationActions}>
+                                                    <TouchableOpacity
+                                                        style={[styles.notificationActionBtn, { borderColor: theme.icon, backgroundColor: theme.background }]}
+                                                        onPress={() => {
+                                                            void onRespondToNotification(notification, "refuse");
+                                                        }}
+                                                        disabled={isProcessing || processingBulkRead}
+                                                    >
+                                                        <Text style={[styles.notificationActionText, { color: theme.text }]}>
+                                                            {isProcessing ? "..." : "Refuser"}
+                                                        </Text>
+                                                    </TouchableOpacity>
+
+                                                    <TouchableOpacity
+                                                        style={[styles.notificationActionBtn, { borderColor: theme.tint, backgroundColor: `${theme.tint}18` }]}
+                                                        onPress={() => {
+                                                            void onRespondToNotification(notification, "accept");
+                                                        }}
+                                                        disabled={isProcessing || processingBulkRead}
+                                                    >
+                                                        {isProcessing ? (
+                                                            <ActivityIndicator size="small" color={theme.tint} />
+                                                        ) : (
+                                                            <Text style={[styles.notificationActionText, { color: theme.tint }]}>Accepter</Text>
+                                                        )}
+                                                    </TouchableOpacity>
+                                                </View>
+                                            </>
+                                        ) : type === "household_deletion_cancel_window" ? (
+                                            <>
+                                                <Text style={[styles.notificationText, { color: theme.text }]}>
+                                                    Le foyer <Text style={styles.notificationStrong}>{householdName}</Text> sera supprimé dans 24h.
+                                                </Text>
+                                                {scheduledForLabel ? (
+                                                    <Text style={[styles.notificationMeta, { color: theme.textSecondary }]}>
+                                                        Suppression prévue le {scheduledForLabel}
+                                                    </Text>
+                                                ) : null}
+                                                {createdLabel ? (
+                                                    <Text style={[styles.notificationMeta, { color: theme.textSecondary }]}>Reçue le {createdLabel}</Text>
+                                                ) : null}
+                                                <View style={styles.notificationActions}>
+                                                    <TouchableOpacity
+                                                        style={[styles.notificationActionBtn, { borderColor: theme.accentWarm, backgroundColor: `${theme.accentWarm}18` }]}
+                                                        onPress={() => {
+                                                            void onRespondToNotification(notification, "cancel");
+                                                        }}
+                                                        disabled={isProcessing || processingBulkRead}
+                                                    >
+                                                        {isProcessing ? (
+                                                            <ActivityIndicator size="small" color={theme.accentWarm} />
+                                                        ) : (
+                                                            <Text style={[styles.notificationActionText, { color: theme.accentWarm }]}>
+                                                                Annuler la suppression
+                                                            </Text>
+                                                        )}
+                                                    </TouchableOpacity>
+                                                </View>
+                                            </>
+                                        ) : type === "household_deletion_request_refused" ? (
+                                            <>
+                                                <Text style={[styles.notificationText, { color: theme.text }]}>
+                                                    {notification.body}
+                                                </Text>
+                                                {createdLabel ? (
+                                                    <Text style={[styles.notificationMeta, { color: theme.textSecondary }]}>Reçue le {createdLabel}</Text>
+                                                ) : null}
+                                                <View style={styles.notificationActions}>
+                                                    <TouchableOpacity
+                                                        style={[styles.notificationActionBtn, { borderColor: theme.icon, backgroundColor: theme.background }]}
+                                                        onPress={() => {
+                                                            void onMarkNotificationRead(notification);
+                                                        }}
+                                                        disabled={isProcessing || processingBulkRead}
+                                                    >
+                                                        <Text style={[styles.notificationActionText, { color: theme.text }]}>
+                                                            {isProcessing ? "..." : "Marquer comme lu"}
+                                                        </Text>
+                                                    </TouchableOpacity>
+                                                    <TouchableOpacity
+                                                        style={[styles.notificationActionBtn, { borderColor: theme.tint, backgroundColor: `${theme.tint}18` }]}
+                                                        onPress={() => {
+                                                            void onLeaveHouseholdFromNotification(notification);
+                                                        }}
+                                                        disabled={isProcessing || processingBulkRead}
+                                                    >
+                                                        {isProcessing ? (
+                                                            <ActivityIndicator size="small" color={theme.tint} />
+                                                        ) : (
+                                                            <Text style={[styles.notificationActionText, { color: theme.tint }]}>Quitter le foyer</Text>
                                                         )}
                                                     </TouchableOpacity>
                                                 </View>
@@ -1078,3 +1235,4 @@ const styles = StyleSheet.create({
         fontWeight: "500",
     },
 });
+

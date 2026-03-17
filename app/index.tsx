@@ -14,12 +14,23 @@ export default function PublicHome() {
     const router = useRouter();
     const colorScheme = useColorScheme();
     const theme = Colors[colorScheme ?? 'light'];
+    const isDark = colorScheme === "dark";
+    const logoContainerBackground = isDark ? "#D9DDE3" : theme.card;
 
     return (
         <View style={[styles.container, { backgroundColor: theme.background }]}>
 
             <View style={styles.heroSection}>
-                <View style={[styles.iconContainer, { backgroundColor: theme.card }]}>
+                <View
+                    style={[
+                        styles.iconContainer,
+                        {
+                            backgroundColor: logoContainerBackground,
+                            borderColor: isDark ? "rgba(255,255,255,0.24)" : "transparent",
+                            borderWidth: isDark ? 1 : 0,
+                        },
+                    ]}
+                >
                     <Image
                         source={require("../assets/images/logo.png")}
                         style={styles.logoImage}
