@@ -139,10 +139,12 @@ export default function RootLayout() {
                             const data = (notification?.data ?? {}) as Record<string, unknown>;
                             const inviterName = String(data.inviter_name ?? "").trim() || "Un parent";
                             const householdName = String(data.household_name ?? "").trim() || "ce foyer";
-                            const requesterName = String(data.requester_name ?? "").trim() || "Un membre";
+                            const requesterName = String(data.requester_name ?? data.requester_household_name ?? "").trim() || "Un foyer";
                             const taskName = String(data.task_name ?? "").trim() || "une tâche";
                             const body = notificationType === "household_invite"
                                 ? `${inviterName} vous invite à rejoindre le foyer ${householdName}.`
+                                : notificationType === "household_link_request"
+                                    ? `${requesterName} souhaite connecter son foyer à ${householdName}.`
                                 : notificationType === "task_reassignment_invite"
                                     ? `${requesterName} vous demande de reprendre ${taskName} (foyer : ${householdName}).`
                                     : String(notification?.body ?? "");

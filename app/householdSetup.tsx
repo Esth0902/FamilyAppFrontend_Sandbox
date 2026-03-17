@@ -79,6 +79,52 @@ type DietaryTagDetail = {
     type: DietaryTagOption["type"];
 };
 
+type HouseholdConnectionPendingRequest = {
+    id: number;
+    direction: "incoming" | "outgoing";
+    status: "pending" | "accepted" | "refused";
+    created_at: string | null;
+    other_household: {
+        id: number;
+        name: string;
+    } | null;
+};
+
+type HouseholdConnectionState = {
+    is_connected: boolean;
+    linked_household: {
+        id: number;
+        name: string;
+    } | null;
+    pending_request: HouseholdConnectionPendingRequest | null;
+    active_code: {
+        code: string;
+        expires_at: string | null;
+        share_text: string;
+    } | null;
+};
+
+type HouseholdConnectionPermissions = {
+    can_manage_connection: boolean;
+    can_generate_code: boolean;
+    can_connect_with_code: boolean;
+    can_unlink: boolean;
+};
+
+const INITIAL_HOUSEHOLD_CONNECTION: HouseholdConnectionState = {
+    is_connected: false,
+    linked_household: null,
+    pending_request: null,
+    active_code: null,
+};
+
+const INITIAL_HOUSEHOLD_CONNECTION_PERMISSIONS: HouseholdConnectionPermissions = {
+    can_manage_connection: false,
+    can_generate_code: false,
+    can_connect_with_code: false,
+    can_unlink: false,
+};
+
 const normalizeMemberRole = (value: unknown): MemberRole => {
     return String(value ?? "").trim() === "parent" ? "parent" : "enfant";
 };
@@ -224,7 +270,21 @@ const buildMemberShareText = (member: CreatedMemberCredential): string => {
         + `Mot de passe temporaire : ${password}\n\n`
         + "Connecte-toi puis modifie ton mot de passe dès la première connexion.";
 };
+const buildHouseholdConnectionShareText = (
+    householdName: string,
+    code: string,
+    customText?: string
+): string => {
+    const normalizedCustomText = String(customText ?? "").trim();
+    if (normalizedCustomText.length > 0) {
+        return normalizedCustomText;
+    }
 
+    return `Invitation de liaison FamilyFlow\n\n`
+        + `Foyer : ${householdName}\n`
+        + `Code de liaison : ${code}\n\n`
+        + "Ouvre FamilyFlow > Modifier le foyer > Foyer connecté, puis encode ce code.";
+};
 
 const resolveActiveHouseholdRole = (rawUser: unknown): MemberRole => {
     const user = (rawUser ?? {}) as {
@@ -362,6 +422,14 @@ export default function SetupHousehold() {
     const [deletingManagedMemberId, setDeletingManagedMemberId] = useState<number | null>(null);
     const [generatedCredentialsByMemberId, setGeneratedCredentialsByMemberId] = useState<Record<number, CreatedMemberCredential>>({});
     const [activeUser, setActiveUser] = useState<{ name?: string; email?: string } | null>(null);
+    const [connectedHouseholdExpanded, setConnectedHouseholdExpanded] = useState(false);
+    const [connectionState, setConnectionState] = useState<HouseholdConnectionState>(INITIAL_HOUSEHOLD_CONNECTION);
+    const [connectionPermissions, setConnectionPermissions] = useState<HouseholdConnectionPermissions>(
+        INITIAL_HOUSEHOLD_CONNECTION_PERMISSIONS
+    );
+    const [connectionLoading, setConnectionLoading] = useState(false);
+    const [connectionCodeInput, setConnectionCodeInput] = useState("");
+    const [connectionActionLoading, setConnectionActionLoading] = useState<"share" | "connect" | "unlink" | null>(null);
     const visibleModules = isMealsScope
         ? MODULES.filter((module) => module.id === "meals")
         : isTasksScope
@@ -783,6 +851,73 @@ export default function SetupHousehold() {
         }
     }, [isEditMode]);
 
+    const loadHouseholdConnection = useCallback(async () => {
+        if (!isEditMode) {
+            return;
+        }
+
+        setConnectionLoading(true);
+        try {
+            const response = await apiFetch("/households/connected-household");
+            const rawConnection = (response?.connection ?? {}) as Record<string, unknown>;
+            const rawPermissions = (response?.permissions ?? {}) as Record<string, unknown>;
+            const rawPending = (rawConnection.pending_request ?? null) as Record<string, unknown> | null;
+            const rawOtherHousehold = (rawPending?.other_household ?? null) as Record<string, unknown> | null;
+            const pendingDirection = String(rawPending?.direction ?? "") === "incoming" ? "incoming" : "outgoing";
+            const pendingStatusRaw = String(rawPending?.status ?? "");
+            const pendingStatus: "pending" | "accepted" | "refused" =
+                pendingStatusRaw === "accepted"
+                    ? "accepted"
+                    : pendingStatusRaw === "refused"
+                        ? "refused"
+                        : "pending";
+
+            setConnectionState({
+                is_connected: Boolean(rawConnection.is_connected),
+                linked_household: rawConnection.linked_household && typeof rawConnection.linked_household === "object"
+                    ? {
+                        id: Number((rawConnection.linked_household as Record<string, unknown>).id ?? 0),
+                        name: String((rawConnection.linked_household as Record<string, unknown>).name ?? "").trim() || "Foyer connecté",
+                    }
+                    : null,
+                pending_request: rawPending && Number(rawPending.id ?? 0) > 0
+                    ? {
+                        id: Number(rawPending.id),
+                        direction: pendingDirection,
+                        status: pendingStatus,
+                        created_at: typeof rawPending.created_at === "string" ? rawPending.created_at : null,
+                        other_household: rawOtherHousehold && Number(rawOtherHousehold.id ?? 0) > 0
+                            ? {
+                                id: Number(rawOtherHousehold.id),
+                                name: String(rawOtherHousehold.name ?? "").trim() || "Autre foyer",
+                            }
+                            : null,
+                    }
+                    : null,
+                active_code: rawConnection.active_code && typeof rawConnection.active_code === "object"
+                    ? {
+                        code: String((rawConnection.active_code as Record<string, unknown>).code ?? "").trim(),
+                        expires_at: typeof (rawConnection.active_code as Record<string, unknown>).expires_at === "string"
+                            ? String((rawConnection.active_code as Record<string, unknown>).expires_at)
+                            : null,
+                        share_text: String((rawConnection.active_code as Record<string, unknown>).share_text ?? "").trim(),
+                    }
+                    : null,
+            });
+
+            setConnectionPermissions({
+                can_manage_connection: Boolean(rawPermissions.can_manage_connection),
+                can_generate_code: Boolean(rawPermissions.can_generate_code),
+                can_connect_with_code: Boolean(rawPermissions.can_connect_with_code),
+                can_unlink: Boolean(rawPermissions.can_unlink),
+            });
+        } catch (error: any) {
+            Alert.alert("Foyer connecté", error?.message || "Impossible de charger la liaison entre foyers.");
+        } finally {
+            setConnectionLoading(false);
+        }
+    }, [isEditMode]);
+
     useEffect(() => {
         if (!isEditMode || !canManageMembers || managedHouseholdId === null || managedHouseholdId <= 0) {
             return () => { };
@@ -793,16 +928,28 @@ export default function SetupHousehold() {
             unsubscribeRealtime = await subscribeToHouseholdRealtime(managedHouseholdId, (message) => {
                 const module = String(message?.module ?? "");
                 const type = String(message?.type ?? "");
-                if (module !== "household" || type !== "member_invite_responded") {
+                if (module !== "household") {
                     return;
                 }
 
-                const status = String((message?.payload ?? {}).status ?? "");
-                if (status !== "accepted") {
+                if (type === "member_invite_responded") {
+                    const status = String((message?.payload ?? {}).status ?? "");
+                    if (status !== "accepted") {
+                        return;
+                    }
+                    void loadManagedMembers();
                     return;
                 }
 
-                void loadManagedMembers();
+                if (
+                    !isMealsScope
+                    && !isTasksScope
+                    && !isBudgetScope
+                    && !isCalendarScope
+                    && (type === "connection_updated" || type === "connection_request_created")
+                ) {
+                    void loadHouseholdConnection();
+                }
             });
         };
 
@@ -813,7 +960,17 @@ export default function SetupHousehold() {
                 unsubscribeRealtime();
             }
         };
-    }, [canManageMembers, isEditMode, loadManagedMembers, managedHouseholdId]);
+    }, [
+        canManageMembers,
+        isBudgetScope,
+        isCalendarScope,
+        isEditMode,
+        isMealsScope,
+        isTasksScope,
+        loadHouseholdConnection,
+        loadManagedMembers,
+        managedHouseholdId,
+    ]);
 
     const updateManagedRoleDraft = (memberId: number, role: MemberRole) => {
         setManagedRoleDrafts((prev) => ({
@@ -1150,6 +1307,12 @@ export default function SetupHousehold() {
                         notes: typeof budget?.settings?.notes === "string" ? budget.settings.notes : "",
                     });
                     await loadManagedMembers();
+                    if (!isMealsScope && !isTasksScope && !isBudgetScope && !isCalendarScope) {
+                        await loadHouseholdConnection();
+                    }
+                } else {
+                    setConnectionState(INITIAL_HOUSEHOLD_CONNECTION);
+                    setConnectionPermissions(INITIAL_HOUSEHOLD_CONNECTION_PERMISSIONS);
                 }
             } catch (error: any) {
                 if (isEditMode && Number(error?.status) === 403) {
@@ -1167,7 +1330,17 @@ export default function SetupHousehold() {
         };
 
         loadSetupState();
-    }, [isBudgetScope, isEditMode, isTasksScope, loadDietaryTags, loadManagedMembers, router]);
+    }, [
+        isBudgetScope,
+        isCalendarScope,
+        isEditMode,
+        isMealsScope,
+        isTasksScope,
+        loadDietaryTags,
+        loadHouseholdConnection,
+        loadManagedMembers,
+        router,
+    ]);
 
     useEffect(() => {
         void loadBudgetChildDrafts();
@@ -1211,6 +1384,92 @@ export default function SetupHousehold() {
     const removeMember = (index: number) => {
         setMembers((prev) => prev.filter((_, i) => i !== index));
     };
+
+    const onShareHouseholdConnectionCode = async () => {
+        setConnectionActionLoading("share");
+        try {
+            const response = await apiFetch("/households/connected-household/link-code", {
+                method: "POST",
+            });
+            const codeValue = String(response?.code?.value ?? "").trim();
+            if (!codeValue) {
+                throw new Error("Code de liaison indisponible.");
+            }
+
+            const shareText = buildHouseholdConnectionShareText(
+                houseName.trim() || "Mon foyer",
+                codeValue,
+                String(response?.code?.share_text ?? "")
+            );
+
+            await Share.share({
+                message: shareText,
+            });
+
+            await loadHouseholdConnection();
+        } catch (error: any) {
+            Alert.alert("Foyer connecté", error?.message || "Impossible de partager un code de liaison.");
+        } finally {
+            setConnectionActionLoading(null);
+        }
+    };
+
+    const onConnectHouseholdWithCode = async () => {
+        const normalizedCode = connectionCodeInput.trim();
+        if (!normalizedCode) {
+            Alert.alert("Foyer connecté", "Encode un code de liaison.");
+            return;
+        }
+
+        setConnectionActionLoading("connect");
+        try {
+            const response = await apiFetch("/households/connected-household/connect", {
+                method: "POST",
+                body: JSON.stringify({
+                    code: normalizedCode,
+                }),
+            });
+
+            setConnectionCodeInput("");
+            await loadHouseholdConnection();
+            Alert.alert("Foyer connecté", String(response?.message ?? "Demande de liaison envoyée."));
+        } catch (error: any) {
+            Alert.alert("Foyer connecté", error?.message || "Impossible d'envoyer la demande de liaison.");
+        } finally {
+            setConnectionActionLoading(null);
+        }
+    };
+
+    const onUnlinkConnectedHousehold = () => {
+        Alert.alert(
+            "Rompre la liaison",
+            "Cette action supprime le lien entre les deux foyers.",
+            [
+                { text: "Annuler", style: "cancel" },
+                {
+                    text: "Rompre",
+                    style: "destructive",
+                    onPress: () => {
+                        void (async () => {
+                            setConnectionActionLoading("unlink");
+                            try {
+                                const response = await apiFetch("/households/connected-household/unlink", {
+                                    method: "POST",
+                                });
+                                await loadHouseholdConnection();
+                                Alert.alert("Foyer connecté", String(response?.message ?? "Liaison supprimée."));
+                            } catch (error: any) {
+                                Alert.alert("Foyer connecté", error?.message || "Impossible de rompre la liaison.");
+                            } finally {
+                                setConnectionActionLoading(null);
+                            }
+                        })();
+                    },
+                },
+            ]
+        );
+    };
+
     const handleSave = async () => {
         if (!isEditMode && createdMembersForShare.length > 0) {
             router.replace("/(tabs)/home");
@@ -1445,6 +1704,24 @@ export default function SetupHousehold() {
 
         return detectedActiveMember ? [detectedActiveMember, ...remainingMembers] : remainingMembers;
     }, [activeUser?.email, activeUser?.name, managedMembers]);
+    const connectionCodeExpiryLabel = useMemo(() => {
+        const isoDate = connectionState.active_code?.expires_at;
+        if (!isoDate) {
+            return "";
+        }
+
+        const parsedDate = new Date(isoDate);
+        if (Number.isNaN(parsedDate.getTime())) {
+            return "";
+        }
+
+        return parsedDate.toLocaleString("fr-BE", {
+            day: "2-digit",
+            month: "2-digit",
+            hour: "2-digit",
+            minute: "2-digit",
+        });
+    }, [connectionState.active_code?.expires_at]);
 
     if (initialLoading) {
         return (
@@ -1830,6 +2107,142 @@ export default function SetupHousehold() {
                         ) : null}
                     </View>
                 </View>
+                )}
+
+                {!isMealsScope && !isTasksScope && !isBudgetScope && !isCalendarScope && isEditMode && (
+                    <View style={styles.section}>
+                        <View style={[styles.collapsibleSectionCard, { backgroundColor: theme.card, borderColor: theme.icon }]}>
+                            <TouchableOpacity
+                                style={styles.collapsibleSectionHeader}
+                                onPress={() => setConnectedHouseholdExpanded((prev) => !prev)}
+                            >
+                                <Text style={[styles.sectionTitle, { color: theme.text, marginBottom: 0 }]}>Foyer connecté</Text>
+                                <MaterialCommunityIcons
+                                    name={connectedHouseholdExpanded ? "chevron-down" : "chevron-right"}
+                                    size={24}
+                                    color={theme.textSecondary}
+                                />
+                            </TouchableOpacity>
+
+                            {connectedHouseholdExpanded ? (
+                                <View style={styles.collapsibleSectionBody}>
+                                    {connectionLoading ? (
+                                        <ActivityIndicator size="small" color={theme.tint} />
+                                    ) : !connectionPermissions.can_manage_connection ? (
+                                        <Text style={[styles.memberMeta, { color: theme.textSecondary }]}>
+                                            Seul un parent peut gérer la liaison entre foyers.
+                                        </Text>
+                                    ) : connectionState.is_connected && connectionState.linked_household ? (
+                                        <View style={[styles.connectedHouseholdCard, { backgroundColor: memberItemBackground }]}>
+                                            <Text style={[styles.connectedHouseholdLabel, { color: theme.textSecondary }]}>
+                                                Liaison active
+                                            </Text>
+                                            <Text style={[styles.connectedHouseholdName, { color: theme.text }]}>
+                                                {connectionState.linked_household.name}
+                                            </Text>
+                                            <TouchableOpacity
+                                                style={[
+                                                    styles.connectedHouseholdDangerBtn,
+                                                    { borderColor: theme.accentWarm, opacity: connectionActionLoading === "unlink" ? 0.75 : 1 },
+                                                ]}
+                                                onPress={onUnlinkConnectedHousehold}
+                                                disabled={connectionActionLoading === "unlink" || !connectionPermissions.can_unlink}
+                                            >
+                                                {connectionActionLoading === "unlink" ? (
+                                                    <ActivityIndicator size="small" color={theme.accentWarm} />
+                                                ) : (
+                                                    <Text style={[styles.connectedHouseholdDangerText, { color: theme.accentWarm }]}>
+                                                        Rompre la liaison
+                                                    </Text>
+                                                )}
+                                            </TouchableOpacity>
+                                        </View>
+                                    ) : connectionState.pending_request ? (
+                                        <View style={[styles.connectedHouseholdCard, { backgroundColor: memberItemBackground }]}>
+                                            <Text style={[styles.connectedHouseholdLabel, { color: theme.textSecondary }]}>
+                                                Demande en attente
+                                            </Text>
+                                            <Text style={[styles.connectedHouseholdName, { color: theme.text }]}>
+                                                {connectionState.pending_request.other_household?.name ?? "Autre foyer"}
+                                            </Text>
+                                            <Text style={[styles.memberMeta, { color: theme.textSecondary }]}>
+                                                {connectionState.pending_request.direction === "incoming"
+                                                    ? "Ce foyer a demandé à se connecter au vôtre. Vérifie les notifications pour accepter ou refuser."
+                                                    : "Votre demande a été envoyée. Vous serez notifié dès qu'une réponse sera donnée."}
+                                            </Text>
+                                        </View>
+                                    ) : (
+                                        <View style={[styles.connectedHouseholdCard, { backgroundColor: memberItemBackground }]}>
+                                            <Text style={[styles.memberMeta, { color: theme.textSecondary, marginBottom: 8 }]}>
+                                                Aucun foyer n’est connecté pour le moment.
+                                            </Text>
+
+                                            <TouchableOpacity
+                                                style={[
+                                                    styles.connectedHouseholdPrimaryBtn,
+                                                    { backgroundColor: theme.tint, opacity: connectionActionLoading === "share" ? 0.75 : 1 },
+                                                ]}
+                                                onPress={() => {
+                                                    void onShareHouseholdConnectionCode();
+                                                }}
+                                                disabled={connectionActionLoading === "share" || !connectionPermissions.can_generate_code}
+                                            >
+                                                {connectionActionLoading === "share" ? (
+                                                    <ActivityIndicator size="small" color="white" />
+                                                ) : (
+                                                    <Text style={styles.connectedHouseholdPrimaryText}>Partager un code de liaison</Text>
+                                                )}
+                                            </TouchableOpacity>
+
+                                            {connectionState.active_code?.code ? (
+                                                <View style={[styles.connectedCodeInfo, { borderColor: theme.icon, backgroundColor: theme.background }]}>
+                                                    <Text style={[styles.connectedCodeLabel, { color: theme.textSecondary }]}>Code actuel</Text>
+                                                    <Text style={[styles.connectedCodeValue, { color: theme.text }]}>
+                                                        {connectionState.active_code.code}
+                                                    </Text>
+                                                    {connectionCodeExpiryLabel ? (
+                                                        <Text style={[styles.memberMeta, { color: theme.textSecondary }]}>
+                                                            Expire le {connectionCodeExpiryLabel}
+                                                        </Text>
+                                                    ) : null}
+                                                </View>
+                                            ) : null}
+
+                                            <Text style={[styles.label, { color: theme.text, marginBottom: 6, marginTop: 12 }]}>
+                                                Connecter un foyer avec un code
+                                            </Text>
+                                            <TextInput
+                                                style={[styles.input, { backgroundColor: theme.background, color: theme.text, marginBottom: 10 }]}
+                                                value={connectionCodeInput}
+                                                onChangeText={(value) => setConnectionCodeInput(value.toUpperCase().replace(/[^A-Z0-9]/g, ""))}
+                                                autoCapitalize="characters"
+                                                placeholder="Ex: AB12CD34"
+                                                placeholderTextColor={theme.textSecondary}
+                                            />
+                                            <TouchableOpacity
+                                                style={[
+                                                    styles.connectedHouseholdSecondaryBtn,
+                                                    { borderColor: theme.tint, backgroundColor: `${theme.tint}14`, opacity: connectionActionLoading === "connect" ? 0.75 : 1 },
+                                                ]}
+                                                onPress={() => {
+                                                    void onConnectHouseholdWithCode();
+                                                }}
+                                                disabled={connectionActionLoading === "connect" || !connectionPermissions.can_connect_with_code}
+                                            >
+                                                {connectionActionLoading === "connect" ? (
+                                                    <ActivityIndicator size="small" color={theme.tint} />
+                                                ) : (
+                                                    <Text style={[styles.connectedHouseholdSecondaryText, { color: theme.tint }]}>
+                                                        Envoyer la demande de liaison
+                                                    </Text>
+                                                )}
+                                            </TouchableOpacity>
+                                        </View>
+                                    )}
+                                </View>
+                            ) : null}
+                        </View>
+                    </View>
                 )}
 
                 <View style={styles.section}>
@@ -2789,6 +3202,75 @@ const styles = StyleSheet.create({
     },
     memberName: { fontSize: 14, fontWeight: "700" },
     memberMeta: { fontSize: 11, marginTop: 2 },
+    connectedHouseholdCard: {
+        borderRadius: 12,
+        padding: 10,
+    },
+    connectedHouseholdLabel: {
+        fontSize: 12,
+        fontWeight: "700",
+        textTransform: "uppercase",
+        marginBottom: 4,
+    },
+    connectedHouseholdName: {
+        fontSize: 16,
+        fontWeight: "700",
+        marginBottom: 8,
+    },
+    connectedHouseholdPrimaryBtn: {
+        minHeight: 44,
+        borderRadius: 10,
+        alignItems: "center",
+        justifyContent: "center",
+        paddingHorizontal: 12,
+    },
+    connectedHouseholdPrimaryText: {
+        color: "white",
+        fontSize: 14,
+        fontWeight: "700",
+    },
+    connectedHouseholdSecondaryBtn: {
+        minHeight: 44,
+        borderRadius: 10,
+        borderWidth: 1,
+        alignItems: "center",
+        justifyContent: "center",
+        paddingHorizontal: 12,
+    },
+    connectedHouseholdSecondaryText: {
+        fontSize: 14,
+        fontWeight: "700",
+    },
+    connectedHouseholdDangerBtn: {
+        minHeight: 40,
+        borderRadius: 10,
+        borderWidth: 1,
+        alignItems: "center",
+        justifyContent: "center",
+        paddingHorizontal: 10,
+        alignSelf: "flex-start",
+    },
+    connectedHouseholdDangerText: {
+        fontSize: 13,
+        fontWeight: "700",
+    },
+    connectedCodeInfo: {
+        borderWidth: 1,
+        borderRadius: 10,
+        padding: 10,
+        marginTop: 10,
+    },
+    connectedCodeLabel: {
+        fontSize: 12,
+        fontWeight: "700",
+        marginBottom: 2,
+    },
+    connectedCodeValue: {
+        fontSize: 20,
+        fontWeight: "800",
+        letterSpacing: 1,
+        marginBottom: 4,
+    },
     templateCard: {
         borderRadius: 12,
         padding: 10,

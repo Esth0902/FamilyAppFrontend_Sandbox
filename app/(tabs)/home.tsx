@@ -52,6 +52,7 @@ type NotificationNavigationTarget =
 
 const ACTION_REQUIRED_NOTIFICATION_TYPES = new Set([
     "household_invite",
+    "household_link_request",
     "task_reassignment_invite",
     "household_deletion_approval_request",
     "household_deletion_cancel_window",
@@ -156,11 +157,13 @@ const normalizePendingNotifications = (
 
             const inviterName = String(data.inviter_name ?? data.initiator_name ?? "").trim() || "Un parent";
             const householdName = String(data.household_name ?? "").trim() || "ce foyer";
-            const requesterName = String(data.requester_name ?? "").trim() || "Un membre";
+            const requesterName = String(data.requester_name ?? data.requester_household_name ?? "").trim() || "Un foyer";
             const taskName = String(data.task_name ?? "").trim() || "cette tâche";
 
             const fallbackBody = type === "household_invite"
                 ? `${inviterName} vous invite à rejoindre le foyer ${householdName}.`
+                : type === "household_link_request"
+                    ? `${requesterName} souhaite connecter son foyer à ${householdName}.`
                 : type === "task_reassignment_invite"
                     ? `${requesterName} vous demande de reprendre ${taskName} (foyer : ${householdName}).`
                     : type === "household_deletion_approval_request"
@@ -231,7 +234,12 @@ const getNotificationNavigationTarget = (
         return "/meal/poll";
     }
 
-    if (type === "household_invite" || type === "household_invite_responded") {
+    if (
+        type === "household_invite"
+        || type === "household_invite_responded"
+        || type === "household_link_request"
+        || type === "household_link_request_responded"
+    ) {
         return "/settings";
     }
 
@@ -433,6 +441,11 @@ export default function ConnectedHome() {
             let response: unknown = null;
             if (notification.type === "household_invite") {
                 response = await apiFetch(`/notifications/${notification.id}/household-invite-response`, {
+                    method: "POST",
+                    body: JSON.stringify({ action }),
+                });
+            } else if (notification.type === "household_link_request") {
+                response = await apiFetch(`/notifications/${notification.id}/household-link-response`, {
                     method: "POST",
                     body: JSON.stringify({ action }),
                 });
@@ -662,7 +675,7 @@ export default function ConnectedHome() {
                                 const inviterName = String(data.inviter_name ?? data.initiator_name ?? "").trim() || "Un parent";
                                 const householdName = String(data.household_name ?? "").trim() || "ce foyer";
                                 const invitedRole = String(data.invited_role ?? "") === "parent" ? "parent" : "enfant";
-                                const requesterName = String(data.requester_name ?? "").trim() || "Un membre";
+                                const requesterName = String(data.requester_name ?? data.requester_household_name ?? "").trim() || "Un foyer";
                                 const taskName = String(data.task_name ?? "").trim() || "cette tâche";
                                 const dueDate = formatDueDate(data.due_date);
                                 const scheduledForLabel = formatNotificationDate(
@@ -688,6 +701,43 @@ export default function ConnectedHome() {
                                                 </Text>
                                                 <Text style={[styles.notificationMeta, { color: theme.textSecondary }]}> 
                                                     Rôle proposé: {invitedRole === "parent" ? "Parent" : "Enfant"}
+                                                </Text>
+                                                {createdLabel ? (
+                                                    <Text style={[styles.notificationMeta, { color: theme.textSecondary }]}>Reçue le {createdLabel}</Text>
+                                                ) : null}
+                                                <View style={styles.notificationActions}>
+                                                    <TouchableOpacity
+                                                        style={[styles.notificationActionBtn, { borderColor: theme.icon, backgroundColor: theme.background }]}
+                                                        onPress={() => {
+                                                            void onRespondToNotification(notification, "refuse");
+                                                        }}
+                                                        disabled={isProcessing || processingBulkRead}
+                                                    >
+                                                        <Text style={[styles.notificationActionText, { color: theme.text }]}>
+                                                            {isProcessing ? "..." : "Refuser"}
+                                                        </Text>
+                                                    </TouchableOpacity>
+
+                                                    <TouchableOpacity
+                                                        style={[styles.notificationActionBtn, { borderColor: theme.tint, backgroundColor: `${theme.tint}18` }]}
+                                                        onPress={() => {
+                                                            void onRespondToNotification(notification, "accept");
+                                                        }}
+                                                        disabled={isProcessing || processingBulkRead}
+                                                    >
+                                                        {isProcessing ? (
+                                                            <ActivityIndicator size="small" color={theme.tint} />
+                                                        ) : (
+                                                            <Text style={[styles.notificationActionText, { color: theme.tint }]}>Accepter</Text>
+                                                        )}
+                                                    </TouchableOpacity>
+                                                </View>
+                                            </>
+                                        ) : type === "household_link_request" ? (
+                                            <>
+                                                <Text style={[styles.notificationText, { color: theme.text }]}>
+                                                    Le foyer <Text style={styles.notificationStrong}>{requesterName}</Text> souhaite se connecter à{" "}
+                                                    <Text style={styles.notificationStrong}>{householdName}</Text>.
                                                 </Text>
                                                 {createdLabel ? (
                                                     <Text style={[styles.notificationMeta, { color: theme.textSecondary }]}>Reçue le {createdLabel}</Text>
