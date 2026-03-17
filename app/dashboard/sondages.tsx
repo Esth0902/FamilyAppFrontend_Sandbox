@@ -244,7 +244,7 @@ export default function DashboardPollsScreen() {
         <Text style={[styles.headerTitle, { color: theme.text }]}>Sondages</Text>
       </View>
 
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
         <View style={[styles.sectionCard, { backgroundColor: theme.card }]}>
           {renderSectionHeader("Sondages ouverts", pollsOpen.length > 0, openOpenPolls, () =>
             setOpenOpenPolls((prev) => !prev)

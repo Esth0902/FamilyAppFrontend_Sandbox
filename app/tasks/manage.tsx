@@ -104,6 +104,11 @@ type BoardPayload = {
     from: string;
     to: string;
   };
+  settings?: {
+    alternating_custody_enabled?: boolean;
+    custody_change_day?: number;
+    custody_home_week_start?: string | null;
+  };
   can_manage_templates: boolean;
   can_manage_instances: boolean;
   current_user?: {
@@ -116,11 +121,19 @@ type BoardPayload = {
 };
 
 type TaskModuleKey = "planned" | "schedule" | "routines";
+type IsoWeekDay = 1 | 2 | 3 | 4 | 5 | 6 | 7;
 
 const pad = (value: number) => String(value).padStart(2, "0");
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 const wheelIndexFromOffset = (offsetY: number, size: number) =>
   clamp(Math.round(offsetY / WHEEL_ITEM_HEIGHT), 0, Math.max(0, size - 1));
+const normalizeIsoWeekDay = (value: unknown, fallback: IsoWeekDay = 1): IsoWeekDay => {
+  const parsed = Number(value);
+  if (Number.isInteger(parsed) && parsed >= 1 && parsed <= 7) {
+    return parsed as IsoWeekDay;
+  }
+  return fallback;
+};
 
 const toIsoDate = (date: Date) => `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 const parseIsoDate = (value: string) => new Date(`${value}T00:00:00`);
@@ -167,6 +180,11 @@ const isoWeekDayFromDate = (date: Date) => {
 const weekStartFromDate = (date: Date) => {
   const normalized = new Date(date.getFullYear(), date.getMonth(), date.getDate());
   return addDays(normalized, 1 - isoWeekDayFromDate(normalized));
+};
+const weekStartFromDateWithIsoDay = (date: Date, startDayIso: number) => {
+  const normalized = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const safeStartDay = Number.isInteger(startDayIso) && startDayIso >= 1 && startDayIso <= 7 ? startDayIso : 1;
+  return addDays(normalized, -((isoWeekDayFromDate(normalized) - safeStartDay + 7) % 7));
 };
 
 const weekLabelFromStart = (weekStart: Date) => {
@@ -251,8 +269,9 @@ export default function TasksScreen() {
   const [saving, setSaving] = useState(false);
   const [tasksEnabled, setTasksEnabled] = useState(false);
   const [weekStart, setWeekStart] = useState(initialWeekStart);
-  const rangeFrom = useMemo(() => toIsoDate(weekStart), [weekStart]);
-  const rangeTo = useMemo(() => toIsoDate(addDays(weekStart, 6)), [weekStart]);
+  const [plannedWeekStartDay, setPlannedWeekStartDay] = useState<IsoWeekDay>(1);
+  const plannedWeekStartDayRef = useRef<IsoWeekDay>(1);
+  const loadBoardRef = useRef<(options?: { silent?: boolean }) => Promise<void>>(async () => {});
   const [canManageTemplates, setCanManageTemplates] = useState(false);
   const [canManageInstances, setCanManageInstances] = useState(false);
   const [members, setMembers] = useState<TaskMember[]>([]);
@@ -304,6 +323,16 @@ export default function TasksScreen() {
   const templateStartDateDayIndexRef = useRef(Math.max(0, templateStartDateWheelDay - 1));
   const templateStartDateMonthIndexRef = useRef(Math.max(0, templateStartDateWheelMonth - 1));
   const templateStartDateYearIndexRef = useRef(0);
+  const [templateEndDateWheelVisible, setTemplateEndDateWheelVisible] = useState(false);
+  const [templateEndDateWheelYear, setTemplateEndDateWheelYear] = useState(new Date().getFullYear());
+  const [templateEndDateWheelMonth, setTemplateEndDateWheelMonth] = useState(new Date().getMonth() + 1);
+  const [templateEndDateWheelDay, setTemplateEndDateWheelDay] = useState(new Date().getDate());
+  const templateEndDayWheelRef = useRef<ScrollView | null>(null);
+  const templateEndMonthWheelRef = useRef<ScrollView | null>(null);
+  const templateEndYearWheelRef = useRef<ScrollView | null>(null);
+  const templateEndDateDayIndexRef = useRef(Math.max(0, templateEndDateWheelDay - 1));
+  const templateEndDateMonthIndexRef = useRef(Math.max(0, templateEndDateWheelMonth - 1));
+  const templateEndDateYearIndexRef = useRef(0);
   const activeModule = useMemo<TaskModuleKey>(() => {
     const raw = Array.isArray(params.module) ? params.module[0] : params.module;
     return isTaskModuleKey(raw) ? raw : "planned";
@@ -311,6 +340,21 @@ export default function TasksScreen() {
   const isPlannedModule = activeModule === "planned";
   const isScheduleModule = activeModule === "schedule";
   const isRoutinesModule = activeModule === "routines";
+  const plannedWeekStart = useMemo(
+    () => weekStartFromDateWithIsoDay(weekStart, plannedWeekStartDay),
+    [plannedWeekStartDay, weekStart]
+  );
+  const standardWeekStart = useMemo(
+    () => weekStartFromDate(weekStart),
+    [weekStart]
+  );
+  const boardWeekStart = useMemo(
+    () => (isPlannedModule ? plannedWeekStart : standardWeekStart),
+    [isPlannedModule, plannedWeekStart, standardWeekStart]
+  );
+  useEffect(() => {
+    plannedWeekStartDayRef.current = plannedWeekStartDay;
+  }, [plannedWeekStartDay]);
   const moduleTitle = useMemo(() => {
     if (isScheduleModule) return "Planifier une tâche ponctuelle";
     if (isRoutinesModule) return "Gérer les routines";
@@ -321,10 +365,10 @@ export default function TasksScreen() {
     if (isRoutinesModule) return "Crée et modifie les routines réutilisables du foyer.";
     return "Suivi des tâches prévues et de leurs statuts.";
   }, [isRoutinesModule, isScheduleModule]);
-  const activeWeekLabel = useMemo(() => weekLabelFromStart(weekStart), [weekStart]);
+  const activeWeekLabel = useMemo(() => weekLabelFromStart(plannedWeekStart), [plannedWeekStart]);
   const isCurrentWeek = useMemo(
-    () => toIsoDate(weekStart) === toIsoDate(weekStartFromDate(new Date())),
-    [weekStart]
+    () => toIsoDate(plannedWeekStart) === toIsoDate(weekStartFromDateWithIsoDay(new Date(), plannedWeekStartDay)),
+    [plannedWeekStart, plannedWeekStartDay]
   );
 
   const goToPreviousWeek = useCallback(() => {
@@ -336,8 +380,8 @@ export default function TasksScreen() {
   }, []);
 
   const goToCurrentWeek = useCallback(() => {
-    setWeekStart(weekStartFromDate(new Date()));
-  }, []);
+    setWeekStart(weekStartFromDateWithIsoDay(new Date(), plannedWeekStartDay));
+  }, [plannedWeekStartDay]);
   const interHouseholdWeekStartIso = useMemo(
     () => weekStartIsoFromIsoDate(templateInterHouseholdWeekStart),
     [templateInterHouseholdWeekStart]
@@ -374,6 +418,10 @@ export default function TasksScreen() {
     const maxDay = new Date(templateStartDateWheelYear, templateStartDateWheelMonth, 0).getDate();
     return Array.from({ length: maxDay }, (_, index) => index + 1);
   }, [templateStartDateWheelMonth, templateStartDateWheelYear]);
+  const templateEndDayOptions = useMemo(() => {
+    const maxDay = new Date(templateEndDateWheelYear, templateEndDateWheelMonth, 0).getDate();
+    return Array.from({ length: maxDay }, (_, index) => index + 1);
+  }, [templateEndDateWheelMonth, templateEndDateWheelYear]);
   const assignableMembers = useMemo(() => {
     if (currentUserRole === "parent") {
       return members;
@@ -439,8 +487,24 @@ export default function TasksScreen() {
     }
 
     try {
+      const rangeFrom = toIsoDate(boardWeekStart);
+      const rangeTo = toIsoDate(addDays(boardWeekStart, 6));
       const payload = await apiFetch(`/tasks/board?from=${rangeFrom}&to=${rangeTo}`) as BoardPayload;
       setTasksEnabled(Boolean(payload?.tasks_enabled));
+      const isAlternatingCustodyEnabled = Boolean(payload?.settings?.alternating_custody_enabled);
+      const homeWeekStartIso = typeof payload?.settings?.custody_home_week_start === "string"
+        ? payload.settings.custody_home_week_start
+        : "";
+      const homeWeekStartDay = isValidIsoDate(homeWeekStartIso)
+        ? normalizeIsoWeekDay(isoWeekDayFromDate(parseIsoDate(homeWeekStartIso)), 1)
+        : null;
+      const nextPlannedWeekStartDay = isAlternatingCustodyEnabled
+        ? (homeWeekStartDay ?? normalizeIsoWeekDay(payload?.settings?.custody_change_day, 1))
+        : 1;
+      if (plannedWeekStartDayRef.current !== nextPlannedWeekStartDay) {
+        plannedWeekStartDayRef.current = nextPlannedWeekStartDay;
+        setPlannedWeekStartDay(nextPlannedWeekStartDay);
+      }
       setCanManageTemplates(Boolean(payload?.can_manage_templates));
       setCanManageInstances(Boolean(payload?.can_manage_instances));
       const payloadCurrentUserId = Number.isInteger(payload?.current_user?.id)
@@ -459,12 +523,16 @@ export default function TasksScreen() {
         setLoading(false);
       }
     }
-  }, [rangeFrom, rangeTo]);
+  }, [boardWeekStart]);
+
+  useEffect(() => {
+    loadBoardRef.current = loadBoard;
+  }, [loadBoard]);
 
   useFocusEffect(
     useCallback(() => {
-      void loadBoard();
-    }, [loadBoard])
+      void loadBoardRef.current();
+    }, [])
   );
 
   useEffect(() => {
@@ -479,7 +547,7 @@ export default function TasksScreen() {
       const unsubscribe = await subscribeToHouseholdRealtime(householdId, (message) => {
         if (!active) return;
         if (message?.module !== "tasks") return;
-        void loadBoard({ silent: true });
+        void loadBoardRef.current({ silent: true });
       });
 
       if (!active) {
@@ -498,7 +566,7 @@ export default function TasksScreen() {
         unsubscribeRealtime();
       }
     };
-  }, [householdId, loadBoard]);
+  }, [householdId]);
 
   useEffect(() => {
     const parsedUserId = Number(currentUserId ?? 0);
@@ -521,7 +589,7 @@ export default function TasksScreen() {
         return;
       }
 
-      void loadBoard({ silent: true });
+      void loadBoardRef.current({ silent: true });
     });
 
       if (!active) {
@@ -540,7 +608,7 @@ export default function TasksScreen() {
         unsubscribeRealtime();
       }
     };
-  }, [currentUserId, loadBoard]);
+  }, [currentUserId]);
 
   useEffect(() => {
     if (!isScheduleModule) {
@@ -567,6 +635,11 @@ export default function TasksScreen() {
     setTemplateStartDateWheelDay((prev) => clamp(prev, 1, maxDay));
   }, [templateStartDayOptions.length]);
 
+  useEffect(() => {
+    const maxDay = templateEndDayOptions.length;
+    setTemplateEndDateWheelDay((prev) => clamp(prev, 1, maxDay));
+  }, [templateEndDayOptions.length]);
+
   const openManualDateWheel = (target: "start" | "end") => {
     if (manualDateWheelVisible && manualDateWheelTarget === target) {
       setManualDateWheelVisible(false);
@@ -590,6 +663,7 @@ export default function TasksScreen() {
     manualDateMonthIndexRef.current = monthIndex;
     manualDateDayIndexRef.current = dayIndex;
     setTemplateStartDateWheelVisible(false);
+    setTemplateEndDateWheelVisible(false);
     setManualDateWheelVisible(true);
 
     requestAnimationFrame(() => {
@@ -644,6 +718,7 @@ export default function TasksScreen() {
     templateStartDateMonthIndexRef.current = monthIndex;
     templateStartDateDayIndexRef.current = dayIndex;
     setManualDateWheelVisible(false);
+    setTemplateEndDateWheelVisible(false);
     setTemplateStartDateWheelVisible(true);
 
     requestAnimationFrame(() => {
@@ -667,6 +742,53 @@ export default function TasksScreen() {
 
     setTemplateStartDate(`${templateStartDateWheelYear}-${pad(templateStartDateWheelMonth)}-${pad(normalizedDay)}`);
   }, [templateStartDateWheelDay, templateStartDateWheelMonth, templateStartDateWheelVisible, templateStartDateWheelYear]);
+
+  const openTemplateEndDateWheel = () => {
+    if (templateEndDateWheelVisible) {
+      setTemplateEndDateWheelVisible(false);
+      return;
+    }
+
+    const sourceDate = parseIsoDate(templateEndDate);
+    const safeDate = Number.isNaN(sourceDate.getTime()) ? new Date() : sourceDate;
+    const year = safeDate.getFullYear();
+    const month = safeDate.getMonth() + 1;
+    const day = safeDate.getDate();
+    const yearIndex = Math.max(0, yearOptions.indexOf(year));
+    const monthIndex = Math.max(0, monthOptions.indexOf(month));
+    const dayIndex = Math.max(0, day - 1);
+
+    setTemplateEndDateWheelYear(year);
+    setTemplateEndDateWheelMonth(month);
+    setTemplateEndDateWheelDay(day);
+    templateEndDateYearIndexRef.current = yearIndex;
+    templateEndDateMonthIndexRef.current = monthIndex;
+    templateEndDateDayIndexRef.current = dayIndex;
+    setManualDateWheelVisible(false);
+    setTemplateStartDateWheelVisible(false);
+    setTemplateEndDateWheelVisible(true);
+
+    requestAnimationFrame(() => {
+      templateEndYearWheelRef.current?.scrollTo({ y: yearIndex * WHEEL_ITEM_HEIGHT, animated: false });
+      templateEndMonthWheelRef.current?.scrollTo({ y: monthIndex * WHEEL_ITEM_HEIGHT, animated: false });
+      templateEndDayWheelRef.current?.scrollTo({ y: dayIndex * WHEEL_ITEM_HEIGHT, animated: false });
+    });
+  };
+
+  useEffect(() => {
+    if (!templateEndDateWheelVisible) {
+      return;
+    }
+
+    const maxDay = new Date(templateEndDateWheelYear, templateEndDateWheelMonth, 0).getDate();
+    const normalizedDay = clamp(templateEndDateWheelDay, 1, maxDay);
+    if (normalizedDay !== templateEndDateWheelDay) {
+      setTemplateEndDateWheelDay(normalizedDay);
+      return;
+    }
+
+    setTemplateEndDate(`${templateEndDateWheelYear}-${pad(templateEndDateWheelMonth)}-${pad(normalizedDay)}`);
+  }, [templateEndDateWheelDay, templateEndDateWheelMonth, templateEndDateWheelVisible, templateEndDateWheelYear]);
 
   const visibleInstances = useMemo(() => {
     if (currentUserRole === "parent") {
@@ -709,6 +831,7 @@ export default function TasksScreen() {
       setTemplateHasEndDate(false);
       setTemplateRecurrenceDays([]);
       setTemplateStartDateWheelVisible(false);
+      setTemplateEndDateWheelVisible(false);
       return;
     }
 
@@ -775,6 +898,7 @@ export default function TasksScreen() {
     setTemplateInterHouseholdAlternating(false);
     setTemplateInterHouseholdWeekStart(toIsoDate(weekStartFromDate(new Date())));
     setTemplateStartDateWheelVisible(false);
+    setTemplateEndDateWheelVisible(false);
   };
 
   const startEditTemplate = (template: TaskTemplate) => {
@@ -818,6 +942,8 @@ export default function TasksScreen() {
           : toIsoDate(weekStartFromDate(new Date()))
       )
     );
+    setTemplateStartDateWheelVisible(false);
+    setTemplateEndDateWheelVisible(false);
   };
 
     const saveTemplate = async () => {
@@ -1116,7 +1242,7 @@ export default function TasksScreen() {
   }
 
   return (
-    <ScrollView style={[styles.container, { backgroundColor: theme.background }]} contentContainerStyle={styles.content}>
+    <ScrollView keyboardShouldPersistTaps="handled" style={[styles.container, { backgroundColor: theme.background }]} contentContainerStyle={styles.content}>
       <View style={styles.header}>
         <View style={styles.headerRow}>
           <TouchableOpacity
@@ -1357,7 +1483,7 @@ export default function TasksScreen() {
 
                           <View style={styles.wheelRow}>
                             <View style={styles.wheelColumn}>
-                              <ScrollView
+                              <ScrollView keyboardShouldPersistTaps="handled"
                                 ref={templateStartDayWheelRef}
                                 nestedScrollEnabled
                                 showsVerticalScrollIndicator={false}
@@ -1395,7 +1521,7 @@ export default function TasksScreen() {
                             </View>
 
                             <View style={styles.wheelColumn}>
-                              <ScrollView
+                              <ScrollView keyboardShouldPersistTaps="handled"
                                 ref={templateStartMonthWheelRef}
                                 nestedScrollEnabled
                                 showsVerticalScrollIndicator={false}
@@ -1433,7 +1559,7 @@ export default function TasksScreen() {
                             </View>
 
                             <View style={styles.wheelColumn}>
-                              <ScrollView
+                              <ScrollView keyboardShouldPersistTaps="handled"
                                 ref={templateStartYearWheelRef}
                                 nestedScrollEnabled
                                 showsVerticalScrollIndicator={false}
@@ -1480,7 +1606,15 @@ export default function TasksScreen() {
                       <View style={styles.toggleRow}>
                         <Text style={{ color: theme.text, fontWeight: "600" }}>Date de fin</Text>
                         <TouchableOpacity
-                          onPress={() => setTemplateHasEndDate((prev) => !prev)}
+                          onPress={() => {
+                            setTemplateHasEndDate((prev) => {
+                              const next = !prev;
+                              if (!next) {
+                                setTemplateEndDateWheelVisible(false);
+                              }
+                              return next;
+                            });
+                          }}
                           style={[
                             styles.switchPill,
                             { borderColor: theme.icon, backgroundColor: templateHasEndDate ? `${theme.tint}30` : theme.background },
@@ -1493,13 +1627,138 @@ export default function TasksScreen() {
                       </View>
 
                       {templateHasEndDate ? (
-                        <TextInput
-                          style={[styles.input, { backgroundColor: theme.background, color: theme.text, borderColor: theme.icon }]}
-                          value={templateEndDate}
-                          onChangeText={setTemplateEndDate}
-                          placeholder="YYYY-MM-DD"
-                          placeholderTextColor={theme.textSecondary}
-                        />
+                        <>
+                          <TouchableOpacity
+                            onPress={openTemplateEndDateWheel}
+                            style={[styles.pickerFieldBtn, { borderColor: theme.icon, backgroundColor: theme.background }]}
+                            disabled={saving}
+                          >
+                            <MaterialCommunityIcons name="calendar-month-outline" size={16} color={theme.textSecondary} />
+                            <Text style={[styles.pickerFieldText, { color: theme.text }]}>{templateEndDate}</Text>
+                          </TouchableOpacity>
+
+                          {templateEndDateWheelVisible ? (
+                            <View style={[styles.inlineWheelPanel, { borderColor: theme.icon, backgroundColor: theme.background }]}>
+                              <Text style={[styles.label, { color: theme.text }]}>Choisir la date de fin</Text>
+
+                              <View style={styles.wheelRow}>
+                                <View style={styles.wheelColumn}>
+                                  <ScrollView keyboardShouldPersistTaps="handled"
+                                    ref={templateEndDayWheelRef}
+                                    nestedScrollEnabled
+                                    showsVerticalScrollIndicator={false}
+                                    snapToInterval={WHEEL_ITEM_HEIGHT}
+                                    decelerationRate="fast"
+                                    scrollEventThrottle={32}
+                                    contentContainerStyle={styles.wheelContentContainer}
+                                    onScroll={(event) => {
+                                      const index = wheelIndexFromOffset(event.nativeEvent.contentOffset.y, templateEndDayOptions.length);
+                                      if (index === templateEndDateDayIndexRef.current) {
+                                        return;
+                                      }
+                                      templateEndDateDayIndexRef.current = index;
+                                      setTemplateEndDateWheelDay(templateEndDayOptions[index]);
+                                    }}
+                                  >
+                                    {templateEndDayOptions.map((value) => (
+                                      <View key={`template-end-wheel-day-${value}`} style={styles.wheelItem}>
+                                        <Text
+                                          style={[
+                                            styles.wheelItemText,
+                                            { color: templateEndDateWheelDay === value ? theme.text : theme.textSecondary },
+                                            templateEndDateWheelDay === value && styles.wheelItemTextSelected,
+                                          ]}
+                                        >
+                                          {`${weekDayShortLabel(templateEndDateWheelYear, templateEndDateWheelMonth, value)} ${pad(value)}`}
+                                        </Text>
+                                      </View>
+                                    ))}
+                                  </ScrollView>
+                                  <View
+                                    pointerEvents="none"
+                                    style={[styles.wheelSelectionOverlay, { borderColor: theme.icon, backgroundColor: `${theme.tint}14` }]}
+                                  />
+                                </View>
+
+                                <View style={styles.wheelColumn}>
+                                  <ScrollView keyboardShouldPersistTaps="handled"
+                                    ref={templateEndMonthWheelRef}
+                                    nestedScrollEnabled
+                                    showsVerticalScrollIndicator={false}
+                                    snapToInterval={WHEEL_ITEM_HEIGHT}
+                                    decelerationRate="fast"
+                                    scrollEventThrottle={32}
+                                    contentContainerStyle={styles.wheelContentContainer}
+                                    onScroll={(event) => {
+                                      const index = wheelIndexFromOffset(event.nativeEvent.contentOffset.y, monthOptions.length);
+                                      if (index === templateEndDateMonthIndexRef.current) {
+                                        return;
+                                      }
+                                      templateEndDateMonthIndexRef.current = index;
+                                      setTemplateEndDateWheelMonth(monthOptions[index]);
+                                    }}
+                                  >
+                                    {monthOptions.map((value) => (
+                                      <View key={`template-end-wheel-month-${value}`} style={styles.wheelItem}>
+                                        <Text
+                                          style={[
+                                            styles.wheelItemText,
+                                            { color: templateEndDateWheelMonth === value ? theme.text : theme.textSecondary },
+                                            templateEndDateWheelMonth === value && styles.wheelItemTextSelected,
+                                          ]}
+                                        >
+                                          {MONTH_LABELS[value - 1]}
+                                        </Text>
+                                      </View>
+                                    ))}
+                                  </ScrollView>
+                                  <View
+                                    pointerEvents="none"
+                                    style={[styles.wheelSelectionOverlay, { borderColor: theme.icon, backgroundColor: `${theme.tint}14` }]}
+                                  />
+                                </View>
+
+                                <View style={styles.wheelColumn}>
+                                  <ScrollView keyboardShouldPersistTaps="handled"
+                                    ref={templateEndYearWheelRef}
+                                    nestedScrollEnabled
+                                    showsVerticalScrollIndicator={false}
+                                    snapToInterval={WHEEL_ITEM_HEIGHT}
+                                    decelerationRate="fast"
+                                    scrollEventThrottle={32}
+                                    contentContainerStyle={styles.wheelContentContainer}
+                                    onScroll={(event) => {
+                                      const index = wheelIndexFromOffset(event.nativeEvent.contentOffset.y, yearOptions.length);
+                                      if (index === templateEndDateYearIndexRef.current) {
+                                        return;
+                                      }
+                                      templateEndDateYearIndexRef.current = index;
+                                      setTemplateEndDateWheelYear(yearOptions[index]);
+                                    }}
+                                  >
+                                    {yearOptions.map((value) => (
+                                      <View key={`template-end-wheel-year-${value}`} style={styles.wheelItem}>
+                                        <Text
+                                          style={[
+                                            styles.wheelItemText,
+                                            { color: templateEndDateWheelYear === value ? theme.text : theme.textSecondary },
+                                            templateEndDateWheelYear === value && styles.wheelItemTextSelected,
+                                          ]}
+                                        >
+                                          {value}
+                                        </Text>
+                                      </View>
+                                    ))}
+                                  </ScrollView>
+                                  <View
+                                    pointerEvents="none"
+                                    style={[styles.wheelSelectionOverlay, { borderColor: theme.icon, backgroundColor: `${theme.tint}14` }]}
+                                  />
+                                </View>
+                              </View>
+                            </View>
+                          ) : null}
+                        </>
                       ) : null}
                     </>
                   ) : null}
@@ -1541,7 +1800,7 @@ export default function TasksScreen() {
                   </View>
 
                   <Text style={[styles.label, { color: theme.text }]}>Membres concernés</Text>
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.memberRow}>
+                  <ScrollView keyboardShouldPersistTaps="handled" horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.memberRow}>
                     {members.map((member) => {
                       const selected = templateRotationUserIds.includes(member.id);
                       return (
@@ -1600,7 +1859,7 @@ export default function TasksScreen() {
                   ) : (
                 <>
                   <Text style={[styles.label, { color: theme.text }]}>Attribuer à</Text>
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.memberRow}>
+                  <ScrollView keyboardShouldPersistTaps="handled" horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.memberRow}>
                     {members.map((member) => (
                       <TouchableOpacity
                         key={`fixed-${member.id}`}
@@ -1748,7 +2007,7 @@ export default function TasksScreen() {
 
                   <View style={styles.wheelRow}>
                     <View style={styles.wheelColumn}>
-                      <ScrollView
+                      <ScrollView keyboardShouldPersistTaps="handled"
                         ref={manualDayWheelRef}
                         nestedScrollEnabled
                         showsVerticalScrollIndicator={false}
@@ -1786,7 +2045,7 @@ export default function TasksScreen() {
                     </View>
 
                     <View style={styles.wheelColumn}>
-                      <ScrollView
+                      <ScrollView keyboardShouldPersistTaps="handled"
                         ref={manualMonthWheelRef}
                         nestedScrollEnabled
                         showsVerticalScrollIndicator={false}
@@ -1824,7 +2083,7 @@ export default function TasksScreen() {
                     </View>
 
                     <View style={styles.wheelColumn}>
-                      <ScrollView
+                      <ScrollView keyboardShouldPersistTaps="handled"
                         ref={manualYearWheelRef}
                         nestedScrollEnabled
                         showsVerticalScrollIndicator={false}
@@ -1866,7 +2125,7 @@ export default function TasksScreen() {
 
               <Text style={[styles.label, { color: theme.text }]}>Attribuer à</Text>
               {assignableMembers.length > 0 ? (
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.memberRow}>
+                <ScrollView keyboardShouldPersistTaps="handled" horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.memberRow}>
                   {assignableMembers.map((member) => (
                     <TouchableOpacity
                       key={`manual-assign-${member.id}`}

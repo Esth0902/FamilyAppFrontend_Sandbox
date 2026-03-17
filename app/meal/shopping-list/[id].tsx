@@ -405,7 +405,7 @@ export default function ShoppingListDetailScreen() {
         <Text style={[styles.title, { color: theme.text }]}>{listTitle}</Text>
       </View>
 
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
         <View style={[styles.card, { backgroundColor: theme.card }]}>
           <Text style={[styles.cardTitle, { color: theme.text }]}>Repas planifiés</Text>
 

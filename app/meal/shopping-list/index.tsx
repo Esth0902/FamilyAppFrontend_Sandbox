@@ -177,7 +177,7 @@ export default function ShoppingListsHomeScreen() {
         <Text style={[styles.title, { color: theme.text }]}>Listes de courses</Text>
       </View>
 
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
         {canManage ? (
           <View style={[styles.card, { backgroundColor: theme.card }]}>
             <Text style={[styles.cardTitle, { color: theme.text }]}>Nouvelle liste</Text>

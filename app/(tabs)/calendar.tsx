@@ -1443,7 +1443,7 @@ export default function CalendarScreen() {
   }
 
   return (
-    <ScrollView
+    <ScrollView keyboardShouldPersistTaps="handled"
       style={[styles.container, { backgroundColor: theme.background }]}
       contentContainerStyle={styles.content}
     >
@@ -1601,7 +1601,7 @@ export default function CalendarScreen() {
                   </View>
                 </View>
 
-                <ScrollView
+                <ScrollView keyboardShouldPersistTaps="handled"
                   style={styles.modalScroll}
                   contentContainerStyle={styles.modalContent}
                   nestedScrollEnabled
@@ -1830,7 +1830,7 @@ export default function CalendarScreen() {
                   </TouchableOpacity>
                 </View>
 
-                <ScrollView style={styles.modalScroll} contentContainerStyle={styles.modalContent}>
+                <ScrollView keyboardShouldPersistTaps="handled" style={styles.modalScroll} contentContainerStyle={styles.modalContent}>
                   <TextInput
                     style={[styles.input, { backgroundColor: theme.background, color: theme.text, borderColor: theme.icon }]}
                     value={mealPlanDate}
@@ -1865,7 +1865,7 @@ export default function CalendarScreen() {
                     placeholderTextColor={theme.textSecondary}
                   />
                   {recipeOptions.length > 0 ? (
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.recipePickerRow}>
+                    <ScrollView keyboardShouldPersistTaps="handled" horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.recipePickerRow}>
                       {filteredRecipeOptions.map((recipe) => (
                         <TouchableOpacity
                           key={`recipe-${recipe.id}`}
@@ -1985,7 +1985,7 @@ export default function CalendarScreen() {
                   </TouchableOpacity>
                 </View>
 
-                <ScrollView style={styles.modalScroll} contentContainerStyle={styles.modalContent}>
+                <ScrollView keyboardShouldPersistTaps="handled" style={styles.modalScroll} contentContainerStyle={styles.modalContent}>
                   {editingEventId === null ? (
                     <>
                       <View style={styles.visibilityRow}>
@@ -2108,7 +2108,7 @@ export default function CalendarScreen() {
 
                       <View style={styles.wheelRow}>
                         <View style={styles.wheelColumn}>
-                          <ScrollView
+                          <ScrollView keyboardShouldPersistTaps="handled"
                             ref={dayWheelRef}
                             nestedScrollEnabled
                             showsVerticalScrollIndicator={false}
@@ -2146,7 +2146,7 @@ export default function CalendarScreen() {
                         </View>
 
                         <View style={styles.wheelColumn}>
-                          <ScrollView
+                          <ScrollView keyboardShouldPersistTaps="handled"
                             ref={monthWheelRef}
                             nestedScrollEnabled
                             showsVerticalScrollIndicator={false}
@@ -2184,7 +2184,7 @@ export default function CalendarScreen() {
                         </View>
 
                         <View style={styles.wheelColumn}>
-                          <ScrollView
+                          <ScrollView keyboardShouldPersistTaps="handled"
                             ref={yearWheelRef}
                             nestedScrollEnabled
                             showsVerticalScrollIndicator={false}
@@ -2233,7 +2233,7 @@ export default function CalendarScreen() {
 
                       <View style={styles.wheelRow}>
                         <View style={styles.wheelColumn}>
-                          <ScrollView
+                          <ScrollView keyboardShouldPersistTaps="handled"
                             ref={hourWheelRef}
                             nestedScrollEnabled
                             showsVerticalScrollIndicator={false}
@@ -2282,7 +2282,7 @@ export default function CalendarScreen() {
                         </View>
 
                         <View style={styles.wheelColumn}>
-                          <ScrollView
+                          <ScrollView keyboardShouldPersistTaps="handled"
                             ref={minuteWheelRef}
                             nestedScrollEnabled
                             showsVerticalScrollIndicator={false}
@@ -2413,7 +2413,7 @@ export default function CalendarScreen() {
                         placeholderTextColor={theme.textSecondary}
                       />
                       {recipeOptions.length > 0 ? (
-                        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.recipePickerRow}>
+                        <ScrollView keyboardShouldPersistTaps="handled" horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.recipePickerRow}>
                           {filteredRecipeOptions.map((recipe) => (
                             <TouchableOpacity
                               key={`new-recipe-${recipe.id}`}
@@ -2516,7 +2516,7 @@ export default function CalendarScreen() {
                       />
                       <Text style={[styles.label, { color: theme.text }]}>Attribuer à</Text>
                       {assignableTaskMembers.length > 0 ? (
-                        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.recipePickerRow}>
+                        <ScrollView keyboardShouldPersistTaps="handled" horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.recipePickerRow}>
                           {assignableTaskMembers.map((member) => (
                             <TouchableOpacity
                               key={`task-assignee-${member.id}`}

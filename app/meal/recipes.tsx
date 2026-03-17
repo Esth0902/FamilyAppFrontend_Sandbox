@@ -902,7 +902,7 @@ export default function RecipesScreen() {
                         {/* MODE PREVIEW (Aperçu avant enregistrement) */}
                         {modalMode === 'preview' && previewRecipe && (
                             <View style={{maxHeight: 450}}>
-                                <ScrollView showsVerticalScrollIndicator={false}>
+                                <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
                                     <Text style={[styles.previewTitle, { color: themeColors.text }]}>{previewRecipe.title}</Text>
                                     <Text style={{color: themeColors.icon, marginBottom: 15}}>{previewRecipe.description}</Text>
 
@@ -930,7 +930,7 @@ export default function RecipesScreen() {
 
                         {/* MODE MANUEL */}
                         {modalMode === 'manual' && (
-                            <ScrollView showsVerticalScrollIndicator={false}>
+                            <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
                                 <Text style={[styles.fieldLabel, { color: themeColors.text }]}>Titre</Text>
                                 <TextInput
                                     style={[styles.input, { color: themeColors.text }]}

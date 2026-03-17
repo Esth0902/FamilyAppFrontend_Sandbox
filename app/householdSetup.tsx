@@ -446,14 +446,28 @@ export default function SetupHousehold() {
         }
 
         const rawSelectedDate = `${custodyDateWheelYear}-${pad2(custodyDateWheelMonth)}-${pad2(normalizedDay)}`;
-        const alignedWeekDate = normalizeCustodyWeekStartDate(rawSelectedDate, tasksSettings.custody_change_day);
-        setTasksSettings((prev) => ({ ...prev, custody_home_week_start: alignedWeekDate }));
+        const selectedDate = new Date(custodyDateWheelYear, custodyDateWheelMonth - 1, normalizedDay);
+        const selectedIsoWeekDay = selectedDate.getDay() === 0 ? 7 : selectedDate.getDay();
+        const alignedWeekDate = normalizeCustodyWeekStartDate(rawSelectedDate, selectedIsoWeekDay);
+        setTasksSettings((prev) => {
+            if (
+                prev.custody_change_day === selectedIsoWeekDay
+                && prev.custody_home_week_start === alignedWeekDate
+            ) {
+                return prev;
+            }
+
+            return {
+                ...prev,
+                custody_change_day: selectedIsoWeekDay,
+                custody_home_week_start: alignedWeekDate,
+            };
+        });
     }, [
         custodyDateWheelVisible,
         custodyDateWheelYear,
         custodyDateWheelMonth,
         custodyDateWheelDay,
-        tasksSettings.custody_change_day,
     ]);
 
     const loadDietaryTags = useCallback(async (type: DietaryTagOption["type"]) => {
@@ -1328,7 +1342,7 @@ export default function SetupHousehold() {
                     <Text style={[styles.headerTitle, { color: theme.text }]}>Comptes créés</Text>
                 </View>
 
-                <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
+                <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
                     <View style={styles.section}>
                         <Text style={[styles.sectionTitle, { color: theme.text }]}>Envoyer les accès</Text>
                         <Text style={[styles.memberMeta, { color: theme.textSecondary, marginBottom: 10 }]}>
@@ -1415,7 +1429,7 @@ export default function SetupHousehold() {
                 </Text>
             </View>
 
-            <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
+            <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
                 {!isMealsScope && !isTasksScope && !isCalendarScope && (
                     <View style={styles.section}>
                         <View style={[styles.collapsibleSectionCard, { backgroundColor: theme.card, borderColor: theme.icon }]}>
@@ -2041,7 +2055,7 @@ export default function SetupHousehold() {
 
                                                     <View style={styles.wheelRow}>
                                                         <View style={styles.wheelColumn}>
-                                                            <ScrollView
+                                                            <ScrollView keyboardShouldPersistTaps="handled"
                                                                 ref={custodyDayWheelRef}
                                                                 nestedScrollEnabled
                                                                 showsVerticalScrollIndicator={false}
@@ -2082,7 +2096,7 @@ export default function SetupHousehold() {
                                                         </View>
 
                                                         <View style={styles.wheelColumn}>
-                                                            <ScrollView
+                                                            <ScrollView keyboardShouldPersistTaps="handled"
                                                                 ref={custodyMonthWheelRef}
                                                                 nestedScrollEnabled
                                                                 showsVerticalScrollIndicator={false}
@@ -2123,7 +2137,7 @@ export default function SetupHousehold() {
                                                         </View>
 
                                                         <View style={styles.wheelColumn}>
-                                                            <ScrollView
+                                                            <ScrollView keyboardShouldPersistTaps="handled"
                                                                 ref={custodyYearWheelRef}
                                                                 nestedScrollEnabled
                                                                 showsVerticalScrollIndicator={false}

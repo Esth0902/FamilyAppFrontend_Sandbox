@@ -127,7 +127,7 @@ export default function DashboardScreen() {
         <Text style={[styles.headerTitle, { color: theme.text }]}>Dashboard</Text>
       </View>
 
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
         <View style={styles.menuGrid}>
           <TouchableOpacity
             style={[styles.card, { backgroundColor: colorScheme === "dark" ? "#1E1E1E" : "#FFF" }]}

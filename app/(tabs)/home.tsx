@@ -55,6 +55,7 @@ const ACTION_REQUIRED_NOTIFICATION_TYPES = new Set([
 
 const TASK_NOTIFICATION_TYPES = new Set([
     "task_assigned",
+    "task_routine_assigned",
     "task_done_validation_needed",
     "task_validated",
     "task_cancelled",
@@ -520,7 +521,7 @@ export default function ConnectedHome() {
 
     return (
         <View style={[styles.container, { backgroundColor: theme.background }]}>
-            <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+            <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
                 <View style={styles.header}>
                     <View style={styles.headerTopRow}>
                         <View style={styles.headerTextWrap}>

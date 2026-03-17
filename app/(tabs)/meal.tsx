@@ -183,7 +183,7 @@ export default function MealScreen() {
     );
 
     return (
-        <ScrollView
+        <ScrollView keyboardShouldPersistTaps="handled"
             style={[styles.container, { backgroundColor: themeColors.background }]}
             contentContainerStyle={styles.content}
         >

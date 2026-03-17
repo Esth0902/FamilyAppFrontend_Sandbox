@@ -1610,7 +1610,7 @@ export default function MealPollScreen() {
         <Text style={[styles.title, { color: theme.text }]}>Sondage repas</Text>
       </View>
 
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
         {(isParent && !activePoll) || (isParent && activePoll?.status === "open" && showPollBuilder) ? (
           renderCreateView()
         ) : !activePoll ? (

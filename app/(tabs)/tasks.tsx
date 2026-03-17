@@ -201,7 +201,7 @@ export default function TasksTabScreen() {
   }
 
   return (
-    <ScrollView style={[styles.container, { backgroundColor: theme.background }]} contentContainerStyle={styles.content}>
+    <ScrollView keyboardShouldPersistTaps="handled" style={[styles.container, { backgroundColor: theme.background }]} contentContainerStyle={styles.content}>
       <View style={styles.header}>
         <View style={styles.headerTopRow}>
           <Text style={[styles.headerTitle, { color: theme.text }]}>Tâches du foyer</Text>

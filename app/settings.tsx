@@ -273,7 +273,7 @@ export default function SettingsScreen() {
     }
 
     return (
-        <ScrollView
+        <ScrollView keyboardShouldPersistTaps="handled"
             style={[styles.container, { backgroundColor: theme.background }]}
             contentContainerStyle={styles.content}
         >

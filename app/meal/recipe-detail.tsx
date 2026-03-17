@@ -314,7 +314,7 @@ export default function RecipeDetailScreen() {
                 ) : null}
             </View>
 
-            <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 20 }}>
+            <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: insets.bottom + 20 }}>
                 {/* Section Description */}
                 <View style={styles.section}>
                     {isEditing && editForm ? (

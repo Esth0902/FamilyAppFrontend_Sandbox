@@ -109,7 +109,7 @@ export default function Register() {
             behavior={Platform.OS === "ios" ? "padding" : "height"}
             style={{ flex: 1, backgroundColor: theme.background }}
         >
-            <ScrollView contentContainerStyle={styles.scrollContainer}>
+            <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.scrollContainer}>
                 <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
                     <MaterialCommunityIcons name="arrow-left" size={24} color={theme.textSecondary} />
                 </TouchableOpacity>
