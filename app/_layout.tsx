@@ -124,7 +124,7 @@ export default function RootLayout() {
                     }
 
                     try {
-                        const response = await apiFetch("/notifications/pending");
+                        const response = await apiFetch("/notifications/pending?all_households=1");
                         const notifications = Array.isArray(response?.notifications) ? response.notifications : [];
 
                         for (const notification of notifications) {
@@ -142,7 +142,7 @@ export default function RootLayout() {
                             const body = notificationType === "household_invite"
                                 ? `${inviterName} vous invite à rejoindre le foyer ${householdName}.`
                                 : notificationType === "task_reassignment_invite"
-                                    ? `${requesterName} vous demande de reprendre ${taskName}.`
+                                    ? `${requesterName} vous demande de reprendre ${taskName} (foyer : ${householdName}).`
                                     : String(notification?.body ?? "");
 
                             await scheduleLocalNotification(
