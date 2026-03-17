@@ -15,6 +15,7 @@ import {
 import { Stack, useFocusEffect, useRouter } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { Swipeable } from "react-native-gesture-handler";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Colors } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
@@ -223,6 +224,7 @@ const normalizeAiPreviewRecipe = (payload: any): AiPreviewRecipe | null => {
 
 export default function MealPollScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const colorScheme = useColorScheme();
   const theme = Colors[colorScheme ?? "light"];
   const { householdId, role } = useStoredUserState();
@@ -1603,9 +1605,9 @@ export default function MealPollScreen() {
     <View style={[styles.container, { backgroundColor: theme.background }]}> 
       <Stack.Screen options={{ headerShown: false }} />
 
-      <View style={[styles.header, { borderBottomColor: theme.icon }]}> 
-        <TouchableOpacity onPress={handleBackArrow}> 
-          <MaterialCommunityIcons name="arrow-left" size={24} color={theme.text} />
+      <View style={[styles.header, { borderBottomColor: theme.icon, paddingTop: Math.max(insets.top, 12) }]}> 
+        <TouchableOpacity onPress={handleBackArrow} style={[styles.backBtn, { borderColor: theme.icon }]}> 
+          <MaterialCommunityIcons name="arrow-left" size={20} color={theme.tint} />
         </TouchableOpacity>
         <Text style={[styles.title, { color: theme.text }]}>Sondage repas</Text>
       </View>
@@ -1823,13 +1825,21 @@ const styles = StyleSheet.create({
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
   header: {
     minHeight: 60,
-    marginTop: 28,
     paddingHorizontal: 20,
     paddingVertical: 8,
     borderBottomWidth: 1,
     flexDirection: "row",
     alignItems: "center",
     gap: 12,
+  },
+  backBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 2,
   },
   title: { fontSize: 18, fontWeight: "700" },
   content: { padding: 16, paddingBottom: 40 },

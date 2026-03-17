@@ -719,8 +719,8 @@ export default function RecipesScreen() {
             <Stack.Screen options={{ headerShown: false }} />
 
             <View style={[styles.headerBar, { borderBottomColor: themeColors.icon }]}>
-                <TouchableOpacity onPress={() => router.replace('/(tabs)/meal')} style={styles.backBtn}>
-                    <MaterialCommunityIcons name="arrow-left" size={24} color={themeColors.text} />
+                <TouchableOpacity onPress={() => router.replace('/(tabs)/meal')} style={[styles.backBtn, { borderColor: themeColors.icon }]}>
+                    <MaterialCommunityIcons name="arrow-left" size={20} color={themeColors.tint} />
                 </TouchableOpacity>
                 <Text style={[styles.headerTitle, { color: themeColors.text }]}>Gestion des Recettes</Text>
             </View>
@@ -1181,7 +1181,16 @@ export default function RecipesScreen() {
 const styles = StyleSheet.create({
     container: { flex: 1 },
     headerBar: { height: 60, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, borderBottomWidth: 1 },
-    backBtn: { marginRight: 16 },
+    backBtn: {
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+        borderWidth: 1,
+        alignItems: "center",
+        justifyContent: "center",
+        marginRight: 12,
+        marginTop: 2,
+    },
     headerTitle: { fontSize: 18, fontWeight: '700' },
     searchContainer: { flexDirection: 'row', alignItems: 'center', marginHorizontal: 15, marginVertical: 10, paddingHorizontal: 15, borderRadius: 12, height: 50, elevation: 2, shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 3 },
     searchInput: { flex: 1, marginLeft: 10, fontSize: 16 },

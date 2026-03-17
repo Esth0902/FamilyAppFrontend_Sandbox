@@ -110,8 +110,8 @@ export default function Register() {
             style={{ flex: 1, backgroundColor: theme.background }}
         >
             <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.scrollContainer}>
-                <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-                    <MaterialCommunityIcons name="arrow-left" size={24} color={theme.textSecondary} />
+                <TouchableOpacity onPress={() => router.back()} style={[styles.backButton, { borderColor: theme.icon }]}>
+                    <MaterialCommunityIcons name="arrow-left" size={20} color={theme.tint} />
                 </TouchableOpacity>
 
                 <View style={styles.header}>
@@ -226,15 +226,19 @@ const styles = StyleSheet.create({
         top: 60,
         left: 24,
         zIndex: 10,
-        padding: 8,
-        marginLeft: -8,
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+        borderWidth: 1,
+        alignItems: "center",
+        justifyContent: "center",
     },
     header: {
         marginTop: 40,
         marginBottom: 32,
     },
     title: {
-        fontSize: 30,
+        fontSize: 18,
         fontWeight: "bold",
         marginBottom: 8,
     },

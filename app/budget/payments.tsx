@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { useFocusEffect, useRouter } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Colors } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
@@ -23,6 +24,7 @@ type PaymentAction = "pay" | "carry_negative";
 
 export default function BudgetPaymentsScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const colorScheme = useColorScheme();
   const theme = Colors[colorScheme ?? "light"];
   const { householdId } = useStoredUserState();
@@ -134,8 +136,8 @@ export default function BudgetPaymentsScreen() {
 
   return (
     <ScrollView style={[styles.container, { backgroundColor: theme.background }]} contentContainerStyle={styles.content}>
-      <View style={styles.headerRow}>
-        <TouchableOpacity onPress={() => router.back()} style={[styles.backBtn, { borderColor: theme.icon }]}>
+      <View style={[styles.headerRow, { borderBottomColor: theme.icon, paddingTop: Math.max(insets.top, 12) }]}>
+        <TouchableOpacity onPress={() => router.replace("/(tabs)/budget")} style={[styles.backBtn, { borderColor: theme.icon }]}>
           <MaterialCommunityIcons name="arrow-left" size={20} color={theme.tint} />
         </TouchableOpacity>
         <View style={{ flex: 1 }}>
@@ -246,9 +248,16 @@ export default function BudgetPaymentsScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  content: { paddingTop: 56, paddingHorizontal: 16, paddingBottom: 40, gap: 12 },
+  content: { paddingTop: 0, paddingHorizontal: 16, paddingBottom: 40, gap: 12 },
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
-  headerRow: { flexDirection: "row", alignItems: "center", gap: 10 },
+  headerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    marginBottom: 2,
+  },
   backBtn: {
     width: 36,
     height: 36,
@@ -256,8 +265,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     alignItems: "center",
     justifyContent: "center",
+    marginTop: 2,
   },
-  title: { fontSize: 24, fontWeight: "700" },
+  title: { fontSize: 18, fontWeight: "700" },
   subtitle: { marginTop: 2, fontSize: 13, lineHeight: 18 },
   card: { borderWidth: 1, borderRadius: 14, padding: 12, gap: 8 },
   childHeader: { flexDirection: "row", alignItems: "center", gap: 8 },

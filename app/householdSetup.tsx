@@ -318,6 +318,20 @@ export default function SetupHousehold() {
     const isTasksScope = params.scope === "tasks";
     const isBudgetScope = params.scope === "budget";
     const isCalendarScope = params.scope === "calendar";
+    const isModuleScope = isMealsScope || isTasksScope || isBudgetScope || isCalendarScope;
+    const showScopedModuleDetails = isEditMode && isModuleScope;
+    const scopedBackRoute = isMealsScope
+        ? "/(tabs)/meal"
+        : isTasksScope
+            ? "/(tabs)/tasks"
+            : isBudgetScope
+                ? "/(tabs)/budget"
+                : isCalendarScope
+                    ? "/(tabs)/calendar"
+                    : null;
+    const householdEditHeaderOffset = isEditMode && !isMealsScope && !isTasksScope && !isBudgetScope && !isCalendarScope
+        ? 6
+        : 0;
     const colorScheme = useColorScheme();
     const theme = Colors[colorScheme ?? "light"];
     const memberItemBackground = `${theme.tint}${colorScheme === "dark" ? "20" : "12"}`;
@@ -411,7 +425,7 @@ export default function SetupHousehold() {
     const [memberEmail, setMemberEmail] = useState("");
     const [memberRole, setMemberRole] = useState<MemberRole>("enfant");
     const [membersExpanded, setMembersExpanded] = useState(!isEditMode);
-    const [modulesExpanded, setModulesExpanded] = useState(!isEditMode);
+    const [modulesExpanded, setModulesExpanded] = useState(!isEditMode || isModuleScope);
     const [managedMembers, setManagedMembers] = useState<ManagedHouseholdMember[]>([]);
     const [managedRoleDrafts, setManagedRoleDrafts] = useState<Record<number, MemberRole>>({});
     const [canManageMembers, setCanManageMembers] = useState(false);
@@ -464,8 +478,8 @@ export default function SetupHousehold() {
     }, [isEditMode]);
 
     useEffect(() => {
-        setModulesExpanded(!isEditMode);
-    }, [isEditMode]);
+        setModulesExpanded(!isEditMode || isModuleScope);
+    }, [isEditMode, isModuleScope]);
 
     const updateMealOption = (option: "recipes" | "polls" | "shopping_list", value: boolean) => {
         setMealOptions((prev) => ({ ...prev, [option]: value }));
@@ -1278,7 +1292,7 @@ export default function SetupHousehold() {
                         });
                         setSelectedMealDietaryTagDetails(detailsMap);
                     }
-                    if (!isTasksScope && !isBudgetScope) {
+                    if (isMealsScope) {
                         await loadDietaryTags("diet");
                     }
                     const parsedCustodyChangeDay =
@@ -1842,11 +1856,20 @@ export default function SetupHousehold() {
                     styles.headerBar,
                     {
                         borderBottomColor: theme.icon,
-                        paddingTop: Math.max(insets.top, 12),
+                        paddingTop: Math.max(insets.top, 12) + householdEditHeaderOffset,
                     },
                 ]}
             >
-                <TouchableOpacity onPress={() => router.back()} style={[styles.headerActionBtn, { borderColor: theme.icon }]}>
+                <TouchableOpacity
+                    onPress={() => {
+                        if (scopedBackRoute) {
+                            router.replace(scopedBackRoute);
+                            return;
+                        }
+                        router.back();
+                    }}
+                    style={[styles.headerActionBtn, { borderColor: theme.icon }]}
+                >
                     <MaterialCommunityIcons name="arrow-left" size={20} color={theme.tint} />
                 </TouchableOpacity>
                 <Text style={[styles.headerTitle, { color: theme.text }]}>
@@ -2268,13 +2291,25 @@ export default function SetupHousehold() {
 
                         {modulesExpanded ? (
                             <View style={styles.collapsibleSectionBody}>
-                                {visibleModules.map((module) => (
+                                {visibleModules.map((module) => {
+                                    const canExpandModulePanel = showScopedModuleDetails || module.id === "meals";
+
+                                    return (
                                     <View key={module.id} style={[styles.moduleContainer, { backgroundColor: theme.background }]}> 
                             <View style={styles.moduleCard}> 
                                 <View style={[styles.moduleIcon, { backgroundColor: theme.background }]}> 
                                     <MaterialCommunityIcons name={module.icon as any} size={24} color={theme.tint} />
                                 </View>
-                                <TouchableOpacity style={{ flex: 1 }} onPress={() => toggleModulePanel(module.id)}>
+                                <TouchableOpacity
+                                    style={{ flex: 1 }}
+                                    onPress={() => {
+                                        if (!canExpandModulePanel) {
+                                            return;
+                                        }
+                                        toggleModulePanel(module.id);
+                                    }}
+                                    disabled={!canExpandModulePanel}
+                                >
                                     <Text style={[styles.moduleLabel, { color: theme.text }]}>{module.label}</Text>
                                     <Text style={{ color: theme.textSecondary, fontSize: 12 }}>{module.desc}</Text>
                                 </TouchableOpacity>
@@ -2283,17 +2318,21 @@ export default function SetupHousehold() {
                                     onValueChange={() => toggleModule(module.id)}
                                     trackColor={{ false: theme.icon, true: theme.tint }}
                                 />
-                                <TouchableOpacity
-                                    onPress={() => toggleModulePanel(module.id)}
-                                    style={{ marginLeft: 8, padding: 4 }}
-                                    disabled={!activeModules[module.id]}
-                                >
-                                    <MaterialCommunityIcons
-                                        name={expandedModules[module.id] ? "chevron-up" : "chevron-down"}
-                                        size={22}
-                                        color={activeModules[module.id] ? theme.text : theme.icon}
-                                    />
-                                </TouchableOpacity>
+                                {canExpandModulePanel ? (
+                                    <TouchableOpacity
+                                        onPress={() => toggleModulePanel(module.id)}
+                                        style={{ marginLeft: 8, padding: 4 }}
+                                        disabled={!activeModules[module.id]}
+                                    >
+                                        <MaterialCommunityIcons
+                                            name={expandedModules[module.id] ? "chevron-up" : "chevron-down"}
+                                            size={22}
+                                            color={activeModules[module.id] ? theme.text : theme.icon}
+                                        />
+                                    </TouchableOpacity>
+                                ) : (
+                                    <View style={styles.mealChevronSpacer} />
+                                )}
                             </View>
 
                             {activeModules[module.id] && expandedModules[module.id] && module.id === "meals" && (
@@ -2306,21 +2345,25 @@ export default function SetupHousehold() {
                                                 onValueChange={(value) => updateMealOption("recipes", value)}
                                                 trackColor={{ false: theme.icon, true: theme.tint }}
                                             />
-                                            <TouchableOpacity
-                                                onPress={() => toggleMealSection("recipes")}
-                                                style={{ marginLeft: 8, padding: 4 }}
-                                                disabled={!mealOptions.recipes}
-                                            >
-                                                <MaterialCommunityIcons
-                                                    name={mealExpandedSections.recipes ? "chevron-up" : "chevron-down"}
-                                                    size={20}
-                                                    color={mealOptions.recipes ? theme.text : theme.icon}
-                                                />
-                                            </TouchableOpacity>
+                                            {showScopedModuleDetails ? (
+                                                <TouchableOpacity
+                                                    onPress={() => toggleMealSection("recipes")}
+                                                    style={{ marginLeft: 8, padding: 4 }}
+                                                    disabled={!mealOptions.recipes}
+                                                >
+                                                    <MaterialCommunityIcons
+                                                        name={mealExpandedSections.recipes ? "chevron-up" : "chevron-down"}
+                                                        size={20}
+                                                        color={mealOptions.recipes ? theme.text : theme.icon}
+                                                    />
+                                                </TouchableOpacity>
+                                            ) : (
+                                                <View style={styles.mealChevronSpacer} />
+                                            )}
                                         </View>
                                     </View>
 
-                                    {mealOptions.recipes && mealExpandedSections.recipes && (
+                                    {showScopedModuleDetails && mealOptions.recipes && mealExpandedSections.recipes && (
                                         <View style={[styles.mealSectionBox, { backgroundColor: theme.background }]}>
                                             <Text style={[styles.label, { color: theme.text, marginTop: 4 }]}>
                                                 Portions par défaut du foyer
@@ -2461,21 +2504,25 @@ export default function SetupHousehold() {
                                                 onValueChange={(value) => updateMealOption("polls", value)}
                                                 trackColor={{ false: theme.icon, true: theme.tint }}
                                             />
-                                            <TouchableOpacity
-                                                onPress={() => toggleMealSection("polls")}
-                                                style={{ marginLeft: 8, padding: 4 }}
-                                                disabled={!mealOptions.polls}
-                                            >
-                                                <MaterialCommunityIcons
-                                                    name={mealExpandedSections.polls ? "chevron-up" : "chevron-down"}
-                                                    size={20}
-                                                    color={mealOptions.polls ? theme.text : theme.icon}
-                                                />
-                                            </TouchableOpacity>
+                                            {showScopedModuleDetails ? (
+                                                <TouchableOpacity
+                                                    onPress={() => toggleMealSection("polls")}
+                                                    style={{ marginLeft: 8, padding: 4 }}
+                                                    disabled={!mealOptions.polls}
+                                                >
+                                                    <MaterialCommunityIcons
+                                                        name={mealExpandedSections.polls ? "chevron-up" : "chevron-down"}
+                                                        size={20}
+                                                        color={mealOptions.polls ? theme.text : theme.icon}
+                                                    />
+                                                </TouchableOpacity>
+                                            ) : (
+                                                <View style={styles.mealChevronSpacer} />
+                                            )}
                                         </View>
                                     </View>
 
-                                    {mealOptions.polls && mealExpandedSections.polls && (
+                                    {showScopedModuleDetails && mealOptions.polls && mealExpandedSections.polls && (
                                         <View style={[styles.mealSectionBox, { backgroundColor: theme.background }]}>
                                             <Text style={[styles.label, { color: theme.text, marginTop: 6 }]}>Jour du sondage</Text>
                                             <View style={styles.daysContainer}>
@@ -2552,7 +2599,7 @@ export default function SetupHousehold() {
                                 </View>
                             )}
 
-                            {activeModules[module.id] && expandedModules[module.id] && module.id === "tasks" && (
+                            {showScopedModuleDetails && activeModules[module.id] && expandedModules[module.id] && module.id === "tasks" && (
                                 <View style={styles.subConfigBox}>
                                     <View style={styles.switchRow}>
                                         <Text style={[styles.label, { color: theme.text }]}>Rappels actifs</Text>
@@ -2762,7 +2809,7 @@ export default function SetupHousehold() {
                                 </View>
                             )}
 
-                            {activeModules[module.id] && expandedModules[module.id] && module.id === "calendar" && (
+                            {showScopedModuleDetails && activeModules[module.id] && expandedModules[module.id] && module.id === "calendar" && (
                                 <View style={styles.subConfigBox}>
                                     <View style={styles.switchRow}>
                                         <Text style={[styles.label, { color: theme.text }]}>Vue partagée</Text>
@@ -2783,7 +2830,7 @@ export default function SetupHousehold() {
                                 </View>
                             )}
 
-                            {activeModules[module.id] && expandedModules[module.id] && module.id === "budget" && (
+                            {showScopedModuleDetails && activeModules[module.id] && expandedModules[module.id] && module.id === "budget" && (
                                 <View style={styles.subConfigBox}>
                                     {isEditMode ? (
                                         <>
@@ -2906,7 +2953,8 @@ export default function SetupHousehold() {
                                 </View>
                             )}
                         </View>
-                                ))}
+                                    );
+                                })}
                             </View>
                         ) : null}
                     </View>

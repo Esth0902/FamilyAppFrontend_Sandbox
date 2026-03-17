@@ -295,8 +295,8 @@ export default function RecipeDetailScreen() {
             <Stack.Screen options={{ headerShown: false }} />
 
             <View style={[styles.headerBar, { borderBottomColor: themeColors.icon }]}>
-                <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-                    <MaterialCommunityIcons name="arrow-left" size={24} color={themeColors.text} />
+                <TouchableOpacity onPress={() => router.back()} style={[styles.backBtn, { borderColor: themeColors.icon }]}>
+                    <MaterialCommunityIcons name="arrow-left" size={20} color={themeColors.tint} />
                 </TouchableOpacity>
                 <Text style={[styles.headerTitle, { color: themeColors.text }]} numberOfLines={1}>
                     {recipe.title}
@@ -590,7 +590,16 @@ const styles = StyleSheet.create({
         paddingHorizontal: 20,
         borderBottomWidth: 1,
     },
-    backBtn: { marginRight: 16 },
+    backBtn: {
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+        borderWidth: 1,
+        alignItems: "center",
+        justifyContent: "center",
+        marginRight: 12,
+        marginTop: 2,
+    },
     headerTitle: { fontSize: 18, fontWeight: '700', flex: 1 },
     section: { padding: 20 },
     sectionTitle: { fontSize: 16, fontWeight: 'bold', marginBottom: 10, textTransform: 'uppercase', letterSpacing: 1 },

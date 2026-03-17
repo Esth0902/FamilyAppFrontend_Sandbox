@@ -13,6 +13,7 @@ import {
 import { useRouter } from "expo-router";
 import * as SecureStore from "expo-secure-store";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Colors } from "@/constants/theme";
 import { apiFetch } from "@/src/api/client";
 import {
@@ -66,6 +67,7 @@ const getHouseholdNickname = (household: HouseholdMembership): string => {
 
 export default function SettingsScreen() {
     const router = useRouter();
+    const insets = useSafeAreaInsets();
     const colorScheme = useColorScheme();
     const theme = Colors[colorScheme ?? "light"];
 
@@ -550,9 +552,9 @@ export default function SettingsScreen() {
             style={[styles.container, { backgroundColor: theme.background }]}
             contentContainerStyle={styles.content}
         >
-            <View style={styles.header}>
-                <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-                    <MaterialCommunityIcons name="arrow-left" size={24} color={theme.textSecondary} />
+            <View style={[styles.header, { borderBottomColor: theme.icon, paddingTop: Math.max(insets.top, 12) }]}>
+                <TouchableOpacity onPress={() => router.back()} style={[styles.backButton, { borderColor: theme.icon }]}>
+                    <MaterialCommunityIcons name="arrow-left" size={20} color={theme.tint} />
                 </TouchableOpacity>
                 <Text style={[styles.title, { color: theme.text }]}>Paramètres utilisateur</Text>
                 <Text style={[styles.subtitle, { color: theme.textSecondary }]}>
@@ -800,23 +802,27 @@ const styles = StyleSheet.create({
     },
     content: {
         paddingHorizontal: 20,
-        paddingTop: 58,
+        paddingTop: 0,
         paddingBottom: 36,
         gap: 16,
     },
     header: {
+        borderBottomWidth: 1,
+        paddingBottom: 12,
         marginBottom: 4,
     },
     backButton: {
-        width: 34,
-        height: 34,
-        borderRadius: 17,
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+        borderWidth: 1,
         alignItems: "center",
         justifyContent: "center",
         marginBottom: 8,
+        marginTop: 2,
     },
     title: {
-        fontSize: 28,
+        fontSize: 18,
         fontWeight: "700",
         marginBottom: 6,
     },

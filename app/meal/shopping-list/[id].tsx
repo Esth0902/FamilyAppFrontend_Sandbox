@@ -2,6 +2,7 @@ import React, { useCallback, useMemo, useState } from "react";
 import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Colors } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
@@ -83,6 +84,7 @@ const normalizeIngredientKey = (ingredientId?: number | null, name?: string, uni
 
 export default function ShoppingListDetailScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { id } = useLocalSearchParams<{ id?: string }>();
   const colorScheme = useColorScheme();
   const theme = Colors[colorScheme ?? "light"];
@@ -398,9 +400,9 @@ export default function ShoppingListDetailScreen() {
     <View style={[styles.container, { backgroundColor: theme.background }]}>
       <Stack.Screen options={{ headerShown: false }} />
 
-      <View style={[styles.header, { borderBottomColor: theme.icon }]}>
-        <TouchableOpacity onPress={() => router.replace("/meal/shopping-list")}>
-          <MaterialCommunityIcons name="arrow-left" size={24} color={theme.text} />
+      <View style={[styles.header, { borderBottomColor: theme.icon, paddingTop: Math.max(insets.top, 12) }]}>
+        <TouchableOpacity onPress={() => router.replace("/meal/shopping-list")} style={[styles.backBtn, { borderColor: theme.icon }]}>
+          <MaterialCommunityIcons name="arrow-left" size={20} color={theme.tint} />
         </TouchableOpacity>
         <Text style={[styles.title, { color: theme.text }]}>{listTitle}</Text>
       </View>
@@ -590,13 +592,22 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
   header: {
-    height: 60,
-    marginTop: 28,
+    minHeight: 60,
     paddingHorizontal: 20,
+    paddingBottom: 8,
     borderBottomWidth: 1,
     flexDirection: "row",
     alignItems: "center",
     gap: 12,
+  },
+  backBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 2,
   },
   title: { fontSize: 18, fontWeight: "700" },
   content: { padding: 16, paddingBottom: 40, gap: 12 },

@@ -11,6 +11,7 @@ import {
 } from "react-native";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Colors } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
@@ -256,6 +257,7 @@ const isTaskModuleKey = (value: unknown): value is TaskModuleKey =>
 
 export default function TasksScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const params = useLocalSearchParams<{ module?: string | string[] }>();
   const colorScheme = useColorScheme();
   const theme = Colors[colorScheme ?? "light"];
@@ -1243,7 +1245,7 @@ export default function TasksScreen() {
 
   return (
     <ScrollView keyboardShouldPersistTaps="handled" style={[styles.container, { backgroundColor: theme.background }]} contentContainerStyle={styles.content}>
-      <View style={styles.header}>
+      <View style={[styles.header, { borderBottomColor: theme.icon, paddingTop: Math.max(insets.top, 12) }]}>
         <View style={styles.headerRow}>
           <TouchableOpacity
             onPress={() => router.replace("/(tabs)/tasks")}
@@ -2274,7 +2276,7 @@ const styles = StyleSheet.create({
   content: {
     paddingBottom: 36,
     paddingHorizontal: 16,
-    paddingTop: 56,
+    paddingTop: 0,
     gap: 12,
   },
   center: {
@@ -2283,6 +2285,8 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   header: {
+    borderBottomWidth: 1,
+    paddingBottom: 12,
     marginBottom: 4,
   },
   headerRow: {
@@ -2291,7 +2295,7 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   headerTitle: {
-    fontSize: 26,
+    fontSize: 18,
     fontWeight: "700",
   },
   headerSubtitle: {
