@@ -10,8 +10,9 @@ import { Colors } from "@/constants/theme";
 import { apiFetch } from "@/src/api/client";
 import { AppErrorBoundary } from "@/src/components/app-error-boundary";
 import { AppAlertHost } from "@/src/components/app-alert-host";
+import { resolveNotificationNavigationTarget, toPositiveInt } from "@/src/notifications/navigation";
 import { subscribeToUserRealtime } from "@/src/realtime/client";
-import { clearStoredUser, getStoredUser, persistStoredUser, setStoredUserCache } from "@/src/session/user-cache";
+import { clearStoredUser, getStoredUser, persistStoredUser, setStoredUserCache, switchStoredHousehold } from "@/src/session/user-cache";
 import { installAppAlertInterceptor } from "@/src/utils/app-alert";
 import { installIosTextScale } from "@/src/ui/ios-text-scale";
 
@@ -40,6 +41,7 @@ installIosTextScale();
 export default function RootLayout() {
     const [isMounted, setIsMounted] = useState(false);
     const notifiedNotificationIdsRef = useRef<Set<number>>(new Set());
+    const handledNotificationPressIdsRef = useRef<Set<number>>(new Set());
     const router = useRouter();
     const segments = useSegments() as string[];
     const currentSegment = segments[0] ?? "";
@@ -56,6 +58,7 @@ export default function RootLayout() {
         let isCancelled = false;
         let timer: ReturnType<typeof setInterval> | null = null;
         let unsubscribeUserRealtime: (() => void) | null = null;
+        let notificationResponseSubscription: { remove: () => void } | null = null;
 
         const bootstrapNotifications = async () => {
             try {
@@ -90,6 +93,78 @@ export default function RootLayout() {
                         });
                     } else {
                         Notifications = null;
+                    }
+                }
+
+                const openNotificationFromData = async (rawData: Record<string, unknown>) => {
+                    const notificationId = toPositiveInt(rawData.notification_id ?? rawData.id);
+                    if (notificationId && handledNotificationPressIdsRef.current.has(notificationId)) {
+                        return;
+                    }
+
+                    if (notificationId) {
+                        handledNotificationPressIdsRef.current.add(notificationId);
+                    }
+
+                    let resolvedHouseholdId = toPositiveInt(rawData.household_id ?? rawData.householdId);
+                    let notificationType = String(rawData.notification_type ?? rawData.type ?? "").trim();
+
+                    if (notificationId && notificationType.length === 0) {
+                        try {
+                            const response = await apiFetch("/notifications/pending?all_households=1");
+                            const notifications = Array.isArray(response?.notifications) ? response.notifications : [];
+                            const matchedNotification = notifications.find(
+                                (notification) => Number(notification?.id ?? 0) === notificationId
+                            );
+
+                            if (matchedNotification) {
+                                notificationType = String(matchedNotification?.type ?? "").trim();
+                                if (!resolvedHouseholdId) {
+                                    resolvedHouseholdId = toPositiveInt(
+                                        matchedNotification?.household_id
+                                            ?? (matchedNotification?.data as Record<string, unknown> | null)?.household_id
+                                    );
+                                }
+                            }
+                        } catch (error) {
+                            console.error("Erreur récupération type notification:", error);
+                        }
+                    }
+
+                    if (resolvedHouseholdId) {
+                        try {
+                            await switchStoredHousehold(resolvedHouseholdId);
+                        } catch (error) {
+                            console.error("Erreur switch foyer depuis notification:", error);
+                        }
+                    }
+
+                    const target = resolveNotificationNavigationTarget(notificationType);
+                    router.push(target);
+                };
+
+                if (Notifications) {
+                    const onNotificationResponse = (
+                        response: { notification?: { request?: { content?: { data?: unknown } } } } | null
+                    ) => {
+                        const rawData = (
+                            response?.notification?.request?.content?.data ?? {}
+                        ) as Record<string, unknown>;
+
+                        if (!rawData || typeof rawData !== "object") {
+                            return;
+                        }
+
+                        void openNotificationFromData(rawData);
+                    };
+
+                    notificationResponseSubscription = Notifications.addNotificationResponseReceivedListener(
+                        onNotificationResponse
+                    );
+
+                    const lastResponse = await Notifications.getLastNotificationResponseAsync();
+                    if (lastResponse) {
+                        onNotificationResponse(lastResponse as { notification?: { request?: { content?: { data?: unknown } } } });
                     }
                 }
 
@@ -137,6 +212,7 @@ export default function RootLayout() {
 
                             const notificationType = String(notification?.type ?? "");
                             const data = (notification?.data ?? {}) as Record<string, unknown>;
+                            const householdId = toPositiveInt(notification?.household_id ?? data.household_id);
                             const inviterName = String(data.inviter_name ?? "").trim() || "Un parent";
                             const householdName = String(data.household_name ?? "").trim() || "ce foyer";
                             const requesterName = String(data.requester_name ?? data.requester_household_name ?? "").trim() || "Un foyer";
@@ -153,7 +229,12 @@ export default function RootLayout() {
                                 notificationId,
                                 String(notification?.title ?? "FamilyFlow"),
                                 body,
-                                (notification?.data ?? {}) as Record<string, unknown>,
+                                {
+                                    ...data,
+                                    notification_id: notificationId,
+                                    notification_type: notificationType,
+                                    ...(householdId ? { household_id: householdId } : {}),
+                                },
                             );
                         }
                     } catch (error: any) {
@@ -175,9 +256,16 @@ export default function RootLayout() {
                         const notificationId = Number(payload.notification_id ?? 0);
                         const title = String(payload.title ?? "").trim();
                         const body = String(payload.body ?? "").trim();
+                        const householdId = toPositiveInt(payload.household_id ?? payload.householdId);
+                        const notificationType = String(payload.notification_type ?? payload.type ?? "").trim();
 
                         if (notificationId > 0 && title.length > 0 && body.length > 0) {
-                            void scheduleLocalNotification(notificationId, title, body, payload);
+                            void scheduleLocalNotification(notificationId, title, body, {
+                                ...payload,
+                                notification_id: notificationId,
+                                notification_type: notificationType,
+                                ...(householdId ? { household_id: householdId } : {}),
+                            });
                             return;
                         }
 
@@ -211,8 +299,11 @@ export default function RootLayout() {
             if (unsubscribeUserRealtime) {
                 unsubscribeUserRealtime();
             }
+            if (notificationResponseSubscription) {
+                notificationResponseSubscription.remove();
+            }
         };
-    }, [isMounted]);
+    }, [isMounted, router]);
 
     useEffect(() => {
         if (!isMounted) return;

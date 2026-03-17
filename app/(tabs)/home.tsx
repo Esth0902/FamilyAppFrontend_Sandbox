@@ -16,6 +16,11 @@ import { MaterialCommunityIcons } from "@expo/vector-icons";
 
 import { apiFetch } from "@/src/api/client";
 import { Colors } from "@/constants/theme";
+import {
+    resolveNotificationNavigationTarget,
+    toPositiveInt,
+    type NotificationNavigationTarget,
+} from "@/src/notifications/navigation";
 import { subscribeToUserRealtime } from "@/src/realtime/client";
 import {
     clearStoredUser,
@@ -41,15 +46,6 @@ type HouseholdItem = {
     role: "parent" | "enfant";
 };
 
-type NotificationNavigationTarget =
-    | "/(tabs)/budget"
-    | "/meal/poll"
-    | "/settings"
-    | {
-        pathname: "/tasks/manage";
-        params: { module: "planned" };
-    };
-
 const ACTION_REQUIRED_NOTIFICATION_TYPES = new Set([
     "household_invite",
     "household_link_request",
@@ -57,46 +53,6 @@ const ACTION_REQUIRED_NOTIFICATION_TYPES = new Set([
     "household_deletion_approval_request",
     "household_deletion_cancel_window",
 ]);
-
-const TASK_NOTIFICATION_TYPES = new Set([
-    "task_assigned",
-    "task_routine_assigned",
-    "task_done_validation_needed",
-    "task_validated",
-    "task_cancelled",
-    "task_reassigned",
-    "task_reassignment_invite",
-    "task_reassignment_invite_responded",
-]);
-
-const BUDGET_NOTIFICATION_TYPES = new Set([
-    "budget_payment_validated",
-    "budget_payment_due",
-    "budget_negative_due",
-    "budget_negative_carried_over",
-    "budget_advance_requested",
-    "budget_advance_reviewed",
-    "budget_reimbursement_requested",
-    "budget_reimbursement_reviewed",
-]);
-
-const POLL_NOTIFICATION_TYPES = new Set([
-    "poll_opened",
-    "poll_reminder",
-    "poll_closing_soon",
-    "poll_closed_too_late",
-    "poll_needs_validation",
-    "poll_validated",
-    "poll_open_prompt",
-]);
-
-const toPositiveInt = (value: unknown): number | null => {
-    const parsed = Number(value);
-    if (!Number.isFinite(parsed)) return null;
-
-    const normalized = Math.trunc(parsed);
-    return normalized > 0 ? normalized : null;
-};
 
 const normalizeHouseholds = (rawHouseholds: unknown): HouseholdItem[] => {
     if (!Array.isArray(rawHouseholds)) {
@@ -220,30 +176,7 @@ const formatDueDate = (rawIsoDate: unknown): string => {
 const getNotificationNavigationTarget = (
     notification: PendingNotification
 ): NotificationNavigationTarget | null => {
-    const type = notification.type;
-
-    if (TASK_NOTIFICATION_TYPES.has(type)) {
-        return { pathname: "/tasks/manage", params: { module: "planned" } };
-    }
-
-    if (BUDGET_NOTIFICATION_TYPES.has(type)) {
-        return "/(tabs)/budget";
-    }
-
-    if (POLL_NOTIFICATION_TYPES.has(type)) {
-        return "/meal/poll";
-    }
-
-    if (
-        type === "household_invite"
-        || type === "household_invite_responded"
-        || type === "household_link_request"
-        || type === "household_link_request_responded"
-    ) {
-        return "/settings";
-    }
-
-    return null;
+    return resolveNotificationNavigationTarget(notification.type);
 };
 
 export default function ConnectedHome() {
