@@ -195,11 +195,12 @@ const weekLabelFromStart = (weekStart: Date) => {
   return `Semaine du ${start} au ${end}`;
 };
 
-const weekStartIsoFromIsoDate = (isoDate: string) => {
+const weekStartIsoFromIsoDate = (isoDate: string, startDayIso: number = 1) => {
+  const safeStartDay = Number.isInteger(startDayIso) && startDayIso >= 1 && startDayIso <= 7 ? startDayIso : 1;
   if (!isValidIsoDate(isoDate)) {
-    return toIsoDate(weekStartFromDate(new Date()));
+    return toIsoDate(weekStartFromDateWithIsoDay(new Date(), safeStartDay));
   }
-  return toIsoDate(weekStartFromDate(parseIsoDate(isoDate)));
+  return toIsoDate(weekStartFromDateWithIsoDay(parseIsoDate(isoDate), safeStartDay));
 };
 
 const normalizeRecurrenceDays = (days: number[] | undefined) => {
@@ -385,8 +386,8 @@ export default function TasksScreen() {
     setWeekStart(weekStartFromDateWithIsoDay(new Date(), plannedWeekStartDay));
   }, [plannedWeekStartDay]);
   const interHouseholdWeekStartIso = useMemo(
-    () => weekStartIsoFromIsoDate(templateInterHouseholdWeekStart),
-    [templateInterHouseholdWeekStart]
+    () => weekStartIsoFromIsoDate(templateInterHouseholdWeekStart, plannedWeekStartDay),
+    [plannedWeekStartDay, templateInterHouseholdWeekStart]
   );
   const interHouseholdWeekLabel = useMemo(
     () => weekLabelFromStart(parseIsoDate(interHouseholdWeekStartIso)),
@@ -394,19 +395,19 @@ export default function TasksScreen() {
   );
   const goToPreviousInterHouseholdWeek = useCallback(() => {
     setTemplateInterHouseholdWeekStart((prev) => {
-      const weekStart = parseIsoDate(weekStartIsoFromIsoDate(prev));
+      const weekStart = parseIsoDate(weekStartIsoFromIsoDate(prev, plannedWeekStartDay));
       return toIsoDate(addDays(weekStart, -7));
     });
-  }, []);
+  }, [plannedWeekStartDay]);
   const goToNextInterHouseholdWeek = useCallback(() => {
     setTemplateInterHouseholdWeekStart((prev) => {
-      const weekStart = parseIsoDate(weekStartIsoFromIsoDate(prev));
+      const weekStart = parseIsoDate(weekStartIsoFromIsoDate(prev, plannedWeekStartDay));
       return toIsoDate(addDays(weekStart, 7));
     });
-  }, []);
+  }, [plannedWeekStartDay]);
   const goToCurrentInterHouseholdWeek = useCallback(() => {
-    setTemplateInterHouseholdWeekStart(toIsoDate(weekStartFromDate(new Date())));
-  }, []);
+    setTemplateInterHouseholdWeekStart(toIsoDate(weekStartFromDateWithIsoDay(new Date(), plannedWeekStartDay)));
+  }, [plannedWeekStartDay]);
   const yearOptions = useMemo(() => {
     const currentYear = new Date().getFullYear();
     return Array.from({ length: 11 }, (_, index) => currentYear - 5 + index);
@@ -742,8 +743,12 @@ export default function TasksScreen() {
       return;
     }
 
-    setTemplateStartDate(`${templateStartDateWheelYear}-${pad(templateStartDateWheelMonth)}-${pad(normalizedDay)}`);
-  }, [templateStartDateWheelDay, templateStartDateWheelMonth, templateStartDateWheelVisible, templateStartDateWheelYear]);
+    const nextIsoDate = `${templateStartDateWheelYear}-${pad(templateStartDateWheelMonth)}-${pad(normalizedDay)}`;
+    setTemplateStartDate(nextIsoDate);
+    if (templateHasEndDate) {
+      setTemplateEndDate((prev) => (prev < nextIsoDate ? nextIsoDate : prev));
+    }
+  }, [templateHasEndDate, templateStartDateWheelDay, templateStartDateWheelMonth, templateStartDateWheelVisible, templateStartDateWheelYear]);
 
   const openTemplateEndDateWheel = () => {
     if (templateEndDateWheelVisible) {
@@ -789,8 +794,23 @@ export default function TasksScreen() {
       return;
     }
 
-    setTemplateEndDate(`${templateEndDateWheelYear}-${pad(templateEndDateWheelMonth)}-${pad(normalizedDay)}`);
-  }, [templateEndDateWheelDay, templateEndDateWheelMonth, templateEndDateWheelVisible, templateEndDateWheelYear]);
+    const nextIsoDate = `${templateEndDateWheelYear}-${pad(templateEndDateWheelMonth)}-${pad(normalizedDay)}`;
+    setTemplateEndDate(nextIsoDate < templateStartDate ? templateStartDate : nextIsoDate);
+  }, [templateEndDateWheelDay, templateEndDateWheelMonth, templateEndDateWheelVisible, templateEndDateWheelYear, templateStartDate]);
+
+  useEffect(() => {
+    if (!templateHasEndDate) {
+      return;
+    }
+
+    if (!isValidIsoDate(templateStartDate) || !isValidIsoDate(templateEndDate)) {
+      return;
+    }
+
+    if (templateEndDate < templateStartDate) {
+      setTemplateEndDate(templateStartDate);
+    }
+  }, [templateEndDate, templateHasEndDate, templateStartDate]);
 
   const visibleInstances = useMemo(() => {
     if (currentUserRole === "parent") {
@@ -878,7 +898,7 @@ export default function TasksScreen() {
     setTemplateInterHouseholdAlternating((prev) => {
       const next = !prev;
       if (next) {
-        setTemplateInterHouseholdWeekStart((current) => weekStartIsoFromIsoDate(current));
+        setTemplateInterHouseholdWeekStart((current) => weekStartIsoFromIsoDate(current, plannedWeekStartDay));
       }
       return next;
     });
@@ -898,7 +918,7 @@ export default function TasksScreen() {
     setTemplateAssigneeUserIds([]);
     setTemplateRotationUserIds([]);
     setTemplateInterHouseholdAlternating(false);
-    setTemplateInterHouseholdWeekStart(toIsoDate(weekStartFromDate(new Date())));
+    setTemplateInterHouseholdWeekStart(toIsoDate(weekStartFromDateWithIsoDay(new Date(), plannedWeekStartDay)));
     setTemplateStartDateWheelVisible(false);
     setTemplateEndDateWheelVisible(false);
   };
@@ -941,8 +961,9 @@ export default function TasksScreen() {
       weekStartIsoFromIsoDate(
         typeof template.inter_household_week_start === "string" && template.inter_household_week_start.length > 0
           ? template.inter_household_week_start
-          : toIsoDate(weekStartFromDate(new Date()))
-      )
+          : toIsoDate(weekStartFromDateWithIsoDay(new Date(), plannedWeekStartDay)),
+        plannedWeekStartDay
+      ),
     );
     setTemplateStartDateWheelVisible(false);
     setTemplateEndDateWheelVisible(false);
@@ -1244,8 +1265,8 @@ export default function TasksScreen() {
   }
 
   return (
-    <ScrollView keyboardShouldPersistTaps="handled" style={[styles.container, { backgroundColor: theme.background }]} contentContainerStyle={styles.content}>
-      <View style={[styles.header, { borderBottomColor: theme.icon, paddingTop: Math.max(insets.top, 12) }]}>
+    <ScrollView keyboardShouldPersistTaps="handled" stickyHeaderIndices={[0]} style={[styles.container, { backgroundColor: theme.background }]} contentContainerStyle={styles.content}>
+      <View style={[styles.header, { borderBottomColor: theme.icon, paddingTop: Math.max(insets.top, 12), backgroundColor: theme.background }]}>
         <View style={styles.headerRow}>
           <TouchableOpacity
             onPress={() => router.replace("/(tabs)/tasks")}
@@ -1381,7 +1402,7 @@ export default function TasksScreen() {
                         ) : null}
                         {template.is_inter_household_alternating ? (
                           <Text style={{ color: theme.textSecondary, fontSize: 12 }}>
-                            {`Alternance inter-foyer: ${weekLabelFromStart(parseIsoDate(weekStartIsoFromIsoDate(template.inter_household_week_start ?? "")))}`}
+                            {`Alternance inter-foyer: ${weekLabelFromStart(parseIsoDate(weekStartIsoFromIsoDate(template.inter_household_week_start ?? "", plannedWeekStartDay)))}`}
                           </Text>
                         ) : null}
                       </View>
@@ -1613,6 +1634,14 @@ export default function TasksScreen() {
                               const next = !prev;
                               if (!next) {
                                 setTemplateEndDateWheelVisible(false);
+                              } else {
+                                const fallbackStartDate = isValidIsoDate(templateStartDate) ? templateStartDate : todayIso;
+                                setTemplateEndDate((current) => {
+                                  if (!isValidIsoDate(current) || current < fallbackStartDate) {
+                                    return fallbackStartDate;
+                                  }
+                                  return current;
+                                });
                               }
                               return next;
                             });

@@ -87,8 +87,8 @@ export default function BudgetMyPocketMoneyScreen() {
   }
 
   return (
-    <ScrollView style={[styles.container, { backgroundColor: theme.background }]} contentContainerStyle={styles.content}>
-      <View style={[styles.headerRow, { borderBottomColor: theme.icon, paddingTop: Math.max(insets.top, 12) }]}>
+    <ScrollView stickyHeaderIndices={[0]} style={[styles.container, { backgroundColor: theme.background }]} contentContainerStyle={styles.content}>
+      <View style={[styles.headerRow, { borderBottomColor: theme.icon, paddingTop: Math.max(insets.top, 12), backgroundColor: theme.background }]}>
         <TouchableOpacity onPress={() => router.replace("/(tabs)/budget")} style={[styles.backBtn, { borderColor: theme.icon }]}>
           <MaterialCommunityIcons name="arrow-left" size={20} color={theme.tint} />
         </TouchableOpacity>

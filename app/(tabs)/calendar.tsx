@@ -159,6 +159,7 @@ type TaskBoardPayload = {
 };
 
 type CreateEntryType = "event" | "meal_plan" | "task";
+type DateWheelTarget = "event_start" | "event_end" | "task_start" | "task_end" | "meal_date";
 type MealPresenceStatus = "present" | "not_home" | "later";
 type EventParticipationStatus = "participate" | "not_participate";
 type ReasonAction =
@@ -411,7 +412,7 @@ export default function CalendarScreen() {
   const [shareWithOtherHousehold, setShareWithOtherHousehold] = useState(false);
   const [createEntryType, setCreateEntryType] = useState<CreateEntryType>("event");
   const [dateWheelVisible, setDateWheelVisible] = useState(false);
-  const [dateWheelTarget, setDateWheelTarget] = useState<"start" | "end">("start");
+  const [dateWheelTarget, setDateWheelTarget] = useState<DateWheelTarget>("event_start");
   const [dateWheelYear, setDateWheelYear] = useState(new Date().getFullYear());
   const [dateWheelMonth, setDateWheelMonth] = useState(new Date().getMonth() + 1);
   const [dateWheelDay, setDateWheelDay] = useState(new Date().getDate());
@@ -549,13 +550,19 @@ export default function CalendarScreen() {
     setDateWheelDay((prev) => clamp(prev, 1, maxDay));
   }, [dayOptions.length]);
 
-  const openDateWheel = (target: "start" | "end") => {
+  const openDateWheel = (target: DateWheelTarget) => {
     if (dateWheelVisible && dateWheelTarget === target) {
       setDateWheelVisible(false);
       return;
     }
 
-    const sourceIsoDate = target === "start" ? eventDate : eventEndDate;
+    const sourceIsoDate = (() => {
+      if (target === "event_start") return eventDate;
+      if (target === "event_end") return eventEndDate;
+      if (target === "task_start") return taskDueDate;
+      if (target === "task_end") return taskEndDate;
+      return mealPlanDate;
+    })();
     const sourceDate = parseIsoDate(sourceIsoDate);
     const safeDate = Number.isNaN(sourceDate.getTime()) ? new Date() : sourceDate;
     const year = safeDate.getFullYear();
@@ -624,15 +631,29 @@ export default function CalendarScreen() {
     }
 
     const nextIsoDate = `${dateWheelYear}-${pad(dateWheelMonth)}-${pad(normalizedDay)}`;
-    if (dateWheelTarget === "start") {
+    if (dateWheelTarget === "event_start") {
       setEventDate(nextIsoDate);
       setEventEndDate((prev) => (prev < nextIsoDate ? nextIsoDate : prev));
       return;
     }
+    if (dateWheelTarget === "event_end") {
+      setEventEndDate(nextIsoDate);
+      setEventDate((prev) => (prev > nextIsoDate ? nextIsoDate : prev));
+      return;
+    }
+    if (dateWheelTarget === "task_start") {
+      setTaskDueDate(nextIsoDate);
+      setTaskEndDate((prev) => (prev < nextIsoDate ? nextIsoDate : prev));
+      return;
+    }
+    if (dateWheelTarget === "task_end") {
+      const normalizedTaskEndDate = nextIsoDate < taskDueDate ? taskDueDate : nextIsoDate;
+      setTaskEndDate(normalizedTaskEndDate);
+      return;
+    }
 
-    setEventEndDate(nextIsoDate);
-    setEventDate((prev) => (prev > nextIsoDate ? nextIsoDate : prev));
-  }, [dateWheelDay, dateWheelMonth, dateWheelTarget, dateWheelVisible, dateWheelYear]);
+    setMealPlanDate(nextIsoDate);
+  }, [dateWheelDay, dateWheelMonth, dateWheelTarget, dateWheelVisible, dateWheelYear, taskDueDate]);
 
   useEffect(() => {
     if (!timeWheelVisible) {
@@ -649,8 +670,9 @@ export default function CalendarScreen() {
   }, [timeWheelHour, timeWheelMinute, timeWheelTarget, timeWheelVisible]);
 
 
-  const loadBoard = useCallback(async (options?: { silent?: boolean }) => {
+  const loadBoard = useCallback(async (options?: { silent?: boolean; bypassCache?: boolean }) => {
     const silent = options?.silent ?? hasLoadedOnceRef.current;
+    const bypassCache = options?.bypassCache === true;
     if (!silent) {
       setLoading(true);
     }
@@ -658,11 +680,17 @@ export default function CalendarScreen() {
     try {
       const recipesRequest = recipesLoadedRef.current
         ? Promise.resolve<RecipeOption[] | null>(null)
-        : (apiFetch("/recipes") as Promise<RecipeOption[]>);
+        : (apiFetch("/recipes", { cacheTtlMs: 120_000, bypassCache }) as Promise<RecipeOption[]>);
 
       const [calendarResult, tasksResult, recipesResult] = await Promise.allSettled([
-        apiFetch(`/calendar/board?from=${calendarRange.from}&to=${calendarRange.to}`) as Promise<CalendarBoardPayload>,
-        apiFetch(`/tasks/board?from=${calendarRange.from}&to=${calendarRange.to}`) as Promise<TaskBoardPayload>,
+        apiFetch(`/calendar/board?from=${calendarRange.from}&to=${calendarRange.to}`, {
+          cacheTtlMs: 12_000,
+          bypassCache,
+        }) as Promise<CalendarBoardPayload>,
+        apiFetch(`/tasks/board?from=${calendarRange.from}&to=${calendarRange.to}`, {
+          cacheTtlMs: 12_000,
+          bypassCache,
+        }) as Promise<TaskBoardPayload>,
         recipesRequest,
       ]);
 
@@ -739,7 +767,7 @@ export default function CalendarScreen() {
         if (module !== "calendar" && module !== "tasks") {
           return;
         }
-        void loadBoard({ silent: true });
+        void loadBoard({ silent: true, bypassCache: true });
       });
 
       if (!active) {
@@ -781,7 +809,7 @@ export default function CalendarScreen() {
           return;
         }
 
-        void loadBoard({ silent: true });
+        void loadBoard({ silent: true, bypassCache: true });
       });
 
       if (!active) {
@@ -962,6 +990,136 @@ export default function CalendarScreen() {
         : tasksEnabled
           && canManageTaskInstances
           && (taskCurrentUserRole !== "parent" || taskAssigneeId !== null);
+  const dateWheelTitle = useMemo(() => {
+    if (dateWheelTarget === "event_start" || dateWheelTarget === "task_start") {
+      return "Choisir la date de début";
+    }
+    if (dateWheelTarget === "event_end" || dateWheelTarget === "task_end") {
+      return "Choisir la date de fin";
+    }
+    return "Choisir la date";
+  }, [dateWheelTarget]);
+  const renderDateWheelPanel = () => (
+    <View style={[styles.inlineWheelPanel, { borderColor: theme.icon, backgroundColor: theme.background }]}>
+      <Text style={[styles.label, { color: theme.text }]}>{dateWheelTitle}</Text>
+
+      <View style={styles.wheelRow}>
+        <View style={styles.wheelColumn}>
+          <ScrollView keyboardShouldPersistTaps="handled"
+            ref={dayWheelRef}
+            nestedScrollEnabled
+            showsVerticalScrollIndicator={false}
+            snapToInterval={WHEEL_ITEM_HEIGHT}
+            decelerationRate="fast"
+            scrollEventThrottle={32}
+            contentContainerStyle={styles.wheelContentContainer}
+            onScroll={(event) => {
+              const index = wheelIndexFromOffset(event.nativeEvent.contentOffset.y, dayOptions.length);
+              if (index === dateWheelDayIndexRef.current) {
+                return;
+              }
+              dateWheelDayIndexRef.current = index;
+              setDateWheelDay(dayOptions[index]);
+            }}
+          >
+            {dayOptions.map((value) => (
+              <View key={`wheel-day-${value}`} style={styles.wheelItem}>
+                <Text
+                  style={[
+                    styles.wheelItemText,
+                    { color: dateWheelDay === value ? theme.text : theme.textSecondary },
+                    dateWheelDay === value && styles.wheelItemTextSelected,
+                  ]}
+                >
+                  {`${weekDayShortLabel(dateWheelYear, dateWheelMonth, value)} ${pad(value)}`}
+                </Text>
+              </View>
+            ))}
+          </ScrollView>
+          <View
+            pointerEvents="none"
+            style={[styles.wheelSelectionOverlay, { borderColor: theme.icon, backgroundColor: `${theme.tint}14` }]}
+          />
+        </View>
+
+        <View style={styles.wheelColumn}>
+          <ScrollView keyboardShouldPersistTaps="handled"
+            ref={monthWheelRef}
+            nestedScrollEnabled
+            showsVerticalScrollIndicator={false}
+            snapToInterval={WHEEL_ITEM_HEIGHT}
+            decelerationRate="fast"
+            scrollEventThrottle={32}
+            contentContainerStyle={styles.wheelContentContainer}
+            onScroll={(event) => {
+              const index = wheelIndexFromOffset(event.nativeEvent.contentOffset.y, monthOptions.length);
+              if (index === dateWheelMonthIndexRef.current) {
+                return;
+              }
+              dateWheelMonthIndexRef.current = index;
+              setDateWheelMonth(monthOptions[index]);
+            }}
+          >
+            {monthOptions.map((value) => (
+              <View key={`wheel-month-${value}`} style={styles.wheelItem}>
+                <Text
+                  style={[
+                    styles.wheelItemText,
+                    { color: dateWheelMonth === value ? theme.text : theme.textSecondary },
+                    dateWheelMonth === value && styles.wheelItemTextSelected,
+                  ]}
+                >
+                  {MONTH_LABELS[value - 1]}
+                </Text>
+              </View>
+            ))}
+          </ScrollView>
+          <View
+            pointerEvents="none"
+            style={[styles.wheelSelectionOverlay, { borderColor: theme.icon, backgroundColor: `${theme.tint}14` }]}
+          />
+        </View>
+
+        <View style={styles.wheelColumn}>
+          <ScrollView keyboardShouldPersistTaps="handled"
+            ref={yearWheelRef}
+            nestedScrollEnabled
+            showsVerticalScrollIndicator={false}
+            snapToInterval={WHEEL_ITEM_HEIGHT}
+            decelerationRate="fast"
+            scrollEventThrottle={32}
+            contentContainerStyle={styles.wheelContentContainer}
+            onScroll={(event) => {
+              const index = wheelIndexFromOffset(event.nativeEvent.contentOffset.y, yearOptions.length);
+              if (index === dateWheelYearIndexRef.current) {
+                return;
+              }
+              dateWheelYearIndexRef.current = index;
+              setDateWheelYear(yearOptions[index]);
+            }}
+          >
+            {yearOptions.map((value) => (
+              <View key={`wheel-year-${value}`} style={styles.wheelItem}>
+                <Text
+                  style={[
+                    styles.wheelItemText,
+                    { color: dateWheelYear === value ? theme.text : theme.textSecondary },
+                    dateWheelYear === value && styles.wheelItemTextSelected,
+                  ]}
+                >
+                  {value}
+                </Text>
+              </View>
+            ))}
+          </ScrollView>
+          <View
+            pointerEvents="none"
+            style={[styles.wheelSelectionOverlay, { borderColor: theme.icon, backgroundColor: `${theme.tint}14` }]}
+          />
+        </View>
+      </View>
+    </View>
+  );
 
   const openNewEventModal = (targetDate?: string) => {
     const eventTargetDate = targetDate ?? selectedDate;
@@ -978,6 +1136,7 @@ export default function CalendarScreen() {
     setTaskTitle("");
     setTaskDescription("");
     setTaskDueDate(eventTargetDate);
+    setTaskEndDate(eventTargetDate);
     setSelectedDate(eventTargetDate);
     setDayProgramModalVisible(false);
     setEventModalVisible(true);
@@ -1009,6 +1168,7 @@ export default function CalendarScreen() {
 
     if (value === "task") {
       setTaskDueDate(eventDate);
+      setTaskEndDate((prev) => (prev < eventDate ? eventDate : prev));
     }
   };
 
@@ -2441,7 +2601,7 @@ export default function CalendarScreen() {
                   />
                   <View style={styles.timeRow}>
                     <TouchableOpacity
-                      onPress={() => openDateWheel("start")}
+                      onPress={() => openDateWheel("event_start")}
                       style={[styles.pickerFieldBtn, styles.dateInput, { borderColor: theme.icon, backgroundColor: theme.background }]}
                       disabled={saving}
                     >
@@ -2460,7 +2620,7 @@ export default function CalendarScreen() {
 
                   <View style={styles.timeRow}>
                     <TouchableOpacity
-                      onPress={() => openDateWheel("end")}
+                      onPress={() => openDateWheel("event_end")}
                       style={[styles.pickerFieldBtn, styles.dateInput, { borderColor: theme.icon, backgroundColor: theme.background }]}
                       disabled={saving}
                     >
@@ -2477,130 +2637,7 @@ export default function CalendarScreen() {
                     </TouchableOpacity>
                   </View>
 
-                  {dateWheelVisible ? (
-                    <View style={[styles.inlineWheelPanel, { borderColor: theme.icon, backgroundColor: theme.background }]}>
-                      <Text style={[styles.label, { color: theme.text }]}>
-                        {dateWheelTarget === "start" ? "Choisir la date de début" : "Choisir la date de fin"}
-                      </Text>
-
-                      <View style={styles.wheelRow}>
-                        <View style={styles.wheelColumn}>
-                          <ScrollView keyboardShouldPersistTaps="handled"
-                            ref={dayWheelRef}
-                            nestedScrollEnabled
-                            showsVerticalScrollIndicator={false}
-                            snapToInterval={WHEEL_ITEM_HEIGHT}
-                            decelerationRate="fast"
-                            scrollEventThrottle={32}
-                            contentContainerStyle={styles.wheelContentContainer}
-                            onScroll={(event) => {
-                              const index = wheelIndexFromOffset(event.nativeEvent.contentOffset.y, dayOptions.length);
-                              if (index === dateWheelDayIndexRef.current) {
-                                return;
-                              }
-                              dateWheelDayIndexRef.current = index;
-                              setDateWheelDay(dayOptions[index]);
-                            }}
-                          >
-                            {dayOptions.map((value) => (
-                              <View key={`wheel-day-${value}`} style={styles.wheelItem}>
-                                <Text
-                                  style={[
-                                    styles.wheelItemText,
-                                    { color: dateWheelDay === value ? theme.text : theme.textSecondary },
-                                    dateWheelDay === value && styles.wheelItemTextSelected,
-                                  ]}
-                                >
-                                  {`${weekDayShortLabel(dateWheelYear, dateWheelMonth, value)} ${pad(value)}`}
-                                </Text>
-                              </View>
-                            ))}
-                          </ScrollView>
-                          <View
-                            pointerEvents="none"
-                            style={[styles.wheelSelectionOverlay, { borderColor: theme.icon, backgroundColor: `${theme.tint}14` }]}
-                          />
-                        </View>
-
-                        <View style={styles.wheelColumn}>
-                          <ScrollView keyboardShouldPersistTaps="handled"
-                            ref={monthWheelRef}
-                            nestedScrollEnabled
-                            showsVerticalScrollIndicator={false}
-                            snapToInterval={WHEEL_ITEM_HEIGHT}
-                            decelerationRate="fast"
-                            scrollEventThrottle={32}
-                            contentContainerStyle={styles.wheelContentContainer}
-                            onScroll={(event) => {
-                              const index = wheelIndexFromOffset(event.nativeEvent.contentOffset.y, monthOptions.length);
-                              if (index === dateWheelMonthIndexRef.current) {
-                                return;
-                              }
-                              dateWheelMonthIndexRef.current = index;
-                              setDateWheelMonth(monthOptions[index]);
-                            }}
-                          >
-                            {monthOptions.map((value) => (
-                              <View key={`wheel-month-${value}`} style={styles.wheelItem}>
-                                <Text
-                                  style={[
-                                    styles.wheelItemText,
-                                    { color: dateWheelMonth === value ? theme.text : theme.textSecondary },
-                                    dateWheelMonth === value && styles.wheelItemTextSelected,
-                                  ]}
-                                >
-                                  {MONTH_LABELS[value - 1]}
-                                </Text>
-                              </View>
-                            ))}
-                          </ScrollView>
-                          <View
-                            pointerEvents="none"
-                            style={[styles.wheelSelectionOverlay, { borderColor: theme.icon, backgroundColor: `${theme.tint}14` }]}
-                          />
-                        </View>
-
-                        <View style={styles.wheelColumn}>
-                          <ScrollView keyboardShouldPersistTaps="handled"
-                            ref={yearWheelRef}
-                            nestedScrollEnabled
-                            showsVerticalScrollIndicator={false}
-                            snapToInterval={WHEEL_ITEM_HEIGHT}
-                            decelerationRate="fast"
-                            scrollEventThrottle={32}
-                            contentContainerStyle={styles.wheelContentContainer}
-                            onScroll={(event) => {
-                              const index = wheelIndexFromOffset(event.nativeEvent.contentOffset.y, yearOptions.length);
-                              if (index === dateWheelYearIndexRef.current) {
-                                return;
-                              }
-                              dateWheelYearIndexRef.current = index;
-                              setDateWheelYear(yearOptions[index]);
-                            }}
-                          >
-                            {yearOptions.map((value) => (
-                              <View key={`wheel-year-${value}`} style={styles.wheelItem}>
-                                <Text
-                                  style={[
-                                    styles.wheelItemText,
-                                    { color: dateWheelYear === value ? theme.text : theme.textSecondary },
-                                    dateWheelYear === value && styles.wheelItemTextSelected,
-                                  ]}
-                                >
-                                  {value}
-                                </Text>
-                              </View>
-                            ))}
-                          </ScrollView>
-                          <View
-                            pointerEvents="none"
-                            style={[styles.wheelSelectionOverlay, { borderColor: theme.icon, backgroundColor: `${theme.tint}14` }]}
-                          />
-                        </View>
-                      </View>
-
-                    </View>
-                  ) : null}
+                  {dateWheelVisible ? renderDateWheelPanel() : null}
 
                   {timeWheelVisible ? (
                     <View style={[styles.inlineWheelPanel, { borderColor: theme.icon, backgroundColor: theme.background }]}>
@@ -2756,13 +2793,16 @@ export default function CalendarScreen() {
                     </>
                   ) : createEntryType === "meal_plan" ? (
                     <>
-                      <TextInput
-                        style={[styles.input, { backgroundColor: theme.background, color: theme.text, borderColor: theme.icon }]}
-                        value={mealPlanDate}
-                        onChangeText={setMealPlanDate}
-                        placeholder="YYYY-MM-DD"
-                        placeholderTextColor={theme.textSecondary}
-                      />
+                      <Text style={[styles.label, { color: theme.text }]}>Date</Text>
+                      <TouchableOpacity
+                        onPress={() => openDateWheel("meal_date")}
+                        style={[styles.pickerFieldBtn, { borderColor: theme.icon, backgroundColor: theme.background }]}
+                        disabled={saving}
+                      >
+                        <MaterialCommunityIcons name="calendar-month-outline" size={16} color={theme.textSecondary} />
+                        <Text style={[styles.pickerFieldText, { color: theme.text }]}>{mealPlanDate}</Text>
+                      </TouchableOpacity>
+                      {dateWheelVisible && dateWheelTarget === "meal_date" ? renderDateWheelPanel() : null}
 
                       <Text style={[styles.label, { color: theme.text }]}>Moment du repas</Text>
                       <View style={styles.visibilityRow}>
@@ -2877,20 +2917,29 @@ export default function CalendarScreen() {
                         placeholderTextColor={theme.textSecondary}
                         multiline
                       />
-                      <TextInput
-                        style={[styles.input, { backgroundColor: theme.background, color: theme.text, borderColor: theme.icon }]}
-                        value={taskDueDate}
-                        onChangeText={setTaskDueDate}
-                        placeholder="Date d'échéance (YYYY-MM-DD)"
-                        placeholderTextColor={theme.textSecondary}
-                      />
-                      <TextInput
-                        style={[styles.input, { backgroundColor: theme.background, color: theme.text, borderColor: theme.icon }]}
-                        value={taskEndDate}
-                        onChangeText={setTaskEndDate}
-                        placeholder="Date de fin (YYYY-MM-DD)"
-                        placeholderTextColor={theme.textSecondary}
-                      />
+                      <Text style={[styles.label, { color: theme.text }]}>Date de début</Text>
+                      <TouchableOpacity
+                        onPress={() => openDateWheel("task_start")}
+                        style={[styles.pickerFieldBtn, { borderColor: theme.icon, backgroundColor: theme.background }]}
+                        disabled={saving}
+                      >
+                        <MaterialCommunityIcons name="calendar-month-outline" size={16} color={theme.textSecondary} />
+                        <Text style={[styles.pickerFieldText, { color: theme.text }]}>{taskDueDate}</Text>
+                      </TouchableOpacity>
+                      {dateWheelVisible && dateWheelTarget === "task_start" ? renderDateWheelPanel() : null}
+                      <Text style={[styles.label, { color: theme.text }]}>Date de fin</Text>
+                      <TouchableOpacity
+                        onPress={() => openDateWheel("task_end")}
+                        style={[styles.pickerFieldBtn, { borderColor: theme.icon, backgroundColor: theme.background }]}
+                        disabled={saving}
+                      >
+                        <MaterialCommunityIcons name="calendar-month-outline" size={16} color={theme.textSecondary} />
+                        <Text style={[styles.pickerFieldText, { color: theme.text }]}>{taskEndDate}</Text>
+                      </TouchableOpacity>
+                      {dateWheelVisible && dateWheelTarget === "task_end" ? renderDateWheelPanel() : null}
+                      <Text style={[styles.helperText, { color: theme.textSecondary }]}>
+                        La date de fin est automatiquement ajustée si elle est avant la date de début.
+                      </Text>
                       <Text style={[styles.label, { color: theme.text }]}>Attribuer à</Text>
                       {assignableTaskMembers.length > 0 ? (
                         <ScrollView keyboardShouldPersistTaps="handled" horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.recipePickerRow}>

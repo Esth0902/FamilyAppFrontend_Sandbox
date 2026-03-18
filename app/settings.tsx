@@ -549,10 +549,11 @@ export default function SettingsScreen() {
 
     return (
         <ScrollView keyboardShouldPersistTaps="handled"
+            stickyHeaderIndices={[0]}
             style={[styles.container, { backgroundColor: theme.background }]}
             contentContainerStyle={styles.content}
         >
-            <View style={[styles.header, { borderBottomColor: theme.icon, paddingTop: Math.max(insets.top, 12) }]}>
+            <View style={[styles.header, { borderBottomColor: theme.icon, paddingTop: Math.max(insets.top, 12), backgroundColor: theme.background }]}>
                 <TouchableOpacity onPress={() => router.back()} style={[styles.backButton, { borderColor: theme.icon }]}>
                     <MaterialCommunityIcons name="arrow-left" size={20} color={theme.tint} />
                 </TouchableOpacity>
