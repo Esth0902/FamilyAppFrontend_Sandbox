@@ -37,6 +37,7 @@ type MealPlanEntry = {
   date: string;
   meal_type: "matin" | "midi" | "soir";
   custom_title?: string | null;
+  recipes?: { id: number; title: string; type?: string | null }[];
   presence_overview?: {
     unanswered?: { id: number; name: string }[];
   } | null;
@@ -80,16 +81,26 @@ const formatDateTime = (iso: string): string => {
   });
 };
 
-const mealTypeLabel = (mealType: string): string => {
-  if (mealType === "matin") return "Matin";
-  if (mealType === "midi") return "Midi";
-  return "Soir";
-};
-
 const mealOrder = (mealType: string): number => {
   if (mealType === "matin") return 1;
   if (mealType === "midi") return 2;
   return 3;
+};
+
+const resolveMealTitle = (meal: MealPlanEntry): string => {
+  const firstRecipeTitle = Array.isArray(meal.recipes)
+    ? String(meal.recipes[0]?.title ?? "").trim()
+    : "";
+  if (firstRecipeTitle !== "") {
+    return firstRecipeTitle;
+  }
+
+  const customTitle = String(meal.custom_title ?? "").trim();
+  if (customTitle !== "") {
+    return customTitle;
+  }
+
+  return "Repas à définir";
 };
 
 export default function DashboardCalendarScreen() {
@@ -188,6 +199,7 @@ export default function DashboardCalendarScreen() {
       })
       .slice(0, 8);
   }, [meals]);
+  const compactCardBackground = colorScheme === "dark" ? `${theme.icon}22` : theme.background;
 
   if (loading) {
     return (
@@ -235,7 +247,10 @@ export default function DashboardCalendarScreen() {
             <View style={[styles.card, { backgroundColor: theme.card, borderColor: theme.icon }]}> 
               <Text style={[styles.title, { color: theme.text }]}>Prochains événements</Text>
               {upcomingEvents.length > 0 ? upcomingEvents.map((event) => (
-                <View key={`event-${event.id}`} style={[styles.detailRow, { borderColor: `${theme.icon}55` }]}> 
+                <View
+                  key={`event-${event.id}`}
+                  style={[styles.detailRow, { borderColor: `${theme.icon}55`, backgroundColor: compactCardBackground }]}
+                > 
                   <Text style={[styles.detailTitle, { color: theme.text }]}>{event.title}</Text>
                   <Text style={[styles.text, { color: theme.textSecondary }]}>Début: {formatDateTime(event.start_at)}</Text>
                   <Text style={[styles.text, { color: theme.textSecondary }]}>Fin: {formatDateTime(event.end_at)}</Text>
@@ -253,16 +268,15 @@ export default function DashboardCalendarScreen() {
             <View style={[styles.card, { backgroundColor: theme.card, borderColor: theme.icon }]}> 
               <Text style={[styles.title, { color: theme.text }]}>Prochains repas</Text>
               {upcomingMeals.length > 0 ? upcomingMeals.map((meal) => (
-                <View key={`meal-${meal.id}`} style={[styles.detailRow, { borderColor: `${theme.icon}55` }]}> 
+                <View
+                  key={`meal-${meal.id}`}
+                  style={[styles.detailRow, { borderColor: `${theme.icon}55`, backgroundColor: compactCardBackground }]}
+                > 
                   <Text style={[styles.detailTitle, { color: theme.text }]}>
-                    {meal.custom_title?.trim() || `Repas ${mealTypeLabel(meal.meal_type)}`}
+                    {resolveMealTitle(meal)}
                   </Text>
-                  <Text style={[styles.text, { color: theme.textSecondary }]}>Date: {formatDate(meal.date)} | {mealTypeLabel(meal.meal_type)}</Text>
-                  {isParent ? (
-                    <Text style={[styles.text, { color: theme.textSecondary }]}>Sans réponse: {meal.presence_overview?.unanswered?.length ?? 0}</Text>
-                  ) : (
-                    <Text style={[styles.text, { color: theme.textSecondary }]}>Ma présence: {meal.my_presence?.status ? "Confirmée" : "À confirmer"}</Text>
-                  )}
+                  <Text style={[styles.text, { color: theme.textSecondary }]}>Date: {formatDate(meal.date)}</Text>
+                  <Text style={[styles.text, { color: theme.textSecondary }]}>Sans réponse: {meal.presence_overview?.unanswered?.length ?? 0}</Text>
                 </View>
               )) : (
                 <Text style={[styles.text, { color: theme.textSecondary }]}>Aucun repas planifié.</Text>

@@ -82,13 +82,14 @@ export default function TabsLayout() {
     }, [segments]);
 
     const loadHouseholdModules = useCallback(
-        async (activeHouseholdId: number | null, options?: { forceRefresh?: boolean }) => {
+        async (activeHouseholdId: number | null, options?: { forceRefresh?: boolean; bypassCache?: boolean }) => {
             if (!activeHouseholdId) {
                 setHouseholdModules(DEFAULT_HOUSEHOLD_MODULES);
                 return;
             }
 
             const forceRefresh = options?.forceRefresh === true;
+            const bypassCache = options?.bypassCache === true;
             const cachedModules = modulesCacheRef.current[activeHouseholdId];
 
             if (cachedModules) {
@@ -99,7 +100,10 @@ export default function TabsLayout() {
             }
 
             try {
-                const response = await apiFetch("/households/config");
+                const response = await apiFetch("/households/config", {
+                    cacheTtlMs: 20_000,
+                    bypassCache,
+                });
                 const parsedModules = parseHouseholdModules(response);
                 modulesCacheRef.current[activeHouseholdId] = parsedModules;
                 setHouseholdModules(parsedModules);
@@ -140,7 +144,7 @@ export default function TabsLayout() {
                     return;
                 }
 
-                void loadHouseholdModules(householdId, { forceRefresh: true });
+                void loadHouseholdModules(householdId, { forceRefresh: true, bypassCache: true });
             });
         };
 

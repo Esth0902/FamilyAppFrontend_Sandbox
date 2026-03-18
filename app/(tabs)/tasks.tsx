@@ -34,6 +34,11 @@ type BoardPayload = {
   tasks_enabled: boolean;
   can_manage_templates: boolean;
   can_manage_instances: boolean;
+  settings?: {
+    alternating_custody_enabled?: boolean;
+    custody_change_day?: number;
+    custody_home_week_start?: string | null;
+  };
   current_user?: {
     id: number;
     role: "parent" | "enfant";
@@ -58,9 +63,43 @@ const isoWeekDayFromDate = (date: Date) => {
   return day === 0 ? 7 : day;
 };
 
-const weekStartFromDate = (date: Date) => {
+const weekStartFromDateWithIsoDay = (date: Date, startDayIso: number) => {
   const normalized = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-  return addDays(normalized, 1 - isoWeekDayFromDate(normalized));
+  const safeStartDay = Number.isInteger(startDayIso) && startDayIso >= 1 && startDayIso <= 7 ? startDayIso : 1;
+  return addDays(normalized, -((isoWeekDayFromDate(normalized) - safeStartDay + 7) % 7));
+};
+
+const toPositiveInt = (value: unknown): number | null => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return null;
+  }
+  return Math.trunc(parsed);
+};
+
+const normalizeIsoWeekDay = (value: unknown, fallback = 1): number => {
+  const parsed = Number(value);
+  if (Number.isInteger(parsed) && parsed >= 1 && parsed <= 7) {
+    return parsed;
+  }
+  return fallback;
+};
+
+const resolveIsoWeekDayFromIsoDate = (value: unknown): number | null => {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return null;
+  }
+  const parsed = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+  return isoWeekDayFromDate(parsed);
+};
+
+const isTodoStatus = (status: unknown): boolean => String(status ?? "").toLowerCase().includes("faire");
+const isDoneStatus = (status: unknown): boolean => {
+  const normalized = String(status ?? "").toLowerCase();
+  return normalized.includes("réalis") || normalized.includes("realis");
 };
 
 const isInstanceAssignedToUser = (
@@ -89,33 +128,59 @@ export default function TasksTabScreen() {
   const [canManageTemplates, setCanManageTemplates] = useState(false);
   const [canManageInstances, setCanManageInstances] = useState(false);
   const [currentUserRole, setCurrentUserRole] = useState<"parent" | "enfant">("enfant");
+  const [plannedWeekStartDay, setPlannedWeekStartDay] = useState<number>(1);
   const [stats, setStats] = useState({ todo: 0, done: 0, validated: 0 });
 
-  const loadBoard = useCallback(async (options?: { silent?: boolean }) => {
+  const loadBoard = useCallback(async (options?: { silent?: boolean; bypassCache?: boolean }) => {
     const silent = options?.silent ?? false;
+    const bypassCache = options?.bypassCache === true;
     if (!silent) {
       setLoading(true);
     }
     try {
-      const weekStart = weekStartFromDate(new Date());
+      const weekStart = weekStartFromDateWithIsoDay(new Date(), plannedWeekStartDay);
       const rangeFrom = toIsoDate(weekStart);
       const rangeTo = toIsoDate(addDays(weekStart, 6));
-      const payload = await apiFetch(`/tasks/board?from=${rangeFrom}&to=${rangeTo}`) as BoardPayload;
+      let payload = await apiFetch(`/tasks/board?from=${rangeFrom}&to=${rangeTo}`, {
+        cacheTtlMs: 12_000,
+        bypassCache,
+      }) as BoardPayload;
+
+      const isAlternatingCustodyEnabled = Boolean(payload?.settings?.alternating_custody_enabled);
+      const homeWeekStartDay = resolveIsoWeekDayFromIsoDate(payload?.settings?.custody_home_week_start);
+      const nextPlannedWeekStartDay = isAlternatingCustodyEnabled
+        ? (homeWeekStartDay ?? normalizeIsoWeekDay(payload?.settings?.custody_change_day, 1))
+        : 1;
+
+      if (nextPlannedWeekStartDay !== plannedWeekStartDay) {
+        setPlannedWeekStartDay(nextPlannedWeekStartDay);
+
+        const correctedWeekStart = weekStartFromDateWithIsoDay(new Date(), nextPlannedWeekStartDay);
+        const correctedFrom = toIsoDate(correctedWeekStart);
+        const correctedTo = toIsoDate(addDays(correctedWeekStart, 6));
+        if (correctedFrom !== rangeFrom || correctedTo !== rangeTo) {
+          payload = await apiFetch(`/tasks/board?from=${correctedFrom}&to=${correctedTo}`, {
+            cacheTtlMs: 12_000,
+            bypassCache: true,
+          }) as BoardPayload;
+        }
+      }
+
       const instances = Array.isArray(payload?.instances) ? payload.instances : [];
 
       setTasksEnabled(Boolean(payload?.tasks_enabled));
       setCanManageTemplates(Boolean(payload?.can_manage_templates));
       setCanManageInstances(Boolean(payload?.can_manage_instances));
       const nextRole = payload?.current_user?.role === "parent" ? "parent" : "enfant";
-      const nextUserId = Number.isInteger(payload?.current_user?.id) ? Number(payload.current_user?.id) : null;
+      const nextUserId = toPositiveInt(payload?.current_user?.id);
       setCurrentUserRole(nextRole);
       const visibleInstances = nextRole === "parent"
         ? instances
         : (nextUserId !== null ? instances.filter((instance) => isInstanceAssignedToUser(instance, nextUserId)) : []);
 
       setStats({
-        todo: visibleInstances.filter((instance) => instance.status === "à faire").length,
-        done: visibleInstances.filter((instance) => instance.status === "réalisée").length,
+        todo: visibleInstances.filter((instance) => isTodoStatus(instance.status)).length,
+        done: visibleInstances.filter((instance) => isDoneStatus(instance.status)).length,
         validated: visibleInstances.filter((instance) => instance.validated_by_parent).length,
       });
     } catch (error: any) {
@@ -125,7 +190,7 @@ export default function TasksTabScreen() {
         setLoading(false);
       }
     }
-  }, []);
+  }, [plannedWeekStartDay]);
 
   useFocusEffect(
     useCallback(() => {
@@ -145,7 +210,7 @@ export default function TasksTabScreen() {
       unsubscribeRealtime = await subscribeToHouseholdRealtime(householdId, (message) => {
         if (!active) return;
         if (message?.module !== "tasks") return;
-        void loadBoard({ silent: true });
+        void loadBoard({ silent: true, bypassCache: true });
       });
     };
 

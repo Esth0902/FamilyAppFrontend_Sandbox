@@ -155,6 +155,7 @@ export default function DashboardPollsScreen() {
   const pollsClosed = data?.polls_closed ?? [];
   const allPolls = data?.polls ?? [];
   const favoriteRecipes = data?.favorite_recipes ?? [];
+  const compactCardBackground = colorScheme === "dark" ? `${theme.icon}22` : theme.background;
 
   const renderSectionHeader = (
     title: string,
@@ -179,7 +180,7 @@ export default function DashboardPollsScreen() {
   };
 
   const renderPollCard = (poll: DashboardPoll, showOptions: boolean) => (
-    <View key={`poll-${poll.id}`} style={[styles.pollCard, { borderColor: theme.icon, backgroundColor: theme.background }]}>
+    <View key={`poll-${poll.id}`} style={[styles.pollCard, { borderColor: `${theme.icon}88`, backgroundColor: compactCardBackground }]}>
       <View style={styles.pollTitleRow}>
         <Text style={[styles.pollTitle, { color: theme.text }]} numberOfLines={2}>
           {poll.title || `Sondage #${poll.id}`}
@@ -247,7 +248,7 @@ export default function DashboardPollsScreen() {
       </View>
 
       <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
-        <View style={[styles.sectionCard, { backgroundColor: theme.card }]}>
+        <View style={[styles.sectionCard, { backgroundColor: theme.card, borderColor: theme.icon }]}>
           {renderSectionHeader("Sondages ouverts", pollsOpen.length > 0, openOpenPolls, () =>
             setOpenOpenPolls((prev) => !prev)
           )}
@@ -256,7 +257,7 @@ export default function DashboardPollsScreen() {
           )}
         </View>
 
-        <View style={[styles.sectionCard, { backgroundColor: theme.card }]}>
+        <View style={[styles.sectionCard, { backgroundColor: theme.card, borderColor: theme.icon }]}>
           {renderSectionHeader("Sondages clôturés", pollsClosed.length > 0, openClosedPolls, () =>
             setOpenClosedPolls((prev) => !prev)
           )}
@@ -265,7 +266,7 @@ export default function DashboardPollsScreen() {
           )}
         </View>
 
-        <View style={[styles.sectionCard, { backgroundColor: theme.card }]}>
+        <View style={[styles.sectionCard, { backgroundColor: theme.card, borderColor: theme.icon }]}>
           {renderSectionHeader("Tous les sondages et votes", allPolls.length > 0, openAllPolls, () =>
             setOpenAllPolls((prev) => !prev)
           )}
@@ -274,13 +275,16 @@ export default function DashboardPollsScreen() {
           )}
         </View>
 
-        <View style={[styles.sectionCard, { backgroundColor: theme.card }]}>
+        <View style={[styles.sectionCard, { backgroundColor: theme.card, borderColor: theme.icon }]}>
           {renderSectionHeader("Recettes preferées des sondages", favoriteRecipes.length > 0, openFavoriteRecipes, () =>
             setOpenFavoriteRecipes((prev) => !prev)
           )}
           {favoriteRecipes.length > 0 ? openFavoriteRecipes ? (
             favoriteRecipes.map((recipe, index) => (
-              <View key={`fav-${recipe.recipe_id}`} style={styles.favoriteRow}>
+              <View
+                key={`fav-${recipe.recipe_id}`}
+                style={[styles.favoriteRow, { borderColor: `${theme.icon}88`, backgroundColor: compactCardBackground }]}
+              >
                 <Text style={[styles.favoriteRank, { color: theme.tint }]}>{index + 1}.</Text>
                 <View style={styles.favoriteTextWrap}>
                   <Text style={[styles.favoriteTitle, { color: theme.text }]} numberOfLines={1}>
@@ -328,8 +332,8 @@ const styles = StyleSheet.create({
   },
   headerTitle: { fontSize: 18, fontWeight: "700" },
   content: { padding: 16, paddingBottom: 40, gap: 12 },
-  sectionCard: { borderRadius: 14, padding: 14 },
-  sectionTitle: { fontSize: 18, fontWeight: "700", marginBottom: 8 },
+  sectionCard: { borderRadius: 14, padding: 12, borderWidth: 1 },
+  sectionTitle: { fontSize: 15, fontWeight: "700", marginBottom: 8 },
   sectionHeaderRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -368,6 +372,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginTop: 8,
     gap: 10,
+    borderWidth: 1,
+    borderRadius: 10,
+    padding: 10,
   },
   favoriteRank: { width: 22, fontWeight: "800", fontSize: 15, textAlign: "right" },
   favoriteTextWrap: { flex: 1 },

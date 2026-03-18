@@ -247,10 +247,18 @@ const isTaskInstanceAssignedToUser = (instance: TaskInstance, userId: number) =>
   }
 
   if (Array.isArray(instance.assignees) && instance.assignees.length > 0) {
-    return instance.assignees.some((assignee) => assignee.id === userId);
+    return instance.assignees.some((assignee) => Number(assignee.id) === userId);
   }
 
-  return instance.assignee.id === userId;
+  return Number(instance.assignee.id) === userId;
+};
+
+const toPositiveInt = (value: unknown): number | null => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return null;
+  }
+  return Math.trunc(parsed);
 };
 
 const isTaskModuleKey = (value: unknown): value is TaskModuleKey =>
@@ -355,6 +363,10 @@ export default function TasksScreen() {
     () => (isPlannedModule ? plannedWeekStart : standardWeekStart),
     [isPlannedModule, plannedWeekStart, standardWeekStart]
   );
+  const boardWeekStartIso = useMemo(
+    () => toIsoDate(boardWeekStart),
+    [boardWeekStart]
+  );
   useEffect(() => {
     plannedWeekStartDayRef.current = plannedWeekStartDay;
   }, [plannedWeekStartDay]);
@@ -438,6 +450,10 @@ export default function TasksScreen() {
     () => new Map(members.map((member) => [member.id, member.name])),
     [members],
   );
+  const routinesTemplates = useMemo(
+    () => templates.filter((template) => template.recurrence !== "once"),
+    [templates]
+  );
 
   const toggleManualAssignee = useCallback((memberId: number) => {
     setSelectedAssigneeIds((prev) => {
@@ -490,7 +506,7 @@ export default function TasksScreen() {
     }
 
     try {
-      const rangeFrom = toIsoDate(boardWeekStart);
+      const rangeFrom = boardWeekStartIso;
       const rangeTo = toIsoDate(addDays(boardWeekStart, 6));
       const payload = await apiFetch(`/tasks/board?from=${rangeFrom}&to=${rangeTo}`) as BoardPayload;
       setTasksEnabled(Boolean(payload?.tasks_enabled));
@@ -510,9 +526,7 @@ export default function TasksScreen() {
       }
       setCanManageTemplates(Boolean(payload?.can_manage_templates));
       setCanManageInstances(Boolean(payload?.can_manage_instances));
-      const payloadCurrentUserId = Number.isInteger(payload?.current_user?.id)
-        ? Number(payload.current_user?.id)
-        : null;
+      const payloadCurrentUserId = toPositiveInt(payload?.current_user?.id);
       const payloadCurrentRole = payload?.current_user?.role === "parent" ? "parent" : "enfant";
       setCurrentUserId(payloadCurrentUserId);
       setCurrentUserRole(payloadCurrentRole);
@@ -526,7 +540,7 @@ export default function TasksScreen() {
         setLoading(false);
       }
     }
-  }, [boardWeekStart]);
+  }, [boardWeekStart, boardWeekStartIso]);
 
   useEffect(() => {
     loadBoardRef.current = loadBoard;
@@ -537,6 +551,13 @@ export default function TasksScreen() {
       void loadBoardRef.current();
     }, [])
   );
+
+  useEffect(() => {
+    if (!isPlannedModule) {
+      return;
+    }
+    void loadBoardRef.current({ silent: true });
+  }, [boardWeekStartIso, isPlannedModule]);
 
   useEffect(() => {
     if (!householdId) {
@@ -1227,8 +1248,8 @@ export default function TasksScreen() {
     }
 
     const assigneeIds = Array.isArray(instance.assignees) && instance.assignees.length > 0
-      ? instance.assignees.map((assignee) => assignee.id)
-      : [instance.assignee.id];
+      ? instance.assignees.map((assignee) => Number(assignee.id))
+      : [Number(instance.assignee.id)];
     if (!assigneeIds.includes(currentUserId)) {
       return;
     }
@@ -1359,9 +1380,9 @@ export default function TasksScreen() {
             <View style={[styles.card, { backgroundColor: theme.card }]}>
               <Text style={[styles.cardTitle, { color: theme.text }]}>Gérer les routines</Text>
 
-              {templates.length > 0 ? (
+              {routinesTemplates.length > 0 ? (
                 <View style={{ marginTop: 10, gap: 8 }}>
-                  {templates.map((template) => (
+                  {routinesTemplates.map((template) => (
                     <View key={`template-${template.id}`} style={[styles.templateRow, { borderColor: theme.icon, backgroundColor: theme.background }]}>
                       <View style={{ flex: 1 }}>
                         <Text style={{ color: theme.text, fontWeight: "700" }}>{template.name}</Text>
@@ -1449,7 +1470,7 @@ export default function TasksScreen() {
                   />
 
                   <View style={styles.recurrenceRow}>
-                    {(["once", "daily", "weekly", "monthly"] as const).map((recurrence) => (
+                    {(["daily", "weekly", "monthly"] as const).map((recurrence) => (
                       <TouchableOpacity
                         key={recurrence}
                         onPress={() => applyTemplateRecurrence(recurrence)}
@@ -2237,14 +2258,14 @@ export default function TasksScreen() {
 
                         {(currentUserId !== null
                           && (
-                            (Array.isArray(instance.assignees) && instance.assignees.some((assignee) => assignee.id === currentUserId))
-                            || (!Array.isArray(instance.assignees) && instance.assignee.id === currentUserId)
+                            (Array.isArray(instance.assignees) && instance.assignees.some((assignee) => Number(assignee.id) === currentUserId))
+                            || (!Array.isArray(instance.assignees) && Number(instance.assignee.id) === currentUserId)
                           )
                           && members.some((member) => {
                             if (Array.isArray(instance.assignees) && instance.assignees.length > 0) {
-                              return !instance.assignees.some((assignee) => assignee.id === member.id);
+                              return !instance.assignees.some((assignee) => Number(assignee.id) === Number(member.id));
                             }
-                            return member.id !== instance.assignee.id;
+                            return Number(member.id) !== Number(instance.assignee.id);
                           })) ? (
                           <TouchableOpacity
                             onPress={() => requestInstanceReassignment(instance)}

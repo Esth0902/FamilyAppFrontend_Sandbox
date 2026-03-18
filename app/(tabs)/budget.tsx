@@ -36,12 +36,13 @@ export default function BudgetTabScreen() {
   const [loading, setLoading] = useState(true);
   const [board, setBoard] = useState<BudgetBoardPayload | null>(null);
 
-  const loadBoard = useCallback(async (options?: { silent?: boolean }) => {
+  const loadBoard = useCallback(async (options?: { silent?: boolean; bypassCache?: boolean }) => {
     const silent = options?.silent ?? false;
+    const bypassCache = options?.bypassCache === true;
     if (!silent) setLoading(true);
 
     try {
-      const payload = await apiFetch("/budget/board") as BudgetBoardPayload;
+      const payload = await apiFetch("/budget/board", { cacheTtlMs: 20_000, bypassCache }) as BudgetBoardPayload;
       setBoard(payload);
     } catch (error: unknown) {
       const message = (error as { message?: string })?.message || "Impossible de charger le budget.";
@@ -68,7 +69,7 @@ export default function BudgetTabScreen() {
       unsubscribeRealtime = await subscribeToHouseholdRealtime(householdId, (message) => {
         if (!active) return;
         if (message?.module !== "budget") return;
-        void loadBoard({ silent: true });
+        void loadBoard({ silent: true, bypassCache: true });
       });
     };
 

@@ -37,6 +37,7 @@ type HistoryItem = {
   statusLabel: string;
   amount: number;
   createdAt: string | null;
+  justification: string | null;
 };
 
 const toTimestamp = (iso: string | null | undefined): number => {
@@ -70,6 +71,20 @@ const toStatusLabel = (transaction: BudgetTransaction): string => {
   return "Refusée";
 };
 
+const toJustification = (transaction: BudgetTransaction): string | null => {
+  const isTargetType =
+    transaction.type === "bonus"
+    || transaction.type === "penalty"
+    || transaction.type === "advance";
+
+  if (!isTargetType) {
+    return null;
+  }
+
+  const value = String(transaction.comment ?? "").trim();
+  return value === "" ? null : value;
+};
+
 const buildHistory = (children: ChildBudget[], limit: number): HistoryItem[] => {
   return children
     .flatMap((child) => child.transactions.map((transaction) => ({
@@ -79,6 +94,7 @@ const buildHistory = (children: ChildBudget[], limit: number): HistoryItem[] => 
       statusLabel: toStatusLabel(transaction),
       amount: Number(transaction.signed_amount ?? transaction.amount ?? 0),
       createdAt: transaction.created_at,
+      justification: toJustification(transaction),
     })))
     .sort((left, right) => toTimestamp(right.createdAt) - toTimestamp(left.createdAt))
     .slice(0, limit);
@@ -266,6 +282,9 @@ export default function DashboardBudgetScreen() {
                     <Text style={[styles.text, { color: theme.textSecondary }]}> 
                       {item.statusLabel} | {formatShortDate(item.createdAt)}
                     </Text>
+                    {item.justification ? (
+                      <Text style={[styles.text, { color: theme.textSecondary }]}>Justification: {item.justification}</Text>
+                    ) : null}
                   </View>
                   <Text style={[styles.historyAmount, { color: item.amount < 0 ? theme.accentWarm : theme.text }]}> 
                     {`${item.amount < 0 ? "-" : "+"}${formatMoney(Math.abs(item.amount), currency)}`}

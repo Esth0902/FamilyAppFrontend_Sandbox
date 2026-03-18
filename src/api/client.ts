@@ -20,7 +20,62 @@ const parseJsonSafe = async (response: Response) => {
     }
 };
 
-export const apiFetch = async (endpoint: string, options: RequestInit = {}) => {
+type ApiFetchOptions = RequestInit & {
+    cacheTtlMs?: number;
+    bypassCache?: boolean;
+};
+
+type CachedApiResponse = {
+    expiresAt: number;
+    data: unknown;
+};
+
+const apiResponseCache = new Map<string, CachedApiResponse>();
+const inFlightGetRequests = new Map<string, Promise<unknown>>();
+const MAX_CACHE_ENTRIES = 80;
+
+const buildCacheKey = (method: string, url: string, householdId: number | null) =>
+    `${method}:${url}:h${householdId ?? 0}`;
+
+const pruneApiCache = () => {
+    while (apiResponseCache.size > MAX_CACHE_ENTRIES) {
+        const firstKey = apiResponseCache.keys().next().value;
+        if (typeof firstKey !== "string") {
+            break;
+        }
+        apiResponseCache.delete(firstKey);
+    }
+};
+
+const getCachedResponse = (cacheKey: string): { hit: boolean; data: unknown } => {
+    const cached = apiResponseCache.get(cacheKey);
+    if (!cached) {
+        return { hit: false, data: null };
+    }
+    if (cached.expiresAt <= Date.now()) {
+        apiResponseCache.delete(cacheKey);
+        return { hit: false, data: null };
+    }
+    return { hit: true, data: cached.data };
+};
+
+const setCachedResponse = (cacheKey: string, data: unknown, ttlMs: number) => {
+    if (!Number.isFinite(ttlMs) || ttlMs <= 0) {
+        return;
+    }
+    apiResponseCache.set(cacheKey, {
+        expiresAt: Date.now() + ttlMs,
+        data,
+    });
+    pruneApiCache();
+};
+
+const clearApiCache = () => {
+    apiResponseCache.clear();
+    inFlightGetRequests.clear();
+};
+
+export const apiFetch = async (endpoint: string, options: ApiFetchOptions = {}) => {
     if (!API_BASE_URL) {
         throw {
             status: 0,
@@ -47,10 +102,33 @@ export const apiFetch = async (endpoint: string, options: RequestInit = {}) => {
         }
     }
 
+    const {
+        cacheTtlMs: rawCacheTtlMs,
+        bypassCache: rawBypassCache,
+        ...requestOptions
+    } = options;
+
+    const method = String(requestOptions.method ?? "GET").toUpperCase();
+    const isGet = method === "GET";
+    const cacheTtlMs = Number.isFinite(rawCacheTtlMs) ? Number(rawCacheTtlMs) : 0;
+    const bypassCache = rawBypassCache === true;
+    const cacheKey = buildCacheKey(method, url, activeHouseholdId);
+
+    if (isGet && !bypassCache && cacheTtlMs > 0) {
+        const cached = getCachedResponse(cacheKey);
+        if (cached.hit) {
+            return cached.data;
+        }
+        const inFlight = inFlightGetRequests.get(cacheKey);
+        if (inFlight) {
+            return inFlight;
+        }
+    }
+
     const headers: Record<string, string> = {
         'Accept': 'application/json',
         'Content-Type': 'application/json',
-        ...(options.headers as Record<string, string>),
+        ...(requestOptions.headers as Record<string, string>),
     };
 
     if (token) {
@@ -60,28 +138,49 @@ export const apiFetch = async (endpoint: string, options: RequestInit = {}) => {
         headers['X-Household-Id'] = String(activeHouseholdId);
     }
 
-    const response = await fetch(url, {
-        ...options,
-        headers,
-    });
+    const requestPromise = (async () => {
+        const response = await fetch(url, {
+            ...requestOptions,
+            method,
+            headers,
+        });
 
-    const data = await parseJsonSafe(response);
+        const data = await parseJsonSafe(response);
 
-    if (!response.ok) {
-        if (response.status === 401) {
-            await Promise.all([
-                SecureStore.deleteItemAsync("authToken"),
-                SecureStore.deleteItemAsync("user"),
-            ]);
-            setStoredUserCache(null, true);
+        if (!response.ok) {
+            if (response.status === 401) {
+                clearApiCache();
+                await Promise.all([
+                    SecureStore.deleteItemAsync("authToken"),
+                    SecureStore.deleteItemAsync("user"),
+                ]);
+                setStoredUserCache(null, true);
+            }
+
+            throw {
+                status: response.status,
+                message: data?.message || `Erreur HTTP ${response.status}`,
+                data,
+            };
         }
 
-        throw {
-            status: response.status,
-            message: data?.message || `Erreur HTTP ${response.status}`,
-            data,
-        };
+        if (!isGet) {
+            clearApiCache();
+        } else if (!bypassCache && cacheTtlMs > 0) {
+            setCachedResponse(cacheKey, data, cacheTtlMs);
+        }
+
+        return data;
+    })();
+
+    if (isGet && !bypassCache && cacheTtlMs > 0) {
+        inFlightGetRequests.set(cacheKey, requestPromise);
+        try {
+            return await requestPromise;
+        } finally {
+            inFlightGetRequests.delete(cacheKey);
+        }
     }
 
-    return data;
+    return requestPromise;
 };

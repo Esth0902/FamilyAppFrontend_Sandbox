@@ -86,8 +86,9 @@ export default function DashboardScreen() {
   const [budgetBoard, setBudgetBoard] = useState<BudgetBoardPayload | null>(null);
   const [calendarSummary, setCalendarSummary] = useState<CalendarSummaryResponse | null>(null);
 
-  const loadDashboard = useCallback(async (options?: { silent?: boolean }) => {
+  const loadDashboard = useCallback(async (options?: { silent?: boolean; bypassCache?: boolean }) => {
     const silent = options?.silent ?? false;
+    const bypassCache = options?.bypassCache === true;
     if (!silent) {
       setLoading(true);
     }
@@ -96,14 +97,14 @@ export default function DashboardScreen() {
 
     try {
       const [dashboardResponse, budgetResponse, calendarResponse] = await Promise.all([
-        apiFetch("/dashboard"),
-        apiFetch("/budget/board").catch((error: ApiError) => {
+        apiFetch("/dashboard", { cacheTtlMs: 20_000, bypassCache }),
+        apiFetch("/budget/board", { cacheTtlMs: 20_000, bypassCache }).catch((error: ApiError) => {
           if (error?.status === 403 || error?.status === 404) {
             return null;
           }
           throw error;
         }),
-        apiFetch(`/calendar/board?from=${range.from}&to=${range.to}`).catch((error: ApiError) => {
+        apiFetch(`/calendar/board?from=${range.from}&to=${range.to}`, { cacheTtlMs: 15_000, bypassCache }).catch((error: ApiError) => {
           if (error?.status === 403 || error?.status === 404) {
             return null;
           }
@@ -149,7 +150,7 @@ export default function DashboardScreen() {
         ) {
           return;
         }
-        void loadDashboard({ silent: true });
+        void loadDashboard({ silent: true, bypassCache: true });
       });
     };
 

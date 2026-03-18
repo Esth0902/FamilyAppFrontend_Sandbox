@@ -173,6 +173,16 @@ const formatDueDate = (rawIsoDate: unknown): string => {
     });
 };
 
+const resolveNotificationJustification = (data: Record<string, unknown>): string => {
+    const value = typeof data.justification === "string"
+        ? data.justification
+        : typeof data.comment === "string"
+            ? data.comment
+            : "";
+
+    return value.trim();
+};
+
 const getNotificationNavigationTarget = (
     notification: PendingNotification
 ): NotificationNavigationTarget | null => {
@@ -611,6 +621,7 @@ export default function ConnectedHome() {
                                 const requesterName = String(data.requester_name ?? data.requester_household_name ?? "").trim() || "Un foyer";
                                 const taskName = String(data.task_name ?? "").trim() || "cette tâche";
                                 const dueDate = formatDueDate(data.due_date);
+                                const justification = resolveNotificationJustification(data);
                                 const scheduledForLabel = formatNotificationDate(
                                     typeof data.scheduled_for === "string" ? data.scheduled_for : null
                                 );
@@ -855,6 +866,11 @@ export default function ConnectedHome() {
                                                     <Text style={styles.notificationStrong}>{notification.title}</Text>
                                                 </Text>
                                                 <Text style={[styles.notificationMeta, { color: theme.textSecondary }]}>{notification.body}</Text>
+                                                {justification ? (
+                                                    <Text style={[styles.notificationMeta, { color: theme.textSecondary }]}>
+                                                        Justification: {justification}
+                                                    </Text>
+                                                ) : null}
                                                 {createdLabel ? (
                                                     <Text style={[styles.notificationMeta, { color: theme.textSecondary }]}>Reçue le {createdLabel}</Text>
                                                 ) : null}

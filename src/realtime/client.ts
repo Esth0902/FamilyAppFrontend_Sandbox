@@ -42,6 +42,8 @@ type RealtimeSubscriptionEntry = {
   eventName: string;
   channel: any;
   listeners: Map<number, RealtimeListener>;
+  mode: "ephemeral" | "sticky";
+  teardownTimer: ReturnType<typeof setTimeout> | null;
   realtimeHandler: (message: RealtimeMessage) => void;
   subscribedHandler: () => void;
   errorHandler: (error: unknown) => void;
@@ -49,11 +51,28 @@ type RealtimeSubscriptionEntry = {
 };
 
 const realtimeSubscriptionRegistry = new Map<string, RealtimeSubscriptionEntry>();
+const REALTIME_SUBSCRIPTION_RETAIN_MS = 90_000;
 
 const buildSubscriptionKey = (channelName: string, eventName: string) => `${channelName}::${eventName}`;
 
+function disposeRealtimeSubscription(subscriptionKey: string, subscription: RealtimeSubscriptionEntry) {
+  if (subscription.teardownTimer) {
+    clearTimeout(subscription.teardownTimer);
+    subscription.teardownTimer = null;
+  }
+
+  subscription.channel.unbind(subscription.eventName, subscription.realtimeHandler);
+  subscription.channel.unbind("pusher:subscription_succeeded", subscription.subscribedHandler);
+  subscription.channel.unbind("pusher:subscription_error", subscription.errorHandler);
+  subscription.pusher.connection.unbind("error", subscription.connectionErrorHandler);
+  subscription.pusher.unsubscribe(subscription.channelName);
+  realtimeSubscriptionRegistry.delete(subscriptionKey);
+}
+
 const clearRealtimeSubscriptionRegistry = () => {
-  realtimeSubscriptionRegistry.clear();
+  for (const [subscriptionKey, subscription] of realtimeSubscriptionRegistry.entries()) {
+    disposeRealtimeSubscription(subscriptionKey, subscription);
+  }
   realtimeListenerIdCounter = 1;
 };
 
@@ -204,12 +223,15 @@ const subscribeToRealtimeChannel = async (
   channelName: string,
   eventName: string,
   onMessage: RealtimeCallback,
-  onError?: RealtimeErrorCallback
+  onError?: RealtimeErrorCallback,
+  options?: { mode?: "ephemeral" | "sticky" }
 ): Promise<() => void> => {
   const pusher = await getOrCreatePusher();
   if (!pusher) {
     return () => {};
   }
+
+  const mode = options?.mode ?? "ephemeral";
 
   const subscriptionKey = buildSubscriptionKey(channelName, eventName);
   let subscription = realtimeSubscriptionRegistry.get(subscriptionKey);
@@ -259,12 +281,19 @@ const subscribeToRealtimeChannel = async (
       eventName,
       channel,
       listeners,
+      mode,
+      teardownTimer: null,
       realtimeHandler,
       subscribedHandler,
       errorHandler,
       connectionErrorHandler,
     };
     realtimeSubscriptionRegistry.set(subscriptionKey, subscription);
+  }
+
+  if (subscription.teardownTimer) {
+    clearTimeout(subscription.teardownTimer);
+    subscription.teardownTimer = null;
   }
 
   const listenerId = realtimeListenerIdCounter++;
@@ -280,13 +309,25 @@ const subscribeToRealtimeChannel = async (
     if (currentSubscription.listeners.size > 0) {
       return;
     }
+    if (currentSubscription.mode === "sticky") {
+      return;
+    }
+    if (currentSubscription.teardownTimer) {
+      return;
+    }
 
-    currentSubscription.channel.unbind(currentSubscription.eventName, currentSubscription.realtimeHandler);
-    currentSubscription.channel.unbind("pusher:subscription_succeeded", currentSubscription.subscribedHandler);
-    currentSubscription.channel.unbind("pusher:subscription_error", currentSubscription.errorHandler);
-    currentSubscription.pusher.connection.unbind("error", currentSubscription.connectionErrorHandler);
-    currentSubscription.pusher.unsubscribe(currentSubscription.channelName);
-    realtimeSubscriptionRegistry.delete(subscriptionKey);
+    // Évite de fermer/réouvrir le même canal pendant une navigation rapide entre écrans.
+    currentSubscription.teardownTimer = setTimeout(() => {
+      const pendingSubscription = realtimeSubscriptionRegistry.get(subscriptionKey);
+      if (!pendingSubscription) {
+        return;
+      }
+      if (pendingSubscription.listeners.size > 0) {
+        pendingSubscription.teardownTimer = null;
+        return;
+      }
+      disposeRealtimeSubscription(subscriptionKey, pendingSubscription);
+    }, REALTIME_SUBSCRIPTION_RETAIN_MS);
   };
 };
 
@@ -300,7 +341,13 @@ export const subscribeToHouseholdRealtime = async (
   }
 
   const channelName = `private-household.${householdId}`;
-  return subscribeToRealtimeChannel(channelName, "household.realtime", onMessage, onError);
+  return subscribeToRealtimeChannel(
+    channelName,
+    "household.realtime",
+    onMessage,
+    onError,
+    { mode: "sticky" }
+  );
 };
 
 export const subscribeToUserRealtime = async (
