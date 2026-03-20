@@ -14,9 +14,10 @@ import {
 } from "react-native";
 import { useRouter } from "expo-router";
 import * as SecureStore from "expo-secure-store";
-import { API_BASE_URL } from "@/src/api/client";
+import { API_BASE_URL, apiFetch } from "@/src/api/client";
 import { Colors } from "@/constants/theme";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
+import { normalizeStoredUser, persistStoredUser, type StoredUser } from "@/src/session/user-cache";
 
 const parseJsonSafe = async (response: Response) => {
     const text = await response.text();
@@ -87,11 +88,40 @@ export default function Register() {
                 return;
             }
 
-            if (data?.token) {
-                await SecureStore.setItemAsync("authToken", data.token);
+            const accessToken =
+                typeof data?.access_token === "string" && data.access_token.trim().length > 0
+                    ? data.access_token
+                    : (typeof data?.token === "string" && data.token.trim().length > 0 ? data.token : null);
+
+            if (!accessToken) {
+                Alert.alert("Erreur", "Réponse d'authentification invalide (token manquant).");
+                return;
             }
-            if (data?.user) {
-                await SecureStore.setItemAsync("user", JSON.stringify(data.user));
+
+            await SecureStore.setItemAsync("authToken", accessToken);
+
+            let resolvedUser: StoredUser | null = data?.user ? (data.user as StoredUser) : null;
+
+            try {
+                const meResponse = await apiFetch("/me", {
+                    headers: {
+                        Authorization: `Bearer ${accessToken}`,
+                    },
+                    bypassCache: true,
+                });
+
+                if (meResponse?.user) {
+                    resolvedUser = meResponse.user as StoredUser;
+                }
+            } catch (syncError) {
+                console.warn("Impossible de synchroniser /me apres inscription:", syncError);
+            }
+
+            if (resolvedUser) {
+                const normalizedUser = normalizeStoredUser(resolvedUser);
+                if (normalizedUser) {
+                    await persistStoredUser(normalizedUser);
+                }
             }
 
             Alert.alert("Bienvenue !", "Compte a été créé avec succès.");

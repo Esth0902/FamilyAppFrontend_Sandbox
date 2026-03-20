@@ -96,6 +96,46 @@ const normalizeAiPreviewRecipe = (value: any): AiPreviewRecipe | null => {
     };
 };
 
+const RECIPE_TYPE_ALIASES: Record<string, string> = {
+    "petit-déjeuner": "petit-déjeuner",
+    "petit-dÃ©jeuner": "petit-déjeuner",
+    "entrée": "entrée",
+    "entrÃ©e": "entrée",
+    "plat principal": "plat principal",
+    "dessert": "dessert",
+    "collation": "collation",
+    "boisson": "boisson",
+    "autre": "autre",
+};
+
+const normalizeRecipeTypeValue = (value: unknown): string => {
+    const raw = String(value ?? "autre").trim().toLowerCase();
+    if (raw.length === 0) {
+        return "autre";
+    }
+    return RECIPE_TYPE_ALIASES[raw] ?? raw;
+};
+
+const extractRecipesPayload = (payload: unknown): Recipe[] => {
+    if (Array.isArray(payload)) {
+        return payload as Recipe[];
+    }
+
+    if (payload && typeof payload === "object") {
+        const maybeData = (payload as { data?: unknown }).data;
+        if (Array.isArray(maybeData)) {
+            return maybeData as Recipe[];
+        }
+
+        const maybeRecipes = (payload as { recipes?: unknown }).recipes;
+        if (Array.isArray(maybeRecipes)) {
+            return maybeRecipes as Recipe[];
+        }
+    }
+
+    return [];
+};
+
 export default function RecipesScreen() {
     const insets = useSafeAreaInsets();
     const colorScheme = useColorScheme();
@@ -139,7 +179,7 @@ export default function RecipesScreen() {
     const fetchRecipes = async () => {
         try {
             const data = await apiFetch('/recipes?scope=all');
-            setRecipes(Array.isArray(data) ? data : []);
+            setRecipes(extractRecipesPayload(data));
 
             try {
                 const configResponse = await apiFetch('/households/config');
@@ -191,7 +231,8 @@ export default function RecipesScreen() {
         let filtered = filterRecipesByTitleQuery(recipes, search);
 
         if (selectedTypeFilter !== 'all') {
-            filtered = filtered.filter((recipe) => (recipe.type ?? 'autre') === selectedTypeFilter);
+            const normalizedSelectedType = normalizeRecipeTypeValue(selectedTypeFilter);
+            filtered = filtered.filter((recipe) => normalizeRecipeTypeValue(recipe.type) === normalizedSelectedType);
         }
 
         if (selectedTab === 'mine') {
@@ -358,6 +399,7 @@ export default function RecipesScreen() {
         const isGlobal = item.is_global === true;
         const isAiGenerated = item.is_ai_generated === true;
         const recipeScopeLabel = isGlobal ? "Globale" : (isAiGenerated ? "IA" : "Perso");
+        const normalizedRecipeType = normalizeRecipeTypeValue(item.type);
         const isInMine = item.is_in_my_recipes ?? isOwned;
         const canManageRecipe = isParent && isOwned;
         const showHeart = selectedTab === 'all' && (isGlobal || isOwned);
@@ -387,7 +429,7 @@ export default function RecipesScreen() {
                                 }}
                             >
                                 <Text style={{ color: themeColors.icon, fontSize: 12, fontWeight: "600" }}>
-                                    {item.type ?? "autre"}
+                                    {normalizedRecipeType}
                                 </Text>
                             </View>
 
