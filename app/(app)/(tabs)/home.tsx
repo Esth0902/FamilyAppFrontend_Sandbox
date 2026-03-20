@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
     View,
     Text,
@@ -10,12 +10,11 @@ import {
     Alert,
 } from "react-native";
 
-import { useRouter, useFocusEffect } from "expo-router";
-import * as SecureStore from "expo-secure-store";
+import { useRouter } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 
-import { apiFetch } from "@/src/api/client";
 import { Colors } from "@/constants/theme";
+import { useHomeData } from "@/src/hooks/useHomeData";
 import {
     resolveNotificationNavigationTarget,
     toPositiveInt,
@@ -23,28 +22,21 @@ import {
 } from "@/src/notifications/navigation";
 import { subscribeToUserRealtime } from "@/src/realtime/client";
 import {
-    clearStoredUser,
     persistStoredUser,
-    refreshStoredUserFromStorage,
     switchStoredHousehold,
     useStoredUserState,
 } from "@/src/session/user-cache";
+import {
+    leaveActiveHousehold,
+    markNotificationRead,
+    normalizeHouseholds,
+    respondToNotification,
+    type HomePendingNotification,
+} from "@/src/services/homeService";
+import { logoutAuthenticatedUser } from "@/src/services/authService";
+import { useAuthStore } from "@/src/store/useAuthStore";
 
-type PendingNotification = {
-    id: number;
-    type: string;
-    householdId: number | null;
-    title: string;
-    body: string;
-    data: Record<string, unknown>;
-    createdAt: string | null;
-};
-
-type HouseholdItem = {
-    id: number;
-    name: string;
-    role: "parent" | "enfant";
-};
+type PendingNotification = HomePendingNotification;
 
 const ACTION_REQUIRED_NOTIFICATION_TYPES = new Set([
     "household_invite",
@@ -53,98 +45,6 @@ const ACTION_REQUIRED_NOTIFICATION_TYPES = new Set([
     "household_deletion_approval_request",
     "household_deletion_cancel_window",
 ]);
-
-const normalizeHouseholds = (rawHouseholds: unknown): HouseholdItem[] => {
-    if (!Array.isArray(rawHouseholds)) {
-        return [];
-    }
-
-    return rawHouseholds
-        .map((rawHousehold): HouseholdItem | null => {
-            const household = (rawHousehold ?? {}) as Record<string, unknown>;
-            const id = toPositiveInt(household.id);
-            if (!id) {
-                return null;
-            }
-
-            const roleValue =
-                String((household.pivot as { role?: unknown } | undefined)?.role ?? household.role ?? "").trim() ||
-                "enfant";
-
-            return {
-                id,
-                name: String(household.name ?? "").trim() || `Foyer #${id}`,
-                role: roleValue === "parent" ? "parent" : "enfant",
-            };
-        })
-        .filter((household): household is HouseholdItem => household !== null);
-};
-
-const normalizePendingNotifications = (
-    rawNotifications: unknown[]
-): PendingNotification[] => {
-    return rawNotifications
-        .map((rawNotification): PendingNotification | null => {
-            const notification = (rawNotification ?? {}) as Record<string, unknown>;
-            const parsedId = toPositiveInt(notification.id);
-            if (!parsedId) {
-                return null;
-            }
-
-            const type = String(notification.type ?? "").trim();
-            const data = (notification.data ?? {}) as Record<string, unknown>;
-            const status = String(data.status ?? "pending").trim();
-            const householdId =
-                toPositiveInt(notification.household_id) ??
-                toPositiveInt(data.household_id) ??
-                null;
-
-            if (type === "household_deletion_cancel_window" && status !== "scheduled") {
-                return null;
-            }
-
-            if (
-                ACTION_REQUIRED_NOTIFICATION_TYPES.has(type)
-                && type !== "household_deletion_cancel_window"
-                && status !== "pending"
-            ) {
-                return null;
-            }
-
-            const inviterName = String(data.inviter_name ?? data.initiator_name ?? "").trim() || "Un parent";
-            const householdName = String(data.household_name ?? "").trim() || "ce foyer";
-            const requesterName = String(data.requester_name ?? data.requester_household_name ?? "").trim() || "Un foyer";
-            const taskName = String(data.task_name ?? "").trim() || "cette tâche";
-
-            const fallbackBody = type === "household_invite"
-                ? `${inviterName} vous invite à rejoindre le foyer ${householdName}.`
-                : type === "household_link_request"
-                    ? `${requesterName} souhaite connecter son foyer à ${householdName}.`
-                : type === "task_reassignment_invite"
-                    ? `${requesterName} vous demande de reprendre ${taskName} (foyer : ${householdName}).`
-                    : type === "household_deletion_approval_request"
-                        ? `${inviterName} demande la suppression du foyer ${householdName}.`
-                        : type === "household_deletion_cancel_window"
-                            ? `Le foyer ${householdName} sera supprimé dans 24h.`
-                            : "Nouvelle notification.";
-
-            return {
-                id: parsedId,
-                type,
-                householdId,
-                title: String(notification.title ?? "FamilyFlow").trim() || "FamilyFlow",
-                body: String(notification.body ?? "").trim() || fallbackBody,
-                data,
-                createdAt: typeof notification.created_at === "string" ? notification.created_at : null,
-            };
-        })
-        .filter((notification): notification is PendingNotification => notification !== null)
-        .sort((left, right) => {
-            const leftDate = left.createdAt ? new Date(left.createdAt).getTime() : 0;
-            const rightDate = right.createdAt ? new Date(right.createdAt).getTime() : 0;
-            return rightDate - leftDate;
-        });
-};
 
 const formatNotificationDate = (isoDate: string | null): string => {
     if (!isoDate) return "";
@@ -194,9 +94,19 @@ export default function ConnectedHome() {
     const colorScheme = useColorScheme();
     const theme = Colors[colorScheme ?? "light"];
     const { user } = useStoredUserState();
+    const token = useAuthStore((state) => state.token);
+    const logout = useAuthStore((state) => state.logout);
 
-    const [loading, setLoading] = useState(true);
-    const [pendingNotifications, setPendingNotifications] = useState<PendingNotification[]>([]);
+    const {
+        pendingNotifications,
+        isInitialLoading,
+        profileError,
+        notificationsError,
+        refreshAll,
+        refreshNotifications,
+        invalidateNotifications,
+    } = useHomeData({ token, user });
+
     const [processingNotificationId, setProcessingNotificationId] = useState<number | null>(null);
     const [processingBulkRead, setProcessingBulkRead] = useState(false);
     const [notificationsOpen, setNotificationsOpen] = useState(false);
@@ -211,121 +121,56 @@ export default function ConnectedHome() {
         return firstHouseholdId;
     }, [firstHouseholdId, user?.household_id]);
 
-    const refreshPendingNotifications = useCallback(async () => {
-        try {
-            const token = await SecureStore.getItemAsync("authToken");
-            if (!token) {
-                setPendingNotifications([]);
+    useEffect(() => {
+        if (!profileError && !notificationsError) {
+            return;
+        }
+
+        console.error("Erreur chargement home:", {
+            profile: profileError?.message,
+            notifications: notificationsError?.message,
+        });
+    }, [notificationsError, profileError]);
+
+    useEffect(() => {
+        if (!token) {
+            return;
+        }
+
+        let isActive = true;
+        let unsubscribeRealtime: (() => void) | null = null;
+
+        const subscribeRealtime = async () => {
+            const parsedUserId = Number(user?.id ?? 0);
+            if (!Number.isFinite(parsedUserId) || parsedUserId <= 0) {
                 return;
             }
 
-            const response = await apiFetch("/notifications/pending?all_households=1");
-            const rawNotifications: unknown[] = Array.isArray(response?.notifications) ? response.notifications : [];
-            setPendingNotifications(normalizePendingNotifications(rawNotifications));
-        } catch (error) {
-            console.error("Erreur chargement notifications en attente:", error);
-        }
-    }, []);
-
-    useFocusEffect(
-        useCallback(() => {
-            let isActive = true;
-            let notificationsTimer: ReturnType<typeof setInterval> | null = null;
-            let unsubscribeRealtime: (() => void) | null = null;
-
-            const fetchUserData = async () => {
-                setLoading(true);
-                try {
-                    const token = await SecureStore.getItemAsync("authToken");
-
-                    if (!token) {
-                        if (isActive) {
-                            await refreshStoredUserFromStorage();
-                            setPendingNotifications([]);
-                        }
-                        return;
-                    }
-
-                    try {
-                        const data = await apiFetch("/me");
-                        if (isActive && data?.user) {
-                            const householdsFromApi = normalizeHouseholds(data.user?.households);
-                            const currentHouseholdId = toPositiveInt(user?.household_id);
-                            const resolvedHouseholdId = currentHouseholdId &&
-                                householdsFromApi.some((household) => household.id === currentHouseholdId)
-                                ? currentHouseholdId
-                                : householdsFromApi[0]?.id ?? null;
-
-                            await persistStoredUser({
-                                ...(data.user as Record<string, unknown>),
-                                household_id: resolvedHouseholdId,
-                            });
-                        } else if (isActive) {
-                            await refreshStoredUserFromStorage();
-                        }
-                    } catch (error) {
-                        console.error("Erreur chargement user (/me):", error);
-                        if (isActive) {
-                            await refreshStoredUserFromStorage();
-                        }
-                    }
-
-                    if (isActive) {
-                        await refreshPendingNotifications();
-                    }
-                } catch (e) {
-                    console.error("Erreur chargement user:", e);
-                } finally {
-                    if (isActive) {
-                        setLoading(false);
-                    }
-                }
-            };
-
-            void fetchUserData();
-
-            const subscribeRealtime = async () => {
-                const parsedUserId = Number(user?.id ?? 0);
-                if (!Number.isFinite(parsedUserId) || parsedUserId <= 0) {
+            const unsubscribe = await subscribeToUserRealtime(parsedUserId, (message) => {
+                const module = String(message?.module ?? "");
+                if (module !== "notifications") {
                     return;
                 }
+                void invalidateNotifications();
+            });
 
-                const unsubscribe = await subscribeToUserRealtime(parsedUserId, (message) => {
-                    const module = String(message?.module ?? "");
-                    if (module !== "notifications") {
-                        return;
-                    }
-                    void refreshPendingNotifications();
-                });
+            if (!isActive) {
+                unsubscribe();
+                return;
+            }
 
-                if (!isActive) {
-                    unsubscribe();
-                    return;
-                }
+            unsubscribeRealtime = unsubscribe;
+        };
 
-                unsubscribeRealtime = unsubscribe;
-            };
-            void subscribeRealtime();
+        void subscribeRealtime();
 
-            notificationsTimer = setInterval(() => {
-                if (!isActive) {
-                    return;
-                }
-                void refreshPendingNotifications();
-            }, 60000);
-
-            return () => {
-                isActive = false;
-                if (notificationsTimer) {
-                    clearInterval(notificationsTimer);
-                }
-                if (unsubscribeRealtime) {
-                    unsubscribeRealtime();
-                }
-            };
-        }, [refreshPendingNotifications, user?.household_id, user?.id])
-    );
-
+        return () => {
+            isActive = false;
+            if (unsubscribeRealtime) {
+                unsubscribeRealtime();
+            }
+        };
+    }, [invalidateNotifications, token, user?.id]);
     const onSetupHouse = () => {
         router.push("/householdSetup");
     };
@@ -335,16 +180,16 @@ export default function ConnectedHome() {
             setSwitchingHouseholdId(householdId);
             try {
                 await switchStoredHousehold(householdId);
-                await refreshPendingNotifications();
+                await refreshAll();
                 return true;
             } catch (error: any) {
-                Alert.alert("Foyer", error?.message || "Impossible de sélectionner ce foyer.");
+                Alert.alert("Foyer", error?.message || "Impossible de sÃ©lectionner ce foyer.");
                 return false;
             } finally {
                 setSwitchingHouseholdId(null);
             }
         },
-        [refreshPendingNotifications]
+        [refreshAll]
     );
 
     const onOpenHouseholdDashboard = useCallback(
@@ -381,40 +226,13 @@ export default function ConnectedHome() {
     ) => {
         setProcessingNotificationId(notification.id);
         try {
-            let response: unknown = null;
-            if (notification.type === "household_invite") {
-                response = await apiFetch(`/notifications/${notification.id}/household-invite-response`, {
-                    method: "POST",
-                    body: JSON.stringify({ action }),
-                });
-            } else if (notification.type === "household_link_request") {
-                response = await apiFetch(`/notifications/${notification.id}/household-link-response`, {
-                    method: "POST",
-                    body: JSON.stringify({ action }),
-                });
-            } else if (notification.type === "task_reassignment_invite") {
-                response = await apiFetch(`/notifications/${notification.id}/task-reassignment-response`, {
-                    method: "POST",
-                    body: JSON.stringify({ action }),
-                });
-            } else if (
-                notification.type === "household_deletion_approval_request"
-                || notification.type === "household_deletion_cancel_window"
-            ) {
-                response = await apiFetch(`/notifications/${notification.id}/household-deletion-response`, {
-                    method: "POST",
-                    body: JSON.stringify({ action }),
-                });
-            } else {
-                await apiFetch(`/notifications/${notification.id}/read`, { method: "POST" });
-            }
-
+            const response = await respondToNotification(notification.id, notification.type, action);
             const typedResponse = response as { user?: unknown } | null;
             if (notification.type === "household_invite" && action === "accept" && typedResponse?.user) {
                 await persistStoredUser(typedResponse.user as Record<string, unknown>);
             }
 
-            await refreshPendingNotifications();
+            await refreshNotifications();
         } catch (error: any) {
             Alert.alert("Notification", error?.message || "Impossible de traiter cette notification.");
         } finally {
@@ -433,27 +251,27 @@ export default function ConnectedHome() {
                     }
                 }
 
-                const response = await apiFetch("/households/leave", { method: "POST" });
+                const response = await leaveActiveHousehold();
                 if (response?.user) {
                     await persistStoredUser(response.user as Record<string, unknown>);
                 }
 
-                await refreshPendingNotifications();
-                Alert.alert("Foyer", "Vous avez quitté ce foyer.");
+                await refreshNotifications();
+                Alert.alert("Foyer", "Vous avez quittÃ© ce foyer.");
             } catch (error: any) {
                 Alert.alert("Foyer", error?.message || "Impossible de quitter ce foyer.");
             } finally {
                 setProcessingNotificationId(null);
             }
         },
-        [activeHouseholdId, onSwitchHousehold, refreshPendingNotifications]
+        [activeHouseholdId, onSwitchHousehold, refreshNotifications]
     );
 
     const onMarkNotificationRead = async (notification: PendingNotification) => {
         setProcessingNotificationId(notification.id);
         try {
-            await apiFetch(`/notifications/${notification.id}/read`, { method: "POST" });
-            await refreshPendingNotifications();
+            await markNotificationRead(notification.id);
+            await refreshNotifications();
         } catch (error: any) {
             Alert.alert("Notification", error?.message || "Impossible de marquer la notification comme lue.");
         } finally {
@@ -474,9 +292,9 @@ export default function ConnectedHome() {
         setProcessingBulkRead(true);
         try {
             for (const notification of readableNotifications) {
-                await apiFetch(`/notifications/${notification.id}/read`, { method: "POST" });
+                await markNotificationRead(notification.id);
             }
-            await refreshPendingNotifications();
+            await refreshNotifications();
         } catch (error: any) {
             Alert.alert("Notification", error?.message || "Impossible de tout marquer comme lu.");
         } finally {
@@ -505,22 +323,17 @@ export default function ConnectedHome() {
 
     const onLogout = async () => {
         try {
-            const token = await SecureStore.getItemAsync("authToken");
             if (token) {
-                apiFetch("/logout", {
-                    method: "POST",
-                }).catch((e) => console.log("Logout backend error:", e));
+                logoutAuthenticatedUser().catch((e) => console.log("Logout backend error:", e));
             }
         } catch (e) {
             console.error("Erreur logout:", e);
         } finally {
-            await SecureStore.deleteItemAsync("authToken");
-            await clearStoredUser();
-            router.replace("/");
+            await logout();
         }
     };
 
-    if (loading) {
+    if (isInitialLoading && !user) {
         return (
             <View style={[styles.center, { backgroundColor: theme.background }]}>
                 <ActivityIndicator color={theme.accentCool} size="large" />
@@ -574,7 +387,7 @@ export default function ConnectedHome() {
                             <TouchableOpacity
                                 onPress={() => router.push("/settings")}
                                 style={[styles.userSettingsButton, { borderColor: theme.icon }]}
-                                accessibilityLabel="Ouvrir les paramètres utilisateur"
+                                accessibilityLabel="Ouvrir les paramÃ¨tres utilisateur"
                             >
                                 <MaterialCommunityIcons name="account-cog-outline" size={20} color={theme.tint} />
                             </TouchableOpacity>
@@ -619,7 +432,7 @@ export default function ConnectedHome() {
                                 const householdName = String(data.household_name ?? "").trim() || "ce foyer";
                                 const invitedRole = String(data.invited_role ?? "") === "parent" ? "parent" : "enfant";
                                 const requesterName = String(data.requester_name ?? data.requester_household_name ?? "").trim() || "Un foyer";
-                                const taskName = String(data.task_name ?? "").trim() || "cette tâche";
+                                const taskName = String(data.task_name ?? "").trim() || "cette tÃ¢che";
                                 const dueDate = formatDueDate(data.due_date);
                                 const justification = resolveNotificationJustification(data);
                                 const scheduledForLabel = formatNotificationDate(
@@ -640,14 +453,14 @@ export default function ConnectedHome() {
                                         {type === "household_invite" ? (
                                             <>
                                                 <Text style={[styles.notificationText, { color: theme.text }]}>
-                                                    Invitation à rejoindre <Text style={styles.notificationStrong}>{householdName}</Text> de la part de{" "}
+                                                    Invitation Ã  rejoindre <Text style={styles.notificationStrong}>{householdName}</Text> de la part de{" "}
                                                     <Text style={styles.notificationStrong}>{inviterName}</Text>.
                                                 </Text>
                                                 <Text style={[styles.notificationMeta, { color: theme.textSecondary }]}> 
-                                                    Rôle proposé: {invitedRole === "parent" ? "Parent" : "Enfant"}
+                                                    RÃ´le proposÃ©: {invitedRole === "parent" ? "Parent" : "Enfant"}
                                                 </Text>
                                                 {createdLabel ? (
-                                                    <Text style={[styles.notificationMeta, { color: theme.textSecondary }]}>Reçue le {createdLabel}</Text>
+                                                    <Text style={[styles.notificationMeta, { color: theme.textSecondary }]}>ReÃ§ue le {createdLabel}</Text>
                                                 ) : null}
                                                 <View style={styles.notificationActions}>
                                                     <TouchableOpacity
@@ -680,11 +493,11 @@ export default function ConnectedHome() {
                                         ) : type === "household_link_request" ? (
                                             <>
                                                 <Text style={[styles.notificationText, { color: theme.text }]}>
-                                                    Le foyer <Text style={styles.notificationStrong}>{requesterName}</Text> souhaite se connecter à{" "}
+                                                    Le foyer <Text style={styles.notificationStrong}>{requesterName}</Text> souhaite se connecter Ã {" "}
                                                     <Text style={styles.notificationStrong}>{householdName}</Text>.
                                                 </Text>
                                                 {createdLabel ? (
-                                                    <Text style={[styles.notificationMeta, { color: theme.textSecondary }]}>Reçue le {createdLabel}</Text>
+                                                    <Text style={[styles.notificationMeta, { color: theme.textSecondary }]}>ReÃ§ue le {createdLabel}</Text>
                                                 ) : null}
                                                 <View style={styles.notificationActions}>
                                                     <TouchableOpacity
@@ -724,10 +537,10 @@ export default function ConnectedHome() {
                                             Foyer: {householdName}
                                         </Text>
                                         {dueDate ? (
-                                            <Text style={[styles.notificationMeta, { color: theme.textSecondary }]}>Échéance: {dueDate}</Text>
+                                            <Text style={[styles.notificationMeta, { color: theme.textSecondary }]}>Ã‰chÃ©ance: {dueDate}</Text>
                                         ) : null}
                                                 {createdLabel ? (
-                                                    <Text style={[styles.notificationMeta, { color: theme.textSecondary }]}>Reçue le {createdLabel}</Text>
+                                                    <Text style={[styles.notificationMeta, { color: theme.textSecondary }]}>ReÃ§ue le {createdLabel}</Text>
                                                 ) : null}
                                                 <View style={styles.notificationActions}>
                                                     <TouchableOpacity
@@ -764,7 +577,7 @@ export default function ConnectedHome() {
                                                     <Text style={styles.notificationStrong}>{householdName}</Text>.
                                                 </Text>
                                                 {createdLabel ? (
-                                                    <Text style={[styles.notificationMeta, { color: theme.textSecondary }]}>Reçue le {createdLabel}</Text>
+                                                    <Text style={[styles.notificationMeta, { color: theme.textSecondary }]}>ReÃ§ue le {createdLabel}</Text>
                                                 ) : null}
                                                 <View style={styles.notificationActions}>
                                                     <TouchableOpacity
@@ -797,15 +610,15 @@ export default function ConnectedHome() {
                                         ) : type === "household_deletion_cancel_window" ? (
                                             <>
                                                 <Text style={[styles.notificationText, { color: theme.text }]}>
-                                                    Le foyer <Text style={styles.notificationStrong}>{householdName}</Text> sera supprimé dans 24h.
+                                                    Le foyer <Text style={styles.notificationStrong}>{householdName}</Text> sera supprimÃ© dans 24h.
                                                 </Text>
                                                 {scheduledForLabel ? (
                                                     <Text style={[styles.notificationMeta, { color: theme.textSecondary }]}>
-                                                        Suppression prévue le {scheduledForLabel}
+                                                        Suppression prÃ©vue le {scheduledForLabel}
                                                     </Text>
                                                 ) : null}
                                                 {createdLabel ? (
-                                                    <Text style={[styles.notificationMeta, { color: theme.textSecondary }]}>Reçue le {createdLabel}</Text>
+                                                    <Text style={[styles.notificationMeta, { color: theme.textSecondary }]}>ReÃ§ue le {createdLabel}</Text>
                                                 ) : null}
                                                 <View style={styles.notificationActions}>
                                                     <TouchableOpacity
@@ -831,7 +644,7 @@ export default function ConnectedHome() {
                                                     {notification.body}
                                                 </Text>
                                                 {createdLabel ? (
-                                                    <Text style={[styles.notificationMeta, { color: theme.textSecondary }]}>Reçue le {createdLabel}</Text>
+                                                    <Text style={[styles.notificationMeta, { color: theme.textSecondary }]}>ReÃ§ue le {createdLabel}</Text>
                                                 ) : null}
                                                 <View style={styles.notificationActions}>
                                                     <TouchableOpacity
@@ -872,7 +685,7 @@ export default function ConnectedHome() {
                                                     </Text>
                                                 ) : null}
                                                 {createdLabel ? (
-                                                    <Text style={[styles.notificationMeta, { color: theme.textSecondary }]}>Reçue le {createdLabel}</Text>
+                                                    <Text style={[styles.notificationMeta, { color: theme.textSecondary }]}>ReÃ§ue le {createdLabel}</Text>
                                                 ) : null}
                                                 <View style={styles.notificationActions}>
                                                     <TouchableOpacity
@@ -979,9 +792,9 @@ export default function ConnectedHome() {
                     <View style={[styles.householdCard, { backgroundColor: theme.card, borderColor: `${theme.icon}33` }]}> 
                         <View style={[styles.accentStrip, { backgroundColor: theme.accentCool }]} />
                         <View style={styles.cardContent}>
-                            <Text style={[styles.cardTitle, { color: theme.text }]}>Créons ton cocon</Text>
+                            <Text style={[styles.cardTitle, { color: theme.text }]}>CrÃ©ons ton cocon</Text>
                             <Text style={[styles.cardText, { color: theme.textSecondary }]}> 
-                                Ajoute les membres de ton foyer, définis les rôles et prépare ton calendrier partagé.
+                                Ajoute les membres de ton foyer, dÃ©finis les rÃ´les et prÃ©pare ton calendrier partagÃ©.
                             </Text>
                             <TouchableOpacity
                                 style={[styles.primaryButton, { backgroundColor: theme.accentCool }]}
@@ -996,7 +809,7 @@ export default function ConnectedHome() {
 
                 <View style={styles.logoutWrap}>
                     <TouchableOpacity onPress={onLogout} style={styles.ghostButton}>
-                        <Text style={[styles.ghostButtonText, { color: theme.accentWarm }]}>Se déconnecter</Text>
+                        <Text style={[styles.ghostButtonText, { color: theme.accentWarm }]}>Se dÃ©connecter</Text>
                     </TouchableOpacity>
                 </View>
             </ScrollView>
@@ -1243,4 +1056,7 @@ const styles = StyleSheet.create({
         fontWeight: "500",
     },
 });
+
+
+
 

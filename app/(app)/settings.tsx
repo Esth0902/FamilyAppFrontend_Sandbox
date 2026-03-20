@@ -11,7 +11,6 @@ import {
     useColorScheme,
 } from "react-native";
 import { useRouter } from "expo-router";
-import * as SecureStore from "expo-secure-store";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Colors } from "@/constants/theme";
@@ -21,8 +20,10 @@ import {
     normalizeStoredUser,
     persistStoredUser,
     switchStoredHousehold,
+    useStoredUserState,
     type StoredUser,
 } from "@/src/session/user-cache";
+import { logoutAuth } from "@/src/store/useAuthStore";
 
 type HouseholdPivot = {
     role?: string;
@@ -88,6 +89,7 @@ export default function SettingsScreen() {
     const [showNewPassword, setShowNewPassword] = useState(false);
     const [showConfirmPassword, setShowConfirmPassword] = useState(false);
     const [householdNicknames, setHouseholdNicknames] = useState<Record<number, string>>({});
+    const { user: cachedUser } = useStoredUserState();
 
     const hydrateFromUser = useCallback((apiUser: ApiUser) => {
         setUser(apiUser);
@@ -111,23 +113,11 @@ export default function SettingsScreen() {
         return Number.isFinite(firstHouseholdId) && firstHouseholdId > 0 ? firstHouseholdId : null;
     }, [households, user?.household_id]);
 
-    const resolveCachedHouseholdId = useCallback(async (): Promise<number | null> => {
-        try {
-            const rawUser = await SecureStore.getItemAsync("user");
-            if (!rawUser) {
-                return null;
-            }
-
-            const parsedUser = JSON.parse(rawUser) as { household_id?: number | string };
-            const parsedId = Number(parsedUser?.household_id ?? 0);
-            return Number.isFinite(parsedId) && parsedId > 0 ? Math.trunc(parsedId) : null;
-        } catch {
-            return null;
-        }
-    }, []);
-
     const persistUserCache = useCallback(async (apiUser: ApiUser, preferredHouseholdId?: number | null) => {
-        const cachedHouseholdId = await resolveCachedHouseholdId();
+        const parsedCachedHouseholdId = Number(cachedUser?.household_id ?? 0);
+        const cachedHouseholdId = Number.isFinite(parsedCachedHouseholdId) && parsedCachedHouseholdId > 0
+            ? Math.trunc(parsedCachedHouseholdId)
+            : null;
         const resolvedPreferredHouseholdId = preferredHouseholdId ?? activeHouseholdId ?? cachedHouseholdId;
 
         const normalizedUser = normalizeStoredUser(
@@ -141,7 +131,7 @@ export default function SettingsScreen() {
 
         await persistStoredUser(normalizedUser as StoredUser);
         return normalizedUser;
-    }, [activeHouseholdId, resolveCachedHouseholdId]);
+    }, [activeHouseholdId, cachedUser?.household_id]);
 
     const loadProfile = useCallback(async (preferredHouseholdId?: number | null) => {
         try {
@@ -156,9 +146,7 @@ export default function SettingsScreen() {
             hydrateFromUser(normalizedUser ?? apiUser);
         } catch (error: any) {
             if (Number(error?.status) === 401) {
-                await SecureStore.deleteItemAsync("authToken");
-                await SecureStore.deleteItemAsync("user");
-                router.replace("/");
+                await logoutAuth();
                 return;
             }
 
@@ -166,7 +154,7 @@ export default function SettingsScreen() {
         } finally {
             setLoading(false);
         }
-    }, [hydrateFromUser, persistUserCache, router]);
+    }, [hydrateFromUser, persistUserCache]);
 
     useEffect(() => {
         void loadProfile();
@@ -410,10 +398,9 @@ export default function SettingsScreen() {
                 }),
             });
 
-            await SecureStore.deleteItemAsync("authToken");
             await clearStoredUser();
+            await logoutAuth();
             Alert.alert("Compte", "Votre compte a été supprimé définitivement.");
-            router.replace("/");
         } catch (error: any) {
             const requiredAction = String(error?.data?.required_action ?? "");
             const blocked = Array.isArray(error?.data?.blocked_households)

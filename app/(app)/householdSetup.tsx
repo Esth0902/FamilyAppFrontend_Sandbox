@@ -2,9 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
     View,
     Text,
-    TextInput,
     StyleSheet,
-    TouchableOpacity,
     Switch,
     ScrollView,
     Alert,
@@ -18,10 +16,11 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Colors } from "@/constants/theme";
-import * as SecureStore from "expo-secure-store";
+import { AppButton } from "@/src/components/ui/AppButton";
+import { AppTextInput } from "@/src/components/ui/AppTextInput";
 import { apiFetch } from "@/src/api/client";
 import { subscribeToHouseholdRealtime } from "@/src/realtime/client";
-import { persistStoredUser } from "@/src/session/user-cache";
+import { persistStoredUser, useStoredUserState, type StoredUser } from "@/src/session/user-cache";
 
 type ModuleKey = "meals" | "tasks" | "budget" | "calendar";
 type MemberRole = "parent" | "enfant";
@@ -140,10 +139,10 @@ const normalizeMemberIdentity = (value?: string): string => {
 const toggleMemberRole = (role: MemberRole): MemberRole => (role === "parent" ? "enfant" : "parent");
 
 const MODULES: { id: ModuleKey; label: string; desc: string; icon: string }[] = [
-    { id: "meals", label: "Repas & Courses", desc: "Menus et liste partagée.", icon: "food-apple-outline" },
-    { id: "tasks", label: "Tâches Ménagères", desc: "Suivi des corvées.", icon: "broom" },
+    { id: "meals", label: "Repas & Courses", desc: "Menus et liste partagÃ©e.", icon: "food-apple-outline" },
+    { id: "tasks", label: "TÃ¢ches MÃ©nagÃ¨res", desc: "Suivi des corvÃ©es.", icon: "broom" },
     { id: "budget", label: "Budget & Argent", desc: "Argent de poche par enfant.", icon: "piggy-bank-outline" },
-    { id: "calendar", label: "Agenda Familial", desc: "Planning partagé.", icon: "calendar-clock" },
+    { id: "calendar", label: "Agenda Familial", desc: "Planning partagÃ©.", icon: "calendar-clock" },
 ];
 
 const DAYS = [
@@ -157,16 +156,16 @@ const DAYS = [
 ];
 
 const DURATION_CHOICES = [12, 24, 48];
-const MONTH_LABELS = ["jan", "fév", "mars", "avr", "mai", "juin", "juil", "août", "sept", "oct", "nov", "dec"];
+const MONTH_LABELS = ["jan", "fÃ©v", "mars", "avr", "mai", "juin", "juil", "aoÃ»t", "sept", "oct", "nov", "dec"];
 const WEEK_DAY_SHORT = ["di", "lu", "ma", "me", "je", "ve", "sa"] as const;
 const WHEEL_ITEM_HEIGHT = 40;
 const WHEEL_VISIBLE_ROWS = 5;
 const WHEEL_CONTAINER_HEIGHT = WHEEL_ITEM_HEIGHT * WHEEL_VISIBLE_ROWS;
 const WHEEL_VERTICAL_PADDING = (WHEEL_CONTAINER_HEIGHT - WHEEL_ITEM_HEIGHT) / 2;
 const DIETARY_TYPE_LABELS: Record<DietaryTagOption["type"], string> = {
-    diet: "Régimes",
-    allergen: "Allergènes",
-    dislike: "À éviter",
+    diet: "RÃ©gimes",
+    allergen: "AllergÃ¨nes",
+    dislike: "Ã€ Ã©viter",
     restriction: "Restrictions",
     cuisine_rule: "Cuisine",
 };
@@ -265,10 +264,10 @@ const buildMemberShareText = (member: CreatedMemberCredential): string => {
     }
 
     return `Bonjour ${name} !\n\n`
-        + "Ton compte FamilyFlow est prêt.\n"
+        + "Ton compte FamilyFlow est prÃªt.\n"
         + `Email : ${email}\n`
         + `Mot de passe temporaire : ${password}\n\n`
-        + "Connecte-toi puis modifie ton mot de passe dès la première connexion.";
+        + "Connecte-toi puis modifie ton mot de passe dÃ¨s la premiÃ¨re connexion.";
 };
 const buildHouseholdConnectionShareText = (
     householdName: string,
@@ -283,7 +282,7 @@ const buildHouseholdConnectionShareText = (
     return `Invitation de liaison FamilyFlow\n\n`
         + `Foyer : ${householdName}\n`
         + `Code de liaison : ${code}\n\n`
-        + "Ouvre FamilyFlow > Modifier le foyer > Foyer connecté, puis encode ce code.";
+        + "Ouvre FamilyFlow > Modifier le foyer > Foyer connectÃ©, puis encode ce code.";
 };
 
 const resolveActiveHouseholdRole = (rawUser: unknown): MemberRole => {
@@ -335,6 +334,7 @@ export default function SetupHousehold() {
     const colorScheme = useColorScheme();
     const theme = Colors[colorScheme ?? "light"];
     const memberItemBackground = `${theme.tint}${colorScheme === "dark" ? "20" : "12"}`;
+    const { user: authUser } = useStoredUserState();
 
     const [loading, setLoading] = useState(false);
     const [initialLoading, setInitialLoading] = useState(true);
@@ -538,7 +538,7 @@ export default function SetupHousehold() {
                         maxAdvanceInput: String(raw.setting?.max_advance_amount ?? 0),
                     };
                 })
-                .filter((draft) => draft !== null) as BudgetChildSettingDraft[];
+                .filter((draft: BudgetChildSettingDraft | null) => draft !== null) as BudgetChildSettingDraft[];
 
             setBudgetChildDrafts(drafts);
             if (typeof response?.currency === "string" && response.currency.trim().length > 0) {
@@ -547,9 +547,9 @@ export default function SetupHousehold() {
         } catch (error: any) {
             const statusCode = Number(error?.status ?? 0);
             if (statusCode === 403) {
-                setBudgetSettingsError("Le module budget est désactivé pour ce foyer.");
+                setBudgetSettingsError("Le module budget est dÃ©sactivÃ© pour ce foyer.");
             } else {
-                setBudgetSettingsError(error?.message || "Impossible de charger les paramètres budget.");
+                setBudgetSettingsError(error?.message || "Impossible de charger les paramÃ¨tres budget.");
             }
             setBudgetChildDrafts([]);
         } finally {
@@ -563,32 +563,32 @@ export default function SetupHousehold() {
         const maxAdvanceAmount = parseDecimalInput(draft.maxAdvanceInput);
 
         if (baseAmount === null || baseAmount < 0) {
-            Alert.alert("Budget", "Le montant de base doit être un nombre positif.");
+            Alert.alert("Budget", "Le montant de base doit Ãªtre un nombre positif.");
             return;
         }
 
         if (!Number.isInteger(resetDay)) {
-            Alert.alert("Budget", "Le jour de réinitialisation doit être un entier.");
+            Alert.alert("Budget", "Le jour de rÃ©initialisation doit Ãªtre un entier.");
             return;
         }
 
         if (draft.recurrence === "weekly" && (resetDay < 1 || resetDay > 7)) {
-            Alert.alert("Budget", "En hebdomadaire, le jour de réinitialisation doit être entre 1 et 7.");
+            Alert.alert("Budget", "En hebdomadaire, le jour de rÃ©initialisation doit Ãªtre entre 1 et 7.");
             return;
         }
 
         if (draft.recurrence === "monthly" && (resetDay < 1 || resetDay > 31)) {
-            Alert.alert("Budget", "En mensuel, le jour de réinitialisation doit être entre 1 et 31.");
+            Alert.alert("Budget", "En mensuel, le jour de rÃ©initialisation doit Ãªtre entre 1 et 31.");
             return;
         }
 
         if (maxAdvanceAmount === null || maxAdvanceAmount < 0) {
-            Alert.alert("Budget", "Le plafond d'avance doit être un nombre positif.");
+            Alert.alert("Budget", "Le plafond d'avance doit Ãªtre un nombre positif.");
             return;
         }
 
         if (draft.allowAdvances && maxAdvanceAmount <= 0) {
-            Alert.alert("Budget", "Le plafond d'avance doit être supérieur à 0 si les avances sont autorisées.");
+            Alert.alert("Budget", "Le plafond d'avance doit Ãªtre supÃ©rieur Ã  0 si les avances sont autorisÃ©es.");
             return;
         }
 
@@ -606,7 +606,7 @@ export default function SetupHousehold() {
             });
             await loadBudgetChildDrafts();
         } catch (error: any) {
-            Alert.alert("Budget", error?.message || "Impossible d'enregistrer les paramètres de cet enfant.");
+            Alert.alert("Budget", error?.message || "Impossible d'enregistrer les paramÃ¨tres de cet enfant.");
         } finally {
             setSavingBudgetChildId(null);
         }
@@ -750,7 +750,7 @@ export default function SetupHousehold() {
     const createDietaryTag = async () => {
         const label = dietaryTagSearch.trim();
         if (label.length < 2) {
-            Alert.alert("Dietary tags", "Le tag doit contenir au moins 2 caractères.");
+            Alert.alert("Dietary tags", "Le tag doit contenir au moins 2 caractÃ¨res.");
             return;
         }
 
@@ -797,8 +797,8 @@ export default function SetupHousehold() {
             const closestTag = error?.data?.closest_tag;
             if (error?.status === 409 && closestTag?.key) {
                 Alert.alert(
-                    "Tag similaire détecté",
-                    `${closestTag.label} existe déjà et a été sélectionné.`,
+                    "Tag similaire dÃ©tectÃ©",
+                    `${closestTag.label} existe dÃ©jÃ  et a Ã©tÃ© sÃ©lectionnÃ©.`,
                 );
                 setSelectedMealDietaryTags((prev) =>
                     prev.includes(String(closestTag.key)) ? prev : [...prev, String(closestTag.key)]
@@ -891,7 +891,7 @@ export default function SetupHousehold() {
                 linked_household: rawConnection.linked_household && typeof rawConnection.linked_household === "object"
                     ? {
                         id: Number((rawConnection.linked_household as Record<string, unknown>).id ?? 0),
-                        name: String((rawConnection.linked_household as Record<string, unknown>).name ?? "").trim() || "Foyer connecté",
+                        name: String((rawConnection.linked_household as Record<string, unknown>).name ?? "").trim() || "Foyer connectÃ©",
                     }
                     : null,
                 pending_request: rawPending && Number(rawPending.id ?? 0) > 0
@@ -926,7 +926,7 @@ export default function SetupHousehold() {
                 can_unlink: Boolean(rawPermissions.can_unlink),
             });
         } catch (error: any) {
-            Alert.alert("Foyer connecté", error?.message || "Impossible de charger la liaison entre foyers.");
+            Alert.alert("Foyer connectÃ©", error?.message || "Impossible de charger la liaison entre foyers.");
         } finally {
             setConnectionLoading(false);
         }
@@ -1007,7 +1007,7 @@ export default function SetupHousehold() {
                 message: buildMemberShareText(credential),
             });
         } catch (shareError) {
-            console.error("Erreur de partage des accès membre:", shareError);
+            console.error("Erreur de partage des accÃ¨s membre:", shareError);
             Alert.alert("Partage", "Impossible d'ouvrir le partage pour ce membre.");
         } finally {
             setSendingMemberKey(null);
@@ -1044,7 +1044,7 @@ export default function SetupHousehold() {
                 setMemberRole("enfant");
 
                 Alert.alert(
-                    "Invitation envoyée",
+                    "Invitation envoyÃ©e",
                     invitedEmail
                         ? `${invitedEmail} recevra une demande pour rejoindre le foyer.`
                         : `${cleanName} recevra une demande pour rejoindre le foyer.`
@@ -1097,9 +1097,9 @@ export default function SetupHousehold() {
             });
 
             await loadManagedMembers();
-            Alert.alert("Membres", "Rôle mis à jour.");
+            Alert.alert("Membres", "RÃ´le mis Ã  jour.");
         } catch (error: any) {
-            Alert.alert("Erreur", error?.message || "Impossible de mettre à jour ce membre.");
+            Alert.alert("Erreur", error?.message || "Impossible de mettre Ã  jour ce membre.");
         } finally {
             setUpdatingManagedMemberId(null);
         }
@@ -1110,7 +1110,7 @@ export default function SetupHousehold() {
 
         Alert.alert(
             `${member.name}`,
-            `Modifier le rôle ?`,
+            `Modifier le rÃ´le ?`,
             [
                 { text: "Annuler", style: "cancel" },
                 {
@@ -1147,7 +1147,7 @@ export default function SetupHousehold() {
                                     return next;
                                 });
                                 await loadManagedMembers();
-                                Alert.alert("Membres", "Membre supprimé du foyer.");
+                                Alert.alert("Membres", "Membre supprimÃ© du foyer.");
                             } catch (error: any) {
                                 Alert.alert("Erreur", error?.message || "Impossible de supprimer ce membre.");
                             } finally {
@@ -1195,7 +1195,7 @@ export default function SetupHousehold() {
                 message: buildMemberShareText(credential),
             });
         } catch (error: any) {
-            Alert.alert("Erreur", error?.message || "Impossible de partager les accès de ce membre.");
+            Alert.alert("Erreur", error?.message || "Impossible de partager les accÃ¨s de ce membre.");
         } finally {
             setSendingMemberKey(null);
         }
@@ -1204,12 +1204,11 @@ export default function SetupHousehold() {
     useEffect(() => {
         const loadSetupState = async () => {
             try {
-                const userStr = await SecureStore.getItemAsync("user");
                 let hasHousehold = false;
                 let activeRole: MemberRole = "enfant";
 
-                if (userStr) {
-                    const user = JSON.parse(userStr);
+                if (authUser) {
+                    const user = authUser as StoredUser;
                     hasHousehold = !!user.household_id || (Array.isArray(user.households) && user.households.length > 0);
                     activeRole = resolveActiveHouseholdRole(user);
                     setAlreadyConfigured(hasHousehold);
@@ -1221,14 +1220,14 @@ export default function SetupHousehold() {
 
                 if (isEditMode) {
                     if (!hasHousehold) {
-                        Alert.alert("Configuration", "Aucun foyer n'est configuré pour ce compte.");
+                        Alert.alert("Configuration", "Aucun foyer n'est configurÃ© pour ce compte.");
                         router.replace("/(tabs)/home");
                         return;
                     }
                     if (activeRole !== "parent") {
                         Alert.alert(
-                            "Accès restreint",
-                            "Seul un parent peut modifier la configuration du foyer. Utilise les paramètres utilisateur pour ton compte."
+                            "AccÃ¨s restreint",
+                            "Seul un parent peut modifier la configuration du foyer. Utilise les paramÃ¨tres utilisateur pour ton compte."
                         );
                         router.replace("/settings");
                         return;
@@ -1331,8 +1330,8 @@ export default function SetupHousehold() {
             } catch (error: any) {
                 if (isEditMode && Number(error?.status) === 403) {
                     Alert.alert(
-                        "Accès restreint",
-                        "Seul un parent peut modifier la configuration du foyer. Utilise les paramètres utilisateur pour ton compte."
+                        "AccÃ¨s restreint",
+                        "Seul un parent peut modifier la configuration du foyer. Utilise les paramÃ¨tres utilisateur pour ton compte."
                     );
                     router.replace("/settings");
                     return;
@@ -1354,6 +1353,7 @@ export default function SetupHousehold() {
         loadHouseholdConnection,
         loadManagedMembers,
         router,
+        authUser,
     ]);
 
     useEffect(() => {
@@ -1388,7 +1388,7 @@ export default function SetupHousehold() {
                 message: buildMemberShareText(member),
             });
         } catch (shareError) {
-            console.error("Erreur de partage d'accès membre:", shareError);
+            console.error("Erreur de partage d'accÃ¨s membre:", shareError);
             Alert.alert("Partage", "Impossible d'ouvrir le partage pour ce membre.");
         } finally {
             setSendingMemberKey(null);
@@ -1422,7 +1422,7 @@ export default function SetupHousehold() {
 
             await loadHouseholdConnection();
         } catch (error: any) {
-            Alert.alert("Foyer connecté", error?.message || "Impossible de partager un code de liaison.");
+            Alert.alert("Foyer connectÃ©", error?.message || "Impossible de partager un code de liaison.");
         } finally {
             setConnectionActionLoading(null);
         }
@@ -1431,7 +1431,7 @@ export default function SetupHousehold() {
     const onConnectHouseholdWithCode = async () => {
         const normalizedCode = connectionCodeInput.trim();
         if (!normalizedCode) {
-            Alert.alert("Foyer connecté", "Encode un code de liaison.");
+            Alert.alert("Foyer connectÃ©", "Encode un code de liaison.");
             return;
         }
 
@@ -1446,9 +1446,9 @@ export default function SetupHousehold() {
 
             setConnectionCodeInput("");
             await loadHouseholdConnection();
-            Alert.alert("Foyer connecté", String(response?.message ?? "Demande de liaison envoyée."));
+            Alert.alert("Foyer connectÃ©", String(response?.message ?? "Demande de liaison envoyÃ©e."));
         } catch (error: any) {
-            Alert.alert("Foyer connecté", error?.message || "Impossible d'envoyer la demande de liaison.");
+            Alert.alert("Foyer connectÃ©", error?.message || "Impossible d'envoyer la demande de liaison.");
         } finally {
             setConnectionActionLoading(null);
         }
@@ -1471,9 +1471,9 @@ export default function SetupHousehold() {
                                     method: "POST",
                                 });
                                 await loadHouseholdConnection();
-                                Alert.alert("Foyer connecté", String(response?.message ?? "Liaison supprimée."));
+                                Alert.alert("Foyer connectÃ©", String(response?.message ?? "Liaison supprimÃ©e."));
                             } catch (error: any) {
-                                Alert.alert("Foyer connecté", error?.message || "Impossible de rompre la liaison.");
+                                Alert.alert("Foyer connectÃ©", error?.message || "Impossible de rompre la liaison.");
                             } finally {
                                 setConnectionActionLoading(null);
                             }
@@ -1505,17 +1505,17 @@ export default function SetupHousehold() {
 
         const parsedDefaultServings = Number(defaultServings);
         if (!Number.isInteger(parsedDefaultServings) || parsedDefaultServings < 1 || parsedDefaultServings > 30) {
-            Alert.alert("Repas", "Le nombre de portions par défaut doit être entre 1 et 30.");
+            Alert.alert("Repas", "Le nombre de portions par dÃ©faut doit Ãªtre entre 1 et 30.");
             return;
         }
         const parsedMaxVotes = Number(maxVotesPerUser);
         if (!Number.isInteger(parsedMaxVotes) || parsedMaxVotes < 1 || parsedMaxVotes > 20) {
-            Alert.alert("Sondages", "Le nombre maximum de votes doit être entre 1 et 20.");
+            Alert.alert("Sondages", "Le nombre maximum de votes doit Ãªtre entre 1 et 20.");
             return;
         }
         const parsedPollTime = parseTimeToHHMM(pollTime);
         if (!parsedPollTime) {
-            Alert.alert("Sondages", "L'heure du sondage doit être au format HH:MM.");
+            Alert.alert("Sondages", "L'heure du sondage doit Ãªtre au format HH:MM.");
             return;
         }
         const parsedDietaryTags = Array.from(
@@ -1528,11 +1528,11 @@ export default function SetupHousehold() {
 
         if (tasksSettings.alternating_custody_enabled) {
             if (!isValidIsoDate(tasksSettings.custody_home_week_start)) {
-                Alert.alert("Tâches", "La date de début de semaine à la maison doit être au format YYYY-MM-DD.");
+                Alert.alert("TÃ¢ches", "La date de dÃ©but de semaine Ã  la maison doit Ãªtre au format YYYY-MM-DD.");
                 return;
             }
             if (!Number.isInteger(tasksSettings.custody_change_day) || tasksSettings.custody_change_day < 1 || tasksSettings.custody_change_day > 7) {
-                Alert.alert("Tâches", "Le jour de bascule doit être compris entre 1 et 7.");
+                Alert.alert("TÃ¢ches", "Le jour de bascule doit Ãªtre compris entre 1 et 7.");
                 return;
             }
         }
@@ -1592,7 +1592,7 @@ export default function SetupHousehold() {
                     }),
                 });
 
-                Alert.alert("Succès", "Configuration du foyer mise à jour.");
+                Alert.alert("SuccÃ¨s", "Configuration du foyer mise Ã  jour.");
             } else {
                 const payload = {
                     household_name: houseName.trim(),
@@ -1634,11 +1634,11 @@ export default function SetupHousehold() {
                         }
                     } catch (refreshError) {
                         console.error("Erreur rafraichissement profil apres creation foyer:", refreshError);
-                        const userStr = await SecureStore.getItemAsync("user");
-                        if (userStr) {
-                            const userData = JSON.parse(userStr);
-                            userData.household_id = createdHouseholdId;
-                            await SecureStore.setItemAsync("user", JSON.stringify(userData));
+                        if (authUser) {
+                            await persistStoredUser({
+                                ...(authUser as StoredUser),
+                                household_id: createdHouseholdId,
+                            });
                         }
                     }
                 }
@@ -1654,13 +1654,13 @@ export default function SetupHousehold() {
                     setCreatedMembersForShare(membersWithCredentials);
                     setAlreadyConfigured(true);
                     Alert.alert(
-                        "Foyer créé",
-                        "Les comptes membres sont prêts. Tu peux maintenant envoyer les accès membre par membre.",
+                        "Foyer crÃ©Ã©",
+                        "Les comptes membres sont prÃªts. Tu peux maintenant envoyer les accÃ¨s membre par membre.",
                     );
                     return;
                 }
 
-                Alert.alert("Félicitations", "Foyer créé et configuré avec succès !");
+                Alert.alert("FÃ©licitations", "Foyer crÃ©Ã© et configurÃ© avec succÃ¨s !");
                 router.replace("/(tabs)/home");
             }
         } catch (error: any) {
@@ -1750,14 +1750,14 @@ export default function SetupHousehold() {
             <View style={[styles.centerContainer, { backgroundColor: theme.background, padding: 24 }]}> 
                 <View style={[styles.lockCard, { backgroundColor: theme.card }]}> 
                     <MaterialCommunityIcons name="home" size={42} color={theme.tint} />
-                    <Text style={[styles.lockTitle, { color: theme.text }]}>Foyer déjà configuré</Text>
-                    <Text style={[styles.lockText, { color: theme.textSecondary }]}>La configuration initiale est terminée.</Text>
-                    <TouchableOpacity
+                    <Text style={[styles.lockTitle, { color: theme.text }]}>Foyer dÃ©jÃ  configurÃ©</Text>
+                    <Text style={[styles.lockText, { color: theme.textSecondary }]}>La configuration initiale est terminÃ©e.</Text>
+                    <AppButton
                         onPress={() => router.replace("/(tabs)/home")}
                         style={[styles.submitButton, { backgroundColor: theme.tint, marginTop: 16 }]}
                     >
-                        <Text style={styles.submitButtonText}>Retour à l&apos;accueil</Text>
-                    </TouchableOpacity>
+                        <Text style={styles.submitButtonText}>Retour Ã  l&apos;accueil</Text>
+                    </AppButton>
                 </View>
             </View>
         );
@@ -1778,20 +1778,20 @@ export default function SetupHousehold() {
                         },
                     ]}
                 >
-                    <TouchableOpacity
+                    <AppButton
                         onPress={() => router.replace("/(tabs)/home")}
                         style={[styles.headerActionBtn, { borderColor: theme.icon }]}
                     >
                         <MaterialCommunityIcons name="close" size={20} color={theme.tint} />
-                    </TouchableOpacity>
-                    <Text style={[styles.headerTitle, { color: theme.text }]}>Comptes créés</Text>
+                    </AppButton>
+                    <Text style={[styles.headerTitle, { color: theme.text }]}>Comptes crÃ©Ã©s</Text>
                 </View>
 
                 <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
                     <View style={styles.section}>
-                        <Text style={[styles.sectionTitle, { color: theme.text }]}>Envoyer les accès</Text>
+                        <Text style={[styles.sectionTitle, { color: theme.text }]}>Envoyer les accÃ¨s</Text>
                         <Text style={[styles.memberMeta, { color: theme.textSecondary, marginBottom: 10 }]}>
-                            Envoie les identifiants temporaires à chaque membre.
+                            Envoie les identifiants temporaires Ã  chaque membre.
                         </Text>
 
                         <View style={{ gap: 8 }}>
@@ -1808,11 +1808,11 @@ export default function SetupHousehold() {
                                                 {member.name || "Membre"}
                                             </Text>
                                             <Text style={[styles.memberMeta, { color: theme.textSecondary }]}>
-                                                {member.generated_email || "Email généré"}
+                                                {member.generated_email || "Email gÃ©nÃ©rÃ©"}
                                             </Text>
                                         </View>
 
-                                        <TouchableOpacity
+                                        <AppButton
                                             onPress={() => shareMemberCredentials(member, memberKey)}
                                             style={[styles.sendCredentialBtn, { backgroundColor: theme.tint }]}
                                             disabled={isSending}
@@ -1825,20 +1825,20 @@ export default function SetupHousehold() {
                                                     <Text style={styles.sendCredentialBtnText}>Envoyer</Text>
                                                 </>
                                             )}
-                                        </TouchableOpacity>
+                                        </AppButton>
                                     </View>
                                 );
                             })}
                         </View>
                     </View>
 
-                    <TouchableOpacity
+                    <AppButton
                         style={[styles.submitButton, { backgroundColor: theme.tint, opacity: loading ? 0.7 : 1 }]}
                         onPress={handleSave}
                         disabled={loading}
                     >
                         <Text style={styles.submitButtonText}>Terminer</Text>
-                    </TouchableOpacity>
+                    </AppButton>
 
                     <View style={{ height: 40 }} />
                 </ScrollView>
@@ -1860,7 +1860,7 @@ export default function SetupHousehold() {
                     },
                 ]}
             >
-                <TouchableOpacity
+                <AppButton
                     onPress={() => {
                         if (scopedBackRoute) {
                             router.replace(scopedBackRoute);
@@ -1871,16 +1871,16 @@ export default function SetupHousehold() {
                     style={[styles.headerActionBtn, { borderColor: theme.icon }]}
                 >
                     <MaterialCommunityIcons name="arrow-left" size={20} color={theme.tint} />
-                </TouchableOpacity>
+                </AppButton>
                 <Text style={[styles.headerTitle, { color: theme.text }]}>
                     {isMealsScope
-                        ? "Paramètres repas"
+                        ? "ParamÃ¨tres repas"
                         : isTasksScope
-                            ? "Paramètres tâches"
+                            ? "ParamÃ¨tres tÃ¢ches"
                             : isBudgetScope
-                                ? "Paramètres budget"
+                                ? "ParamÃ¨tres budget"
                             : isCalendarScope
-                                ? "Paramètres calendrier"
+                                ? "ParamÃ¨tres calendrier"
                         : (isEditMode ? "Modifier le foyer" : "Nouveau Foyer")}
                 </Text>
             </View>
@@ -1893,8 +1893,8 @@ export default function SetupHousehold() {
                                 <Text style={[styles.sectionTitle, { color: theme.text, marginBottom: 0 }]}>Nom du foyer</Text>
                             </View>
                             <View style={styles.collapsibleSectionBody}>
-                                <TextInput
-                                    style={[styles.input, { backgroundColor: theme.background, color: theme.text, marginBottom: 0 }]}
+                                <AppTextInput
+                                    style={[styles.input, styles.inputNoMargin]}
                                     value={houseName}
                                     onChangeText={setHouseName}
                                     placeholder="Ex: La Tribu"
@@ -1908,14 +1908,14 @@ export default function SetupHousehold() {
                 {!isMealsScope && !isTasksScope && !isBudgetScope && !isCalendarScope && (
                     <View style={styles.section}>
                         <View style={[styles.collapsibleSectionCard, { backgroundColor: theme.card, borderColor: theme.icon }]}>
-                            <TouchableOpacity style={styles.collapsibleSectionHeader} onPress={() => setMembersExpanded((prev) => !prev)}>
+                            <AppButton style={styles.collapsibleSectionHeader} onPress={() => setMembersExpanded((prev) => !prev)}>
                                 <Text style={[styles.sectionTitle, { color: theme.text, marginBottom: 0 }]}>Membres du foyer</Text>
                                 <MaterialCommunityIcons
                                     name={membersExpanded ? "chevron-down" : "chevron-right"}
                                     size={24}
                                     color={theme.textSecondary}
                                 />
-                            </TouchableOpacity>
+                            </AppButton>
 
                             {membersExpanded ? (
                                 <View style={styles.collapsibleSectionBody}>
@@ -1942,7 +1942,7 @@ export default function SetupHousehold() {
                                                         <View style={{ flex: 1 }}>
                                                             <View style={styles.memberTitleRow}>
                                                                 <Text style={[styles.memberName, { color: theme.text }]}>{member.name}</Text>
-                                                                <TouchableOpacity
+                                                                <AppButton
                                                                     style={[
                                                                         styles.memberRoleBadge,
                                                                         member.role === "parent"
@@ -1960,15 +1960,15 @@ export default function SetupHousehold() {
                                                                     >
                                                                         {member.role === "parent" ? "Parent" : "Enfant"}
                                                                     </Text>
-                                                                </TouchableOpacity>
+                                                                </AppButton>
                                                             </View>
                                                             {member.email ? (
                                                                 <Text style={[styles.memberMeta, { color: theme.textSecondary }]}>{member.email}</Text>
                                                             ) : null}
                                                         </View>
-                                                        <TouchableOpacity onPress={() => removeMember(index)}>
+                                                        <AppButton onPress={() => removeMember(index)}>
                                                             <MaterialCommunityIcons name="trash-can-outline" size={22} color={theme.textSecondary} />
-                                                        </TouchableOpacity>
+                                                        </AppButton>
                                                     </View>
                                                 ))}
                                             </View>
@@ -1994,7 +1994,7 @@ export default function SetupHousehold() {
                                                             <View style={{ flex: 1 }}>
                                                                 <View style={styles.memberTitleRow}>
                                                                     <Text style={[styles.memberName, { color: theme.text }]}>{member.name}</Text>
-                                                                    <TouchableOpacity
+                                                                    <AppButton
                                                                         style={[
                                                                             styles.memberRoleBadge,
                                                                             nextRole === "parent"
@@ -2013,20 +2013,20 @@ export default function SetupHousehold() {
                                                                         >
                                                                             {nextRole === "parent" ? "Parent" : "Enfant"}
                                                                         </Text>
-                                                                    </TouchableOpacity>
+                                                                    </AppButton>
                                                                 </View>
                                                                 <Text style={[styles.memberMeta, { color: theme.textSecondary }]}>
-                                                                    {member.email || "E-mail non défini"}
+                                                                    {member.email || "E-mail non dÃ©fini"}
                                                                 </Text>
                                                                 <Text style={[styles.memberMeta, { color: theme.textSecondary }]}>
                                                                     {member.must_change_password
-                                                                        ? "Mot de passe temporaire à modifier"
-                                                                        : "Accès actif"}
+                                                                        ? "Mot de passe temporaire Ã  modifier"
+                                                                        : "AccÃ¨s actif"}
                                                                 </Text>
 
                                                                 {canManageMembers ? (
                                                                     <View style={styles.memberActionRow}>
-                                                                        <TouchableOpacity
+                                                                        <AppButton
                                                                             onPress={() => onDeleteManagedMember(member)}
                                                                             style={[styles.memberActionBtn, { backgroundColor: theme.background, borderColor: theme.icon, borderWidth: 1, opacity: isDeleting ? 0.7 : 1 }]}
                                                                             disabled={isUpdating || isDeleting}
@@ -2034,10 +2034,10 @@ export default function SetupHousehold() {
                                                                             <Text style={[styles.memberActionBtnText, { color: theme.text }]}>
                                                                                 {isDeleting ? "Supp..." : "Supprimer"}
                                                                             </Text>
-                                                                        </TouchableOpacity>
+                                                                        </AppButton>
 
                                                                         {member.must_change_password && (
-                                                                            <TouchableOpacity
+                                                                            <AppButton
                                                                                 onPress={() => {
                                                                                     void onShareManagedMemberAccess(member);
                                                                                 }}
@@ -2047,7 +2047,7 @@ export default function SetupHousehold() {
                                                                                 <Text style={[styles.memberActionBtnText, { color: theme.tint }]}>
                                                                                     {isSharing ? "Partage..." : "Partager"}
                                                                                 </Text>
-                                                                            </TouchableOpacity>
+                                                                            </AppButton>
                                                                         )}
                                                                     </View>
                                                                 ) : null}
@@ -2062,16 +2062,16 @@ export default function SetupHousehold() {
 
                                 {!isEditMode || canManageMembers ? (
                                     <View style={[styles.memberEditor, { backgroundColor: memberItemBackground }]}>
-                                        <TextInput
-                                            style={[styles.input, { backgroundColor: theme.background, color: theme.text, marginBottom: 12 }]}
+                                        <AppTextInput
+                                            style={[styles.input, styles.inputWithBottomSpacing]}
                                             placeholder="Nom du membre"
                                             placeholderTextColor={theme.textSecondary}
                                             value={memberName}
                                             onChangeText={setMemberName}
                                         />
 
-                                        <TextInput
-                                            style={[styles.input, { backgroundColor: theme.background, color: theme.text, marginBottom: 12 }]}
+                                        <AppTextInput
+                                            style={[styles.input, styles.inputWithBottomSpacing]}
                                             placeholder="Email (optionnel)"
                                             placeholderTextColor={theme.textSecondary}
                                             keyboardType="email-address"
@@ -2081,7 +2081,7 @@ export default function SetupHousehold() {
                                         />
 
                                         <View style={styles.roleRow}>
-                                            <TouchableOpacity
+                                            <AppButton
                                                 onPress={() => setMemberRole("parent")}
                                                 style={[
                                                     styles.roleChip,
@@ -2090,9 +2090,9 @@ export default function SetupHousehold() {
                                                 ]}
                                             >
                                                 <Text style={[styles.roleChipText, { color: theme.text }]}>Parent</Text>
-                                            </TouchableOpacity>
+                                            </AppButton>
 
-                                            <TouchableOpacity
+                                            <AppButton
                                                 onPress={() => setMemberRole("enfant")}
                                                 style={[
                                                     styles.roleChip,
@@ -2101,10 +2101,10 @@ export default function SetupHousehold() {
                                                 ]}
                                             >
                                                 <Text style={[styles.roleChipText, { color: theme.text }]}>Enfant</Text>
-                                            </TouchableOpacity>
+                                            </AppButton>
                                         </View>
 
-                                        <TouchableOpacity
+                                        <AppButton
                                             onPress={() => {
                                                 if (isEditMode) {
                                                     void onAddManagedMember();
@@ -2119,11 +2119,11 @@ export default function SetupHousehold() {
                                             <Text style={[styles.addButtonText, { color: theme.tint }]}>
                                                 {isEditMode && addingManagedMember ? "Ajout..." : "Ajouter ce membre"}
                                             </Text>
-                                        </TouchableOpacity>
+                                        </AppButton>
                                     </View>
                                 ) : (
                                     <Text style={[styles.memberMeta, { color: theme.textSecondary }]}>
-                                        Seul un parent peut gérer les membres du foyer.
+                                        Seul un parent peut gÃ©rer les membres du foyer.
                                     </Text>
                                 )}
                             </View>
@@ -2135,17 +2135,17 @@ export default function SetupHousehold() {
                 {!isMealsScope && !isTasksScope && !isBudgetScope && !isCalendarScope && isEditMode && (
                     <View style={styles.section}>
                         <View style={[styles.collapsibleSectionCard, { backgroundColor: theme.card, borderColor: theme.icon }]}>
-                            <TouchableOpacity
+                            <AppButton
                                 style={styles.collapsibleSectionHeader}
                                 onPress={() => setConnectedHouseholdExpanded((prev) => !prev)}
                             >
-                                <Text style={[styles.sectionTitle, { color: theme.text, marginBottom: 0 }]}>Foyer connecté</Text>
+                                <Text style={[styles.sectionTitle, { color: theme.text, marginBottom: 0 }]}>Foyer connectÃ©</Text>
                                 <MaterialCommunityIcons
                                     name={connectedHouseholdExpanded ? "chevron-down" : "chevron-right"}
                                     size={24}
                                     color={theme.textSecondary}
                                 />
-                            </TouchableOpacity>
+                            </AppButton>
 
                             {connectedHouseholdExpanded ? (
                                 <View style={styles.collapsibleSectionBody}>
@@ -2153,7 +2153,7 @@ export default function SetupHousehold() {
                                         <ActivityIndicator size="small" color={theme.tint} />
                                     ) : !connectionPermissions.can_manage_connection ? (
                                         <Text style={[styles.memberMeta, { color: theme.textSecondary }]}>
-                                            Seul un parent peut gérer la liaison entre foyers.
+                                            Seul un parent peut gÃ©rer la liaison entre foyers.
                                         </Text>
                                     ) : connectionState.is_connected && connectionState.linked_household ? (
                                         <View style={[styles.connectedHouseholdCard, { backgroundColor: memberItemBackground }]}>
@@ -2163,7 +2163,7 @@ export default function SetupHousehold() {
                                             <Text style={[styles.connectedHouseholdName, { color: theme.text }]}>
                                                 {connectionState.linked_household.name}
                                             </Text>
-                                            <TouchableOpacity
+                                            <AppButton
                                                 style={[
                                                     styles.connectedHouseholdDangerBtn,
                                                     { borderColor: theme.accentWarm, opacity: connectionActionLoading === "unlink" ? 0.75 : 1 },
@@ -2178,7 +2178,7 @@ export default function SetupHousehold() {
                                                         Rompre la liaison
                                                     </Text>
                                                 )}
-                                            </TouchableOpacity>
+                                            </AppButton>
                                         </View>
                                     ) : connectionState.pending_request ? (
                                         <View style={[styles.connectedHouseholdCard, { backgroundColor: memberItemBackground }]}>
@@ -2190,17 +2190,17 @@ export default function SetupHousehold() {
                                             </Text>
                                             <Text style={[styles.memberMeta, { color: theme.textSecondary }]}>
                                                 {connectionState.pending_request.direction === "incoming"
-                                                    ? "Ce foyer a demandé à se connecter au vôtre. Vérifie les notifications pour accepter ou refuser."
-                                                    : "Votre demande a été envoyée. Vous serez notifié dès qu'une réponse sera donnée."}
+                                                    ? "Ce foyer a demandÃ© Ã  se connecter au vÃ´tre. VÃ©rifie les notifications pour accepter ou refuser."
+                                                    : "Votre demande a Ã©tÃ© envoyÃ©e. Vous serez notifiÃ© dÃ¨s qu'une rÃ©ponse sera donnÃ©e."}
                                             </Text>
                                         </View>
                                     ) : (
                                         <View style={[styles.connectedHouseholdCard, { backgroundColor: memberItemBackground }]}>
                                             <Text style={[styles.memberMeta, { color: theme.textSecondary, marginBottom: 8 }]}>
-                                                Aucun foyer n’est connecté pour le moment.
+                                                Aucun foyer nâ€™est connectÃ© pour le moment.
                                             </Text>
 
-                                            <TouchableOpacity
+                                            <AppButton
                                                 style={[
                                                     styles.connectedHouseholdPrimaryBtn,
                                                     { backgroundColor: theme.tint, opacity: connectionActionLoading === "share" ? 0.75 : 1 },
@@ -2215,7 +2215,7 @@ export default function SetupHousehold() {
                                                 ) : (
                                                     <Text style={styles.connectedHouseholdPrimaryText}>Partager un code de liaison</Text>
                                                 )}
-                                            </TouchableOpacity>
+                                            </AppButton>
 
                                             {connectionState.active_code?.code ? (
                                                 <View style={[styles.connectedCodeInfo, { borderColor: theme.icon, backgroundColor: theme.background }]}>
@@ -2234,15 +2234,15 @@ export default function SetupHousehold() {
                                             <Text style={[styles.label, { color: theme.text, marginBottom: 6, marginTop: 12 }]}>
                                                 Connecter un foyer avec un code
                                             </Text>
-                                            <TextInput
-                                                style={[styles.input, { backgroundColor: theme.background, color: theme.text, marginBottom: 10 }]}
+                                            <AppTextInput
+                                                style={[styles.input, styles.inputWithSmallBottomSpacing]}
                                                 value={connectionCodeInput}
                                                 onChangeText={(value) => setConnectionCodeInput(value.toUpperCase().replace(/[^A-Z0-9]/g, ""))}
                                                 autoCapitalize="characters"
                                                 placeholder="Ex: AB12CD34"
                                                 placeholderTextColor={theme.textSecondary}
                                             />
-                                            <TouchableOpacity
+                                            <AppButton
                                                 style={[
                                                     styles.connectedHouseholdSecondaryBtn,
                                                     { borderColor: theme.tint, backgroundColor: `${theme.tint}14`, opacity: connectionActionLoading === "connect" ? 0.75 : 1 },
@@ -2259,7 +2259,7 @@ export default function SetupHousehold() {
                                                         Envoyer la demande de liaison
                                                     </Text>
                                                 )}
-                                            </TouchableOpacity>
+                                            </AppButton>
                                         </View>
                                     )}
                                 </View>
@@ -2270,12 +2270,12 @@ export default function SetupHousehold() {
 
                 <View style={styles.section}>
                     <View style={[styles.collapsibleSectionCard, { backgroundColor: theme.card, borderColor: theme.icon }]}>
-                        <TouchableOpacity style={styles.collapsibleSectionHeader} onPress={() => setModulesExpanded((prev) => !prev)}>
+                        <AppButton style={styles.collapsibleSectionHeader} onPress={() => setModulesExpanded((prev) => !prev)}>
                             <Text style={[styles.sectionTitle, { color: theme.text, marginBottom: 0 }]}>
                         {isMealsScope
                             ? "Repas & courses"
                             : isTasksScope
-                                ? "Tâches ménagères"
+                                ? "TÃ¢ches mÃ©nagÃ¨res"
                                 : isBudgetScope
                                     ? "Budget"
                                 : isCalendarScope
@@ -2287,7 +2287,7 @@ export default function SetupHousehold() {
                                 size={24}
                                 color={theme.textSecondary}
                             />
-                        </TouchableOpacity>
+                        </AppButton>
 
                         {modulesExpanded ? (
                             <View style={styles.collapsibleSectionBody}>
@@ -2300,7 +2300,7 @@ export default function SetupHousehold() {
                                 <View style={[styles.moduleIcon, { backgroundColor: theme.background }]}> 
                                     <MaterialCommunityIcons name={module.icon as any} size={24} color={theme.tint} />
                                 </View>
-                                <TouchableOpacity
+                                <AppButton
                                     style={{ flex: 1 }}
                                     onPress={() => {
                                         if (!canExpandModulePanel) {
@@ -2312,14 +2312,14 @@ export default function SetupHousehold() {
                                 >
                                     <Text style={[styles.moduleLabel, { color: theme.text }]}>{module.label}</Text>
                                     <Text style={{ color: theme.textSecondary, fontSize: 12 }}>{module.desc}</Text>
-                                </TouchableOpacity>
+                                </AppButton>
                                 <Switch
                                     value={!!activeModules[module.id]}
                                     onValueChange={() => toggleModule(module.id)}
                                     trackColor={{ false: theme.icon, true: theme.tint }}
                                 />
                                 {canExpandModulePanel ? (
-                                    <TouchableOpacity
+                                    <AppButton
                                         onPress={() => toggleModulePanel(module.id)}
                                         style={{ marginLeft: 8, padding: 4 }}
                                         disabled={!activeModules[module.id]}
@@ -2329,7 +2329,7 @@ export default function SetupHousehold() {
                                             size={22}
                                             color={activeModules[module.id] ? theme.text : theme.icon}
                                         />
-                                    </TouchableOpacity>
+                                    </AppButton>
                                 ) : (
                                     <View style={styles.mealChevronSpacer} />
                                 )}
@@ -2346,7 +2346,7 @@ export default function SetupHousehold() {
                                                 trackColor={{ false: theme.icon, true: theme.tint }}
                                             />
                                             {showScopedModuleDetails ? (
-                                                <TouchableOpacity
+                                                <AppButton
                                                     onPress={() => toggleMealSection("recipes")}
                                                     style={{ marginLeft: 8, padding: 4 }}
                                                     disabled={!mealOptions.recipes}
@@ -2356,7 +2356,7 @@ export default function SetupHousehold() {
                                                         size={20}
                                                         color={mealOptions.recipes ? theme.text : theme.icon}
                                                     />
-                                                </TouchableOpacity>
+                                                </AppButton>
                                             ) : (
                                                 <View style={styles.mealChevronSpacer} />
                                             )}
@@ -2366,10 +2366,10 @@ export default function SetupHousehold() {
                                     {showScopedModuleDetails && mealOptions.recipes && mealExpandedSections.recipes && (
                                         <View style={[styles.mealSectionBox, { backgroundColor: theme.background }]}>
                                             <Text style={[styles.label, { color: theme.text, marginTop: 4 }]}>
-                                                Portions par défaut du foyer
+                                                Portions par dÃ©faut du foyer
                                             </Text>
-                                            <TextInput
-                                                style={[styles.input, { backgroundColor: theme.card, color: theme.text, marginBottom: 0 }]}
+                                            <AppTextInput
+                                                style={[styles.input, styles.inputNoMargin]}
                                                 value={defaultServings}
                                                 onChangeText={setDefaultServings}
                                                 keyboardType="numeric"
@@ -2382,7 +2382,7 @@ export default function SetupHousehold() {
                                             </Text>
                                             <View style={styles.categoryFilterWrap}>
                                                 {DIETARY_TYPE_ORDER.map((type) => (
-                                                    <TouchableOpacity
+                                                    <AppButton
                                                         key={type}
                                                         onPress={() => {
                                                             if (selectedDietaryTypeFilter === type) {
@@ -2407,22 +2407,22 @@ export default function SetupHousehold() {
                                                         >
                                                             {DIETARY_TYPE_LABELS[type]}
                                                         </Text>
-                                                    </TouchableOpacity>
+                                                    </AppButton>
                                                 ))}
                                             </View>
 
                                             {selectedTagsForCurrentType.length > 0 && (
                                                 <View style={{ marginBottom: 10 }}>
                                                     <Text style={[styles.selectedHint, { color: theme.textSecondary }]}>
-                                                        Sélection dans {DIETARY_TYPE_LABELS[selectedDietaryTypeFilter]}:
+                                                        SÃ©lection dans {DIETARY_TYPE_LABELS[selectedDietaryTypeFilter]}:
                                                     </Text>
                                                     <Text style={[styles.selectedValues, { color: theme.text }]}>
                                                         {selectedTagsForCurrentType.map((tag) => tag.label).join(", ")}
                                                     </Text>
                                                 </View>
                                             )}
-                                            <TextInput
-                                                style={[styles.input, { backgroundColor: theme.card, color: theme.text, marginBottom: 10 }]}
+                                            <AppTextInput
+                                                style={[styles.input, styles.inputWithSmallBottomSpacing]}
                                                 value={dietaryTagSearch}
                                                 onChangeText={setDietaryTagSearch}
                                                 placeholder={`Rechercher un tag (${DIETARY_TYPE_LABELS[selectedDietaryTypeFilter]})...`}
@@ -2438,14 +2438,14 @@ export default function SetupHousehold() {
                                                 </View>
                                             ) : filteredDietaryTags.length === 0 ? (
                                                 <Text style={{ color: theme.textSecondary, fontSize: 12 }}>
-                                                    Aucun tag ne correspond à la recherche.
+                                                    Aucun tag ne correspond Ã  la recherche.
                                                 </Text>
                                             ) : (
                                                 <View style={styles.tagsWrap}>
                                                     {filteredDietaryTags.map((tag) => {
                                                         const isSelected = selectedMealDietaryTags.includes(tag.key);
                                                         return (
-                                                            <TouchableOpacity
+                                                            <AppButton
                                                                 key={tag.id}
                                                                 onPress={() => toggleMealDietaryTag(tag.key)}
                                                                 style={[
@@ -2466,7 +2466,7 @@ export default function SetupHousehold() {
                                                                 <Text style={[styles.tagChipType, { color: theme.textSecondary }]}>
                                                                     {DIETARY_TYPE_LABELS[tag.type]}
                                                                 </Text>
-                                                            </TouchableOpacity>
+                                                            </AppButton>
                                                         );
                                                     })}
                                                 </View>
@@ -2478,9 +2478,9 @@ export default function SetupHousehold() {
                                                         Ajouter &quot;{dietaryTagSearch.trim()}&quot; ?
                                                     </Text>
                                                     <Text style={[styles.createTagTypeText, { color: theme.textSecondary }]}>
-                                                        Catégorie: {DIETARY_TYPE_LABELS[selectedDietaryTypeFilter]}
+                                                        CatÃ©gorie: {DIETARY_TYPE_LABELS[selectedDietaryTypeFilter]}
                                                     </Text>
-                                                    <TouchableOpacity
+                                                    <AppButton
                                                         onPress={createDietaryTag}
                                                         disabled={creatingDietaryTag}
                                                         style={[styles.createTagBtn, { backgroundColor: theme.tint, opacity: creatingDietaryTag ? 0.7 : 1 }]}
@@ -2490,7 +2490,7 @@ export default function SetupHousehold() {
                                                         ) : (
                                                             <Text style={styles.createTagBtnText}>Ajouter ce tag</Text>
                                                         )}
-                                                    </TouchableOpacity>
+                                                    </AppButton>
                                                 </View>
                                             )}
                                         </View>
@@ -2505,7 +2505,7 @@ export default function SetupHousehold() {
                                                 trackColor={{ false: theme.icon, true: theme.tint }}
                                             />
                                             {showScopedModuleDetails ? (
-                                                <TouchableOpacity
+                                                <AppButton
                                                     onPress={() => toggleMealSection("polls")}
                                                     style={{ marginLeft: 8, padding: 4 }}
                                                     disabled={!mealOptions.polls}
@@ -2515,7 +2515,7 @@ export default function SetupHousehold() {
                                                         size={20}
                                                         color={mealOptions.polls ? theme.text : theme.icon}
                                                     />
-                                                </TouchableOpacity>
+                                                </AppButton>
                                             ) : (
                                                 <View style={styles.mealChevronSpacer} />
                                             )}
@@ -2527,7 +2527,7 @@ export default function SetupHousehold() {
                                             <Text style={[styles.label, { color: theme.text, marginTop: 6 }]}>Jour du sondage</Text>
                                             <View style={styles.daysContainer}>
                                                 {DAYS.map((day) => (
-                                                    <TouchableOpacity
+                                                    <AppButton
                                                         key={day.value}
                                                         onPress={() => setPollDay(day.value)}
                                                         style={[
@@ -2537,15 +2537,15 @@ export default function SetupHousehold() {
                                                         ]}
                                                     >
                                                         <Text style={{ color: pollDay === day.value ? "white" : theme.text, fontSize: 12 }}>{day.label}</Text>
-                                                    </TouchableOpacity>
+                                                    </AppButton>
                                                 ))}
                                             </View>
 
                                             <View style={{ flexDirection: "row", gap: 12, marginTop: 10 }}>
                                                 <View style={{ flex: 1 }}>
                                                     <Text style={[styles.label, { color: theme.text }]}>Heure</Text>
-                                                    <TextInput
-                                                        style={[styles.input, { backgroundColor: theme.card, color: theme.text, textAlign: "center", marginBottom: 0 }]}
+                                                    <AppTextInput
+                                                        style={[styles.input, styles.inputCentered, styles.inputNoMargin]}
                                                         value={pollTime}
                                                         onChangeText={setPollTime}
                                                         placeholder="10:00"
@@ -2557,7 +2557,7 @@ export default function SetupHousehold() {
                                                     <Text style={[styles.label, { color: theme.text }]}>Duree</Text>
                                                     <View style={{ flexDirection: "row", gap: 6 }}>
                                                         {DURATION_CHOICES.map((value) => (
-                                                            <TouchableOpacity
+                                                            <AppButton
                                                                 key={value}
                                                                 onPress={() => setPollDuration(value)}
                                                                 style={[
@@ -2567,14 +2567,14 @@ export default function SetupHousehold() {
                                                                 ]}
                                                             >
                                                                 <Text style={{ color: pollDuration === value ? "white" : theme.text }}>{value}h</Text>
-                                                            </TouchableOpacity>
+                                                            </AppButton>
                                                         ))}
                                                     </View>
                                                 </View>
                                             </View>
                                             <Text style={[styles.label, { color: theme.text, marginTop: 12 }]}>Max votes par utilisateur</Text>
-                                            <TextInput
-                                                style={[styles.input, { backgroundColor: theme.card, color: theme.text, marginBottom: 0 }]}
+                                            <AppTextInput
+                                                style={[styles.input, styles.inputNoMargin]}
                                                 value={maxVotesPerUser}
                                                 onChangeText={setMaxVotesPerUser}
                                                 keyboardType="numeric"
@@ -2611,7 +2611,7 @@ export default function SetupHousehold() {
                                     </View>
 
                                     <View style={styles.switchRow}>
-                                        <Text style={[styles.label, { color: theme.text, marginBottom: 0 }]}>Garde alternée</Text>
+                                        <Text style={[styles.label, { color: theme.text, marginBottom: 0 }]}>Garde alternÃ©e</Text>
                                         <Switch
                                             value={tasksSettings.alternating_custody_enabled}
                                             onValueChange={(value) =>
@@ -2626,7 +2626,7 @@ export default function SetupHousehold() {
                                             <Text style={[styles.label, { color: theme.text, marginTop: 6 }]}>Jour de bascule</Text>
                                             <View style={styles.daysContainer}>
                                                 {DAYS.map((day) => (
-                                                    <TouchableOpacity
+                                                    <AppButton
                                                         key={`custody-day-${day.value}`}
                                                         onPress={() =>
                                                             setTasksSettings((prev) => ({
@@ -2653,12 +2653,12 @@ export default function SetupHousehold() {
                                                         >
                                                             {day.label}
                                                         </Text>
-                                                    </TouchableOpacity>
+                                                    </AppButton>
                                                 ))}
                                             </View>
 
-                                            <Text style={[styles.label, { color: theme.text }]}>Début d&apos;une semaine à la maison</Text>
-                                            <TouchableOpacity
+                                            <Text style={[styles.label, { color: theme.text }]}>DÃ©but d&apos;une semaine Ã  la maison</Text>
+                                            <AppButton
                                                 onPress={openCustodyDateWheel}
                                                 style={[styles.pickerFieldBtn, { borderColor: theme.icon, backgroundColor: theme.background }]}
                                             >
@@ -2666,10 +2666,10 @@ export default function SetupHousehold() {
                                                 <Text style={[styles.pickerFieldText, { color: theme.text }]}>
                                                     {tasksSettings.custody_home_week_start}
                                                 </Text>
-                                            </TouchableOpacity>
+                                            </AppButton>
                                             {custodyDateWheelVisible ? (
                                                 <View style={[styles.inlineWheelPanel, { borderColor: theme.icon, backgroundColor: theme.background }]}>
-                                                    <Text style={[styles.label, { color: theme.text }]}>Choisir la semaine de référence</Text>
+                                                    <Text style={[styles.label, { color: theme.text }]}>Choisir la semaine de rÃ©fÃ©rence</Text>
 
                                                     <View style={styles.wheelRow}>
                                                         <View style={styles.wheelColumn}>
@@ -2798,12 +2798,12 @@ export default function SetupHousehold() {
                                                 </View>
                                             ) : null}
                                             <Text style={[styles.memberMeta, { color: theme.textSecondary }]}>
-                                                Les tâches récurrentes des enfants seront planifiées une semaine sur deux, à partir de cette semaine.
+                                                Les tÃ¢ches rÃ©currentes des enfants seront planifiÃ©es une semaine sur deux, Ã  partir de cette semaine.
                                             </Text>
                                         </>
                                     ) : (
                                         <Text style={[styles.memberMeta, { color: theme.textSecondary, marginTop: 4 }]}>
-                                            Active la garde alternée pour limiter les routines enfants aux semaines à la maison.
+                                            Active la garde alternÃ©e pour limiter les routines enfants aux semaines Ã  la maison.
                                         </Text>
                                     )}
                                 </View>
@@ -2812,7 +2812,7 @@ export default function SetupHousehold() {
                             {showScopedModuleDetails && activeModules[module.id] && expandedModules[module.id] && module.id === "calendar" && (
                                 <View style={styles.subConfigBox}>
                                     <View style={styles.switchRow}>
-                                        <Text style={[styles.label, { color: theme.text }]}>Vue partagée</Text>
+                                        <Text style={[styles.label, { color: theme.text }]}>Vue partagÃ©e</Text>
                                         <Switch
                                             value={calendarSettings.shared_view_enabled}
                                             onValueChange={(value) => setCalendarSettings((prev) => ({ ...prev, shared_view_enabled: value }))}
@@ -2834,9 +2834,9 @@ export default function SetupHousehold() {
                                 <View style={styles.subConfigBox}>
                                     {isEditMode ? (
                                         <>
-                                            <Text style={[styles.label, { color: theme.text }]}>Paramètres par enfant</Text>
+                                            <Text style={[styles.label, { color: theme.text }]}>ParamÃ¨tres par enfant</Text>
                                             <Text style={[styles.memberMeta, { color: theme.textSecondary, marginBottom: 8 }]}>
-                                                Définis ici le montant de base, la récurrence, le jour de réinitialisation et les règles d&apos;avance.
+                                                DÃ©finis ici le montant de base, la rÃ©currence, le jour de rÃ©initialisation et les rÃ¨gles d&apos;avance.
                                             </Text>
 
                                             {budgetSettingsLoading ? (
@@ -2845,7 +2845,7 @@ export default function SetupHousehold() {
                                                 <Text style={[styles.memberMeta, { color: theme.accentWarm }]}>{budgetSettingsError}</Text>
                                             ) : budgetChildDrafts.length === 0 ? (
                                                 <Text style={[styles.memberMeta, { color: theme.textSecondary }]}>
-                                                    Aucun enfant trouvé pour ce foyer.
+                                                    Aucun enfant trouvÃ© pour ce foyer.
                                                 </Text>
                                             ) : (
                                                 <View style={{ gap: 10 }}>
@@ -2854,8 +2854,8 @@ export default function SetupHousehold() {
                                                             <Text style={[styles.memberName, { color: theme.text }]}>{draft.childName}</Text>
 
                                                             <Text style={[styles.label, { color: theme.text, marginBottom: 4 }]}>Montant de base</Text>
-                                                            <TextInput
-                                                                style={[styles.budgetCompactInput, { backgroundColor: theme.card, color: theme.text }]}
+                                                            <AppTextInput
+                                                                style={styles.budgetCompactInput}
                                                                 keyboardType="decimal-pad"
                                                                 value={draft.baseAmountInput}
                                                                 onChangeText={(value) => updateBudgetChildDraft(draft.childId, { baseAmountInput: value })}
@@ -2863,9 +2863,9 @@ export default function SetupHousehold() {
                                                                 placeholderTextColor={theme.textSecondary}
                                                             />
 
-                                                            <Text style={[styles.label, { color: theme.text, marginBottom: 4 }]}>Récurrence</Text>
+                                                            <Text style={[styles.label, { color: theme.text, marginBottom: 4 }]}>RÃ©currence</Text>
                                                             <View style={styles.budgetRecurrenceRow}>
-                                                                <TouchableOpacity
+                                                                <AppButton
                                                                     onPress={() => updateBudgetChildDraft(draft.childId, { recurrence: "weekly" })}
                                                                     style={[
                                                                         styles.budgetChoiceBtn,
@@ -2877,8 +2877,8 @@ export default function SetupHousehold() {
                                                                     <Text style={[styles.budgetChoiceText, { color: draft.recurrence === "weekly" ? "#FFFFFF" : theme.text }]}>
                                                                         Hebdomadaire
                                                                     </Text>
-                                                                </TouchableOpacity>
-                                                                <TouchableOpacity
+                                                                </AppButton>
+                                                                <AppButton
                                                                     onPress={() => updateBudgetChildDraft(draft.childId, { recurrence: "monthly" })}
                                                                     style={[
                                                                         styles.budgetChoiceBtn,
@@ -2890,20 +2890,20 @@ export default function SetupHousehold() {
                                                                     <Text style={[styles.budgetChoiceText, { color: draft.recurrence === "monthly" ? "#FFFFFF" : theme.text }]}>
                                                                         Mensuelle
                                                                     </Text>
-                                                                </TouchableOpacity>
+                                                                </AppButton>
                                                             </View>
 
                                                             <Text style={[styles.label, { color: theme.text, marginBottom: 4 }]}>
                                                                 {draft.recurrence === "weekly"
-                                                                    ? "Jour de réinitialisation (1 à 7)"
-                                                                    : "Jour de réinitialisation (1 à 31)"}
+                                                                    ? "Jour de rÃ©initialisation (1 Ã  7)"
+                                                                    : "Jour de rÃ©initialisation (1 Ã  31)"}
                                                             </Text>
-                                                            <TextInput
-                                                                style={[styles.budgetCompactInput, { backgroundColor: theme.card, color: theme.text }]}
+                                                            <AppTextInput
+                                                                style={styles.budgetCompactInput}
                                                                 keyboardType="number-pad"
                                                                 value={draft.resetDayInput}
                                                                 onChangeText={(value) => updateBudgetChildDraft(draft.childId, { resetDayInput: value })}
-                                                                placeholder={draft.recurrence === "weekly" ? "1 à 7" : "1 à 31"}
+                                                                placeholder={draft.recurrence === "weekly" ? "1 Ã  7" : "1 Ã  31"}
                                                                 placeholderTextColor={theme.textSecondary}
                                                             />
 
@@ -2917,8 +2917,8 @@ export default function SetupHousehold() {
                                                             </View>
 
                                                             <Text style={[styles.label, { color: theme.text, marginBottom: 4 }]}>Plafond d&apos;avance</Text>
-                                                            <TextInput
-                                                                style={[styles.budgetCompactInput, { backgroundColor: theme.card, color: theme.text, opacity: draft.allowAdvances ? 1 : 0.65 }]}
+                                                            <AppTextInput
+                                                                style={[styles.budgetCompactInput, !draft.allowAdvances && styles.inputDisabled]}
                                                                 keyboardType="decimal-pad"
                                                                 value={draft.maxAdvanceInput}
                                                                 editable={draft.allowAdvances}
@@ -2927,7 +2927,7 @@ export default function SetupHousehold() {
                                                                 placeholderTextColor={theme.textSecondary}
                                                             />
 
-                                                            <TouchableOpacity
+                                                            <AppButton
                                                                 onPress={() => {
                                                                     void saveBudgetChildDraft(draft);
                                                                 }}
@@ -2939,7 +2939,7 @@ export default function SetupHousehold() {
                                                                 ) : (
                                                                     <Text style={styles.budgetSaveBtnText}>Enregistrer pour {draft.childName}</Text>
                                                                 )}
-                                                            </TouchableOpacity>
+                                                            </AppButton>
                                                         </View>
                                                     ))}
                                                 </View>
@@ -2947,7 +2947,7 @@ export default function SetupHousehold() {
                                         </>
                                     ) : (
                                         <Text style={[styles.memberMeta, { color: theme.textSecondary }]}>
-                                            Les paramètres détaillés par enfant seront disponibles dès que le foyer sera créé.
+                                            Les paramÃ¨tres dÃ©taillÃ©s par enfant seront disponibles dÃ¨s que le foyer sera crÃ©Ã©.
                                         </Text>
                                     )}
                                 </View>
@@ -2960,7 +2960,7 @@ export default function SetupHousehold() {
                     </View>
                 </View>
 
-                <TouchableOpacity
+                <AppButton
                     style={[styles.submitButton, { backgroundColor: theme.tint, opacity: loading ? 0.7 : 1 }]}
                     onPress={handleSave}
                     disabled={loading}
@@ -2969,10 +2969,10 @@ export default function SetupHousehold() {
                         <ActivityIndicator color="white" />
                     ) : (
                         <Text style={styles.submitButtonText}>
-                            {isEditMode ? "Enregistrer la configuration" : "Créer le foyer"}
+                            {isEditMode ? "Enregistrer la configuration" : "CrÃ©er le foyer"}
                         </Text>
                     )}
-                </TouchableOpacity>
+                </AppButton>
 
                 <View style={{ height: 40 }} />
             </ScrollView>
@@ -3008,6 +3008,11 @@ const styles = StyleSheet.create({
     sectionTitle: { fontSize: 16, fontWeight: "700", marginBottom: 12 },
     label: { fontSize: 14, fontWeight: "600", marginBottom: 8 },
     input: { height: 50, borderRadius: 12, paddingHorizontal: 16, fontSize: 16, marginBottom: 16 },
+    inputNoMargin: { marginBottom: 0 },
+    inputWithBottomSpacing: { marginBottom: 12 },
+    inputWithSmallBottomSpacing: { marginBottom: 10 },
+    inputCentered: { textAlign: "center" },
+    inputDisabled: { opacity: 0.65 },
     pickerFieldBtn: {
         borderWidth: 1,
         borderRadius: 10,
@@ -3447,3 +3452,5 @@ const styles = StyleSheet.create({
     },
     submitButtonText: { color: "white", fontSize: 18, fontWeight: "bold" },
 });
+
+

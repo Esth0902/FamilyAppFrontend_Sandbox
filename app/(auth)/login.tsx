@@ -2,11 +2,8 @@ import React, { useState } from "react";
 import {
     View,
     Text,
-    TextInput,
-    TouchableOpacity,
     StyleSheet,
     Alert,
-    ActivityIndicator,
     useColorScheme,
 } from "react-native";
 import { useRouter } from "expo-router";
@@ -15,6 +12,9 @@ import { API_BASE_URL, apiFetch } from "@/src/api/client";
 import { Colors } from "@/constants/theme";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { normalizeStoredUser, persistStoredUser, type StoredUser } from "@/src/session/user-cache";
+import { setAuthToken } from "@/src/store/useAuthStore";
+import { AppButton } from "@/src/components/ui/AppButton";
+import { AppTextInput } from "@/src/components/ui/AppTextInput";
 
 const parseJsonSafe = async (response: Response) => {
     const text = await response.text();
@@ -77,6 +77,7 @@ export default function Login() {
             }
 
             await SecureStore.setItemAsync("authToken", accessToken);
+            setAuthToken(accessToken);
 
             let resolvedUser: StoredUser | null = data?.user ? (data.user as StoredUser) : null;
 
@@ -92,7 +93,7 @@ export default function Login() {
                     resolvedUser = meResponse.user as StoredUser;
                 }
             } catch (syncError) {
-                console.warn("Impossible de synchroniser /me apres login:", syncError);
+                console.warn("Impossible de synchroniser /me après login:", syncError);
             }
 
             if (resolvedUser) {
@@ -120,45 +121,41 @@ export default function Login() {
         <View style={[styles.container, { backgroundColor: theme.background }]}>
             <View style={styles.content}>
 
-                <TouchableOpacity onPress={() => router.back()} style={[styles.backButton, { borderColor: theme.icon }]}>
+                <AppButton onPress={() => router.back()} style={[styles.backButton, { borderColor: theme.icon }]}> 
                     <MaterialCommunityIcons name="arrow-left" size={20} color={theme.tint} />
-                </TouchableOpacity>
+                </AppButton>
 
                 <View style={styles.header}>
                     <Text style={[styles.title, { color: theme.text }]}>Bon retour !</Text>
-                    <Text style={[styles.subtitle, { color: theme.textSecondary }]}>
+                    <Text style={[styles.subtitle, { color: theme.textSecondary }]}> 
                         Connecte-toi pour accéder à ton foyer.
                     </Text>
                 </View>
 
                 <View style={styles.form}>
-                    <Text style={[styles.label, { color: theme.text }]}>E-mail</Text>
-                    <TextInput
-                        style={[styles.input, { backgroundColor: theme.card, color: theme.text, borderColor: theme.icon }]}
+                    <AppTextInput
+                        label="E-mail"
+                        style={styles.input}
+                        containerStyle={styles.inputContainer}
                         placeholder="Ex: parent@famille.com"
-                        placeholderTextColor={theme.textSecondary}
                         autoCapitalize="none"
                         keyboardType="email-address"
                         value={email}
                         onChangeText={setEmail}
                     />
 
-                    <Text style={[styles.label, { color: theme.text }]}>Mot de passe</Text>
                     <View style={styles.passwordFieldContainer}>
-                        <TextInput
-                            style={[
-                                styles.input,
-                                styles.passwordInput,
-                                { backgroundColor: theme.card, color: theme.text, borderColor: theme.icon },
-                            ]}
+                        <AppTextInput
+                            label="Mot de passe"
+                            style={[styles.input, styles.passwordInput]}
+                            containerStyle={styles.inputContainer}
                             placeholder="••••••••"
-                            placeholderTextColor={theme.textSecondary}
                             secureTextEntry={!showPassword}
                             value={password}
                             onChangeText={setPassword}
                         />
 
-                        <TouchableOpacity
+                        <AppButton
                             onPress={() => setShowPassword((prev) => !prev)}
                             style={styles.eyeButton}
                             accessibilityLabel={showPassword ? "Masquer le mot de passe" : "Afficher le mot de passe"}
@@ -168,29 +165,24 @@ export default function Login() {
                                 size={20}
                                 color={theme.textSecondary}
                             />
-                        </TouchableOpacity>
+                        </AppButton>
                     </View>
 
-                    <TouchableOpacity
-                        style={{ alignSelf: 'flex-end', marginBottom: 24 }}
+                    <AppButton
+                        title="Mot de passe oublié ?"
+                        variant="ghost"
+                        style={styles.forgotPasswordButton}
+                        textStyle={styles.forgotPasswordText}
                         onPress={() => router.push("/forgot-password")}
-                    >
-                        <Text style={{ color: theme.accentCool, fontSize: 14 }}>
-                            Mot de passe oublié ?
-                        </Text>
-                    </TouchableOpacity>
+                    />
 
-                    {loading ? (
-                        <ActivityIndicator size="large" color={theme.tint} />
-                    ) : (
-                        <TouchableOpacity
-                            style={[styles.loginButton, { backgroundColor: theme.tint }]}
-                            onPress={onLogin}
-                            activeOpacity={0.8}
-                        >
-                            <Text style={styles.loginButtonText}>Se connecter</Text>
-                        </TouchableOpacity>
-                    )}
+                    <AppButton
+                        title="Se connecter"
+                        variant="primary"
+                        loading={loading}
+                        style={styles.loginButton}
+                        onPress={onLogin}
+                    />
                 </View>
             </View>
         </View>
@@ -216,8 +208,6 @@ const styles = StyleSheet.create({
         height: 36,
         borderRadius: 18,
         borderWidth: 1,
-        alignItems: "center",
-        justifyContent: "center",
     },
     header: {
         marginBottom: 32,
@@ -234,52 +224,43 @@ const styles = StyleSheet.create({
     form: {
         width: '100%',
     },
-    label: {
-        fontSize: 14,
-        fontWeight: '600',
-        marginBottom: 8,
-        marginLeft: 4,
+    inputContainer: {
+        marginBottom: 16,
     },
     input: {
-        width: '100%',
         height: 50,
-        borderWidth: 1,
-        borderRadius: 12,
-        paddingHorizontal: 16,
-        marginBottom: 16,
-        fontSize: 16,
+        marginBottom: 0,
     },
     passwordFieldContainer: {
         position: "relative",
         marginBottom: 16,
     },
     passwordInput: {
-        marginBottom: 0,
         paddingRight: 48,
     },
     eyeButton: {
         position: "absolute",
         right: 12,
-        top: 0,
-        bottom: 0,
-        justifyContent: "center",
-        alignItems: "center",
+        top: 36,
+        width: 24,
+        height: 24,
+    },
+    forgotPasswordButton: {
+        alignSelf: "flex-end",
+        marginBottom: 24,
+        minHeight: 24,
+    },
+    forgotPasswordText: {
+        fontSize: 14,
     },
     loginButton: {
         width: '100%',
-        height: 54,
+        minHeight: 54,
         borderRadius: 12,
-        alignItems: 'center',
-        justifyContent: 'center',
         shadowColor: "#000",
         shadowOffset: { width: 0, height: 4 },
         shadowOpacity: 0.2,
         shadowRadius: 5,
         elevation: 4,
     },
-    loginButtonText: {
-        color: 'white',
-        fontSize: 18,
-        fontWeight: 'bold',
-    }
 });

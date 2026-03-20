@@ -2,11 +2,8 @@ import React, { useState } from "react";
 import {
     View,
     Text,
-    TextInput,
-    TouchableOpacity,
     StyleSheet,
     Alert,
-    ActivityIndicator,
     ScrollView,
     KeyboardAvoidingView,
     Platform,
@@ -18,6 +15,9 @@ import { API_BASE_URL, apiFetch } from "@/src/api/client";
 import { Colors } from "@/constants/theme";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { normalizeStoredUser, persistStoredUser, type StoredUser } from "@/src/session/user-cache";
+import { setAuthToken } from "@/src/store/useAuthStore";
+import { AppButton } from "@/src/components/ui/AppButton";
+import { AppTextInput } from "@/src/components/ui/AppTextInput";
 
 const parseJsonSafe = async (response: Response) => {
     const text = await response.text();
@@ -99,6 +99,7 @@ export default function Register() {
             }
 
             await SecureStore.setItemAsync("authToken", accessToken);
+            setAuthToken(accessToken);
 
             let resolvedUser: StoredUser | null = data?.user ? (data.user as StoredUser) : null;
 
@@ -114,7 +115,7 @@ export default function Register() {
                     resolvedUser = meResponse.user as StoredUser;
                 }
             } catch (syncError) {
-                console.warn("Impossible de synchroniser /me apres inscription:", syncError);
+                console.warn("Impossible de synchroniser /me après inscription:", syncError);
             }
 
             if (resolvedUser) {
@@ -124,7 +125,7 @@ export default function Register() {
                 }
             }
 
-            Alert.alert("Bienvenue !", "Compte a été créé avec succès.");
+            Alert.alert("Bienvenue !", "Compte créé avec succès.");
             router.replace("/(tabs)/home");
         } catch (error: unknown) {
             console.error(error);
@@ -140,50 +141,51 @@ export default function Register() {
             style={{ flex: 1, backgroundColor: theme.background }}
         >
             <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.scrollContainer}>
-                <TouchableOpacity onPress={() => router.back()} style={[styles.backButton, { borderColor: theme.icon }]}>
+                <AppButton onPress={() => router.back()} style={[styles.backButton, { borderColor: theme.icon }]}> 
                     <MaterialCommunityIcons name="arrow-left" size={20} color={theme.tint} />
-                </TouchableOpacity>
+                </AppButton>
 
                 <View style={styles.header}>
                     <Text style={[styles.title, { color: theme.text }]}>Créer un compte</Text>
-                    <Text style={[styles.subtitle, { color: theme.textSecondary }]}>
+                    <Text style={[styles.subtitle, { color: theme.textSecondary }]}> 
                         Rejoins FamilyFlow pour organiser ta vie de famille.
                     </Text>
                 </View>
 
                 <View style={styles.form}>
-                    <Text style={[styles.label, { color: theme.text }]}>Nom complet</Text>
-                    <TextInput
-                        style={[styles.input, { backgroundColor: theme.card, color: theme.text, borderColor: theme.icon }]}
+                    <AppTextInput
+                        label="Nom complet"
+                        style={styles.input}
+                        containerStyle={styles.inputContainer}
                         placeholder="Ex: Sophie"
-                        placeholderTextColor={theme.textSecondary}
                         value={name}
                         onChangeText={setName}
                     />
 
-                    <Text style={[styles.label, { color: theme.text }]}>E-mail</Text>
-                    <TextInput
-                        style={[styles.input, { backgroundColor: theme.card, color: theme.text, borderColor: theme.icon }]}
+                    <AppTextInput
+                        label="E-mail"
+                        style={styles.input}
+                        containerStyle={styles.inputContainer}
                         placeholder="Ex: parent@famille.com"
-                        placeholderTextColor={theme.textSecondary}
                         autoCapitalize="none"
                         keyboardType="email-address"
                         value={email}
                         onChangeText={setEmail}
+                        error={fieldErrors.email}
                     />
-                    {fieldErrors.email && <Text style={styles.errorText}>{fieldErrors.email}</Text>}
 
-                    <Text style={[styles.label, { color: theme.text }]}>Mot de passe</Text>
                     <View style={styles.passwordFieldContainer}>
-                        <TextInput
-                            style={[styles.input, styles.passwordInput, { backgroundColor: theme.card, color: theme.text, borderColor: theme.icon }]}
+                        <AppTextInput
+                            label="Mot de passe"
+                            style={[styles.input, styles.passwordInput]}
+                            containerStyle={styles.inputContainer}
                             placeholder="Min 8 caractères"
-                            placeholderTextColor={theme.textSecondary}
                             secureTextEntry={!showPassword}
                             value={password}
                             onChangeText={setPassword}
+                            error={fieldErrors.password}
                         />
-                        <TouchableOpacity
+                        <AppButton
                             style={styles.eyeButton}
                             onPress={() => setShowPassword((prev) => !prev)}
                             accessibilityLabel={showPassword ? "Masquer le mot de passe" : "Afficher le mot de passe"}
@@ -193,51 +195,51 @@ export default function Register() {
                                 size={20}
                                 color={theme.textSecondary}
                             />
-                        </TouchableOpacity>
+                        </AppButton>
                     </View>
 
-                    <Text style={[styles.label, { color: theme.text }]}>Confirmation</Text>
                     <View style={styles.passwordFieldContainer}>
-                        <TextInput
-                            style={[styles.input, styles.passwordInput, { backgroundColor: theme.card, color: theme.text, borderColor: theme.icon }]}
+                        <AppTextInput
+                            label="Confirmation"
+                            style={[styles.input, styles.passwordInput]}
+                            containerStyle={styles.inputContainer}
                             placeholder="Répétez le mot de passe"
-                            placeholderTextColor={theme.textSecondary}
                             secureTextEntry={!showPasswordConfirm}
                             value={passwordConfirm}
                             onChangeText={setPasswordConfirm}
                         />
-                        <TouchableOpacity
+                        <AppButton
                             style={styles.eyeButton}
                             onPress={() => setShowPasswordConfirm((prev) => !prev)}
-                            accessibilityLabel={showPasswordConfirm ? "Masquer le mot de passe de confirmation" : "Afficher le mot de passe de confirmation"}
+                            accessibilityLabel={showPasswordConfirm ? "Masquer la confirmation" : "Afficher la confirmation"}
                         >
                             <MaterialCommunityIcons
                                 name={showPasswordConfirm ? "eye-off-outline" : "eye-outline"}
                                 size={20}
                                 color={theme.textSecondary}
                             />
-                        </TouchableOpacity>
+                        </AppButton>
                     </View>
 
                     <View style={{ height: 20 }} />
 
-                    {loading ? (
-                        <ActivityIndicator size="large" color={theme.tint} />
-                    ) : (
-                        <TouchableOpacity
-                            style={[styles.primaryButton, { backgroundColor: theme.tint }]}
-                            onPress={onRegister}
-                            activeOpacity={0.8}
-                        >
-                            <Text style={styles.primaryButtonText}>Créer mon compte</Text>
-                        </TouchableOpacity>
-                    )}
+                    <AppButton
+                        title="Créer mon compte"
+                        variant="primary"
+                        loading={loading}
+                        style={styles.primaryButton}
+                        onPress={onRegister}
+                    />
 
                     <View style={styles.footerLink}>
                         <Text style={{ color: theme.textSecondary }}>Déjà un compte ? </Text>
-                        <TouchableOpacity onPress={() => router.push("/login")}>
-                            <Text style={{ color: theme.accentCool, fontWeight: "bold" }}>Se connecter</Text>
-                        </TouchableOpacity>
+                        <AppButton
+                            title="Se connecter"
+                            variant="ghost"
+                            style={styles.footerAction}
+                            textStyle={styles.footerActionText}
+                            onPress={() => router.push("/login")}
+                        />
                     </View>
                 </View>
             </ScrollView>
@@ -260,8 +262,6 @@ const styles = StyleSheet.create({
         height: 36,
         borderRadius: 18,
         borderWidth: 1,
-        alignItems: "center",
-        justifyContent: "center",
     },
     header: {
         marginTop: 40,
@@ -278,65 +278,48 @@ const styles = StyleSheet.create({
     form: {
         width: "100%",
     },
-    label: {
-        fontSize: 14,
-        fontWeight: "600",
-        marginBottom: 8,
-        marginLeft: 4,
+    inputContainer: {
+        marginBottom: 16,
     },
     input: {
-        width: "100%",
         height: 50,
-        borderWidth: 1,
-        borderRadius: 12,
-        paddingHorizontal: 16,
-        marginBottom: 16,
-        fontSize: 16,
+        marginBottom: 0,
     },
     passwordFieldContainer: {
         position: "relative",
         marginBottom: 16,
     },
     passwordInput: {
-        marginBottom: 0,
         paddingRight: 48,
     },
     eyeButton: {
         position: "absolute",
         right: 12,
-        top: 0,
-        bottom: 0,
-        justifyContent: "center",
-        alignItems: "center",
+        top: 36,
+        width: 24,
+        height: 24,
     },
     primaryButton: {
         width: "100%",
-        height: 54,
+        minHeight: 54,
         borderRadius: 12,
-        alignItems: "center",
-        justifyContent: "center",
         shadowColor: "#000",
         shadowOffset: { width: 0, height: 4 },
         shadowOpacity: 0.2,
         shadowRadius: 5,
         elevation: 4,
     },
-    primaryButtonText: {
-        color: "#FFFFFF",
-        fontSize: 18,
-        fontWeight: "bold",
-    },
     footerLink: {
         flexDirection: "row",
         justifyContent: "center",
+        alignItems: "center",
         marginTop: 24,
         marginBottom: 40,
     },
-    errorText: {
-        color: "red",
-        fontSize: 12,
-        marginTop: -12,
-        marginBottom: 10,
-        marginLeft: 4,
+    footerAction: {
+        minHeight: 24,
+    },
+    footerActionText: {
+        fontWeight: "bold",
     },
 });

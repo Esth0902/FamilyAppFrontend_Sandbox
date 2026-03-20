@@ -3,12 +3,12 @@ import {
     View,
     Text,
     StyleSheet,
-    TouchableOpacity,
     useColorScheme, Platform,
     Image,
 } from "react-native";
 import { useRouter } from "expo-router";
 import { Colors } from "@/constants/theme";
+import { AppButton } from "@/src/components/ui/AppButton";
 
 export default function PublicHome() {
     const router = useRouter();
@@ -18,7 +18,7 @@ export default function PublicHome() {
     const logoContainerBackground = isDark ? "#D9DDE3" : theme.card;
 
     return (
-        <View style={[styles.container, { backgroundColor: theme.background }]}>
+        <View style={[styles.container, { backgroundColor: theme.background }]}> 
 
             <View style={styles.heroSection}>
                 <View
@@ -38,35 +38,29 @@ export default function PublicHome() {
                     />
                 </View>
 
-                <Text style={[styles.logoText, { color: theme.text }]}>
+                <Text style={[styles.logoText, { color: theme.text }]}> 
                     FamilyFlow
                 </Text>
 
-                <Text style={[styles.subtitle, { color: theme.textSecondary }]}>
+                <Text style={[styles.subtitle, { color: theme.textSecondary }]}> 
                     Centralise la gestion de ton foyer : repas, tâches, budget, calendrier et garde alternée.
                 </Text>
             </View>
 
             <View style={styles.buttonsContainer}>
-
-                <TouchableOpacity
-                    style={[styles.buttonPrimary, { backgroundColor: theme.tint }]}
+                <AppButton
+                    title="Se connecter"
+                    variant="primary"
+                    style={styles.buttonPrimary}
                     onPress={() => router.push("/login")}
-                    activeOpacity={0.8}
-                >
-                    <Text style={styles.buttonPrimaryText}>Se connecter</Text>
-                </TouchableOpacity>
+                />
 
-                <TouchableOpacity
-                    style={[styles.buttonSecondary, { borderColor: theme.tint }]}
+                <AppButton
+                    title="Créer un compte"
+                    variant="secondary"
+                    style={styles.buttonSecondary}
                     onPress={() => router.push("/register")}
-                    activeOpacity={0.6}
-                >
-                    <Text style={[styles.buttonSecondaryText, { color: theme.tint }]}>
-                        Créer un compte
-                    </Text>
-                </TouchableOpacity>
-
+                />
             </View>
         </View>
     );
@@ -124,33 +118,19 @@ const styles = StyleSheet.create({
 
     buttonPrimary: {
         width: '100%',
-        paddingVertical: 16,
+        minHeight: 54,
         borderRadius: 16,
-        alignItems: 'center',
-        justifyContent: 'center',
         shadowColor: "#000",
         shadowOffset: { width: 0, height: 4 },
         shadowOpacity: 0.2,
         shadowRadius: 8,
         elevation: 4,
     },
-    buttonPrimaryText: {
-        color: '#FFFFFF',
-        fontSize: 18,
-        fontWeight: '600',
-    },
 
     buttonSecondary: {
         width: '100%',
-        paddingVertical: 16,
+        minHeight: 54,
         borderRadius: 16,
-        alignItems: 'center',
-        justifyContent: 'center',
         borderWidth: 2,
-        backgroundColor: 'transparent',
     },
-    buttonSecondaryText: {
-        fontSize: 18,
-        fontWeight: '600',
-    }
 });

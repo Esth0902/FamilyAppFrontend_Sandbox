@@ -1,8 +1,8 @@
-import { Slot, useRouter, useSegments } from "expo-router";
+import { Redirect, Slot, useRouter, useSegments, type Href } from "expo-router";
 import { useEffect, useRef, useState } from "react";
-import * as SecureStore from "expo-secure-store";
-import { View, ActivityIndicator, LogBox } from "react-native";
+import { View, LogBox } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import Constants from "expo-constants";
 
@@ -12,7 +12,8 @@ import { AppErrorBoundary } from "@/src/components/app-error-boundary";
 import { AppAlertHost } from "@/src/components/app-alert-host";
 import { resolveNotificationNavigationTarget, toPositiveInt } from "@/src/notifications/navigation";
 import { subscribeToUserRealtime } from "@/src/realtime/client";
-import { clearStoredUser, getStoredUser, persistStoredUser, setStoredUserCache, switchStoredHousehold } from "@/src/session/user-cache";
+import { persistStoredUser, switchStoredHousehold } from "@/src/session/user-cache";
+import { hydrateAuthState, logoutAuth, useAuthStore } from "@/src/store/useAuthStore";
 import { installAppAlertInterceptor } from "@/src/utils/app-alert";
 import { installIosTextScale } from "@/src/ui/ios-text-scale";
 
@@ -39,19 +40,25 @@ installAppAlertInterceptor();
 installIosTextScale();
 
 export default function RootLayout() {
-    const [isMounted, setIsMounted] = useState(false);
+    const [queryClient] = useState(() => new QueryClient({
+        defaultOptions: {
+            queries: {
+                retry: 1,
+            },
+        },
+    }));
+    const [authBootstrapped, setAuthBootstrapped] = useState(false);
     const notifiedNotificationIdsRef = useRef<Set<number>>(new Set());
     const handledNotificationPressIdsRef = useRef<Set<number>>(new Set());
     const router = useRouter();
     const segments = useSegments() as string[];
-    const currentSegment = segments[0] ?? "";
+    const token = useAuthStore((state) => state.token);
+    const user = useAuthStore((state) => state.user);
+    const authHydrated = useAuthStore((state) => state.hydrated);
+    const authReady = authHydrated && authBootstrapped;
 
     useEffect(() => {
-        setIsMounted(true);
-    }, []);
-
-    useEffect(() => {
-        if (!isMounted) {
+        if (!authReady || !token || user?.must_change_password) {
             return;
         }
 
@@ -62,15 +69,7 @@ export default function RootLayout() {
 
         const bootstrapNotifications = async () => {
             try {
-                const token = await SecureStore.getItemAsync("authToken");
-                if (!token) {
-                    return;
-                }
-
-                const user = await getStoredUser();
-                if (user?.must_change_password) {
-                    return;
-                }
+                const currentUser = user;
 
                 let Notifications: NotificationsModule | null = null;
                 if (!isExpoGo) {
@@ -114,7 +113,7 @@ export default function RootLayout() {
                             const response = await apiFetch("/notifications/pending?all_households=1");
                             const notifications = Array.isArray(response?.notifications) ? response.notifications : [];
                             const matchedNotification = notifications.find(
-                                (notification) => Number(notification?.id ?? 0) === notificationId
+                                (notification: any) => Number(notification?.id ?? 0) === notificationId
                             );
 
                             if (matchedNotification) {
@@ -244,7 +243,7 @@ export default function RootLayout() {
                     }
                 };
 
-                const parsedUserId = Number(user?.id ?? 0);
+                const parsedUserId = Number(currentUser?.id ?? 0);
                 if (Number.isFinite(parsedUserId) && parsedUserId > 0) {
                     const unsubscribe = await subscribeToUserRealtime(parsedUserId, (message) => {
                         const module = String(message?.module ?? "");
@@ -303,21 +302,28 @@ export default function RootLayout() {
                 notificationResponseSubscription.remove();
             }
         };
-    }, [isMounted, router]);
+    }, [authReady, router, token, user]);
 
     useEffect(() => {
-        if (!isMounted) return;
+        let isCancelled = false;
 
-        const checkAuth = async () => {
+        const bootstrapAuth = async () => {
             try {
-                const token = await SecureStore.getItemAsync("authToken");
-                let user = token ? await getStoredUser() : null;
+                const snapshot = await hydrateAuthState();
+                let resolvedToken = snapshot.token;
+                let resolvedUser = snapshot.user;
 
-                if (token && !user) {
+                if (resolvedToken && !resolvedUser) {
                     try {
-                        const meResponse = await apiFetch("/me");
+                        const meResponse = await apiFetch("/me", {
+                            headers: {
+                                Authorization: `Bearer ${resolvedToken}`,
+                            },
+                            bypassCache: true,
+                        });
+
                         if (meResponse?.user) {
-                            user = meResponse.user;
+                            resolvedUser = meResponse.user;
                             await persistStoredUser(meResponse.user);
                         }
                     } catch {
@@ -325,76 +331,75 @@ export default function RootLayout() {
                     }
                 }
 
-                if (token && !user) {
-                    await SecureStore.deleteItemAsync("authToken");
-                    await clearStoredUser();
-                } else if (!token) {
-                    setStoredUserCache(null, true);
+                if ((!resolvedToken && resolvedUser) || (resolvedToken && !resolvedUser)) {
+                    await logoutAuth();
                 }
-
-                const refreshedToken = await SecureStore.getItemAsync("authToken");
-                const hasToken = !!refreshedToken;
-
-                const isPublicRoute = currentSegment === ""
-                    || currentSegment === "login"
-                    || currentSegment === "register"
-                    || currentSegment === "forgot-password"
-                    || currentSegment === "password-reset";
-                const isChangeCredentialsRoute = currentSegment === "change-credentials";
-
-                console.log("Check Auth -> Token:", hasToken, "| Segment:", currentSegment);
-
-                if (hasToken) {
-                    const mustChangePassword = !!user?.must_change_password;
-                    if (mustChangePassword) {
-                        if (!isChangeCredentialsRoute) {
-                            router.replace("/change-credentials");
-                        }
-                        return;
-                    }
-
-                    if (isChangeCredentialsRoute) {
-                        router.replace("/(tabs)/home");
-                        return;
-                    }
-
-                    const hasHousehold = user?.household_id || (user?.households && user.households.length > 0);
-
-                    if (!hasHousehold && currentSegment !== "householdSetup") {
-                        router.replace("/householdSetup");
-                    } else if (hasHousehold && isPublicRoute) {
-                        router.replace("/(tabs)/home");
-                    }
-                } else if (!isPublicRoute) {
-                    router.replace("/");
+            } catch (error) {
+                console.error("Erreur bootstrap auth:", error);
+            } finally {
+                if (!isCancelled) {
+                    setAuthBootstrapped(true);
                 }
-            } catch (err) {
-                console.error("Erreur auth: ", err);
             }
         };
 
-        checkAuth().catch((err) => {
-            console.error("Erreur inattendue dans checkAuth:", err);
-        });
+        void bootstrapAuth();
 
-    }, [currentSegment, isMounted, router]);
+        return () => {
+            isCancelled = true;
+        };
+    }, []);
 
-    if (!isMounted) {
-        return (
-            <GestureHandlerRootView style={{ flex: 1 }}>
-                <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
-                    <ActivityIndicator size="large" color={Colors.light.tint} />
-                </View>
-            </GestureHandlerRootView>
-        );
+    const rootSegment = segments[0] ?? "";
+    const nestedSegment = segments[1] ?? "";
+    const currentSegment = rootSegment === "(auth)" || rootSegment === "(app)"
+        ? nestedSegment
+        : rootSegment;
+    const hasToken = !!token;
+    const mustChangePassword = !!user?.must_change_password;
+    const hasHousehold = !!(user?.household_id || (Array.isArray(user?.households) && user.households.length > 0));
+    const isPublicRoute = rootSegment === "(auth)"
+        || currentSegment === ""
+        || currentSegment === "login"
+        || currentSegment === "register"
+        || currentSegment === "forgot-password"
+        || currentSegment === "password-reset";
+    const isChangeCredentialsRoute = currentSegment === "change-credentials";
+    const isHouseholdSetupRoute = currentSegment === "householdSetup";
+
+    let redirectHref: Href | null = null;
+    if (authReady) {
+        if (!hasToken && !isPublicRoute) {
+            redirectHref = "/";
+        } else if (hasToken) {
+            if (mustChangePassword) {
+                if (!isChangeCredentialsRoute) {
+                    redirectHref = "/change-credentials";
+                }
+            } else if (isChangeCredentialsRoute) {
+                redirectHref = hasHousehold ? "/(tabs)/home" : "/householdSetup";
+            } else if (!hasHousehold && !isHouseholdSetupRoute) {
+                redirectHref = "/householdSetup";
+            } else if (hasHousehold && isPublicRoute) {
+                redirectHref = "/(tabs)/home";
+            }
+        }
     }
 
     return (
         <GestureHandlerRootView style={{ flex: 1 }}>
-            <AppErrorBoundary>
-                <Slot />
-                <AppAlertHost />
-            </AppErrorBoundary>
+            <QueryClientProvider client={queryClient}>
+                <AppErrorBoundary>
+                    {!authReady ? (
+                        <View style={{ flex: 1, backgroundColor: Colors.light.background }} />
+                    ) : redirectHref ? (
+                        <Redirect href={redirectHref} />
+                    ) : (
+                        <Slot />
+                    )}
+                    <AppAlertHost />
+                </AppErrorBoundary>
+            </QueryClientProvider>
         </GestureHandlerRootView>
     );
 }

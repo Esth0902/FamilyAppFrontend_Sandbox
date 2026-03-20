@@ -12,13 +12,13 @@ import {
     useColorScheme,
 } from "react-native";
 import { useRouter } from "expo-router";
-import * as SecureStore from "expo-secure-store";
 import { Colors } from "@/constants/theme";
 import { apiFetch } from "@/src/api/client";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import {
     normalizeStoredUser,
     persistStoredUser,
+    useStoredUserState,
     type StoredUser as CachedUser,
 } from "@/src/session/user-cache";
 
@@ -26,6 +26,7 @@ export default function ChangeCredentialsScreen() {
     const router = useRouter();
     const colorScheme = useColorScheme();
     const theme = Colors[colorScheme ?? "light"];
+    const { user } = useStoredUserState();
 
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
@@ -35,24 +36,10 @@ export default function ChangeCredentialsScreen() {
     const [loading, setLoading] = useState(false);
 
     useEffect(() => {
-        const hydrateEmail = async () => {
-            try {
-                const userStr = await SecureStore.getItemAsync("user");
-                if (!userStr) {
-                    return;
-                }
-
-                const user = JSON.parse(userStr) as CachedUser;
-                if (typeof user?.email === "string" && user.email.trim().length > 0) {
-                    setEmail(user.email.trim());
-                }
-            } catch {
-                // Ignore cache parse issues.
-            }
-        };
-
-        void hydrateEmail();
-    }, []);
+        if (typeof user?.email === "string" && user.email.trim().length > 0) {
+            setEmail(user.email.trim());
+        }
+    }, [user?.email]);
 
     const onSubmit = async () => {
         if (!email.trim() || !password || !passwordConfirm) {

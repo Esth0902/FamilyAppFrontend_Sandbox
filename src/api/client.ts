@@ -1,6 +1,5 @@
-import * as SecureStore from "expo-secure-store";
 import { resolvePublicApiUrl } from "@/src/config/public-env";
-import { setStoredUserCache } from "@/src/session/user-cache";
+import { getAuthStateSnapshot, hydrateAuthState, logoutAuth } from "@/src/store/useAuthStore";
 
 const trimRightSlash = (value: string) => value.replace(/\/+$/, "");
 
@@ -86,19 +85,16 @@ export const apiFetch = async (endpoint: string, options: ApiFetchOptions = {}) 
     const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
     const url = `${API_BASE_URL}${cleanEndpoint}`;
 
-    const token = await SecureStore.getItemAsync("authToken");
-    const rawUser = await SecureStore.getItemAsync("user");
+    const authSnapshot = getAuthStateSnapshot();
+    const hydratedAuth = authSnapshot.hydrated ? authSnapshot : await hydrateAuthState();
+    const token = hydratedAuth.token;
+    const rawUser = hydratedAuth.user;
     let activeHouseholdId: number | null = null;
 
     if (rawUser) {
-        try {
-            const parsedUser = JSON.parse(rawUser) as { household_id?: number | string };
-            const candidate = Number(parsedUser?.household_id ?? 0);
-            if (Number.isFinite(candidate) && candidate > 0) {
-                activeHouseholdId = Math.trunc(candidate);
-            }
-        } catch {
-            activeHouseholdId = null;
+        const candidate = Number((rawUser as { household_id?: number | string }).household_id ?? 0);
+        if (Number.isFinite(candidate) && candidate > 0) {
+            activeHouseholdId = Math.trunc(candidate);
         }
     }
 
@@ -150,11 +146,7 @@ export const apiFetch = async (endpoint: string, options: ApiFetchOptions = {}) 
         if (!response.ok) {
             if (response.status === 401) {
                 clearApiCache();
-                await Promise.all([
-                    SecureStore.deleteItemAsync("authToken"),
-                    SecureStore.deleteItemAsync("user"),
-                ]);
-                setStoredUserCache(null, true);
+                await logoutAuth();
             }
 
             throw {
