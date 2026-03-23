@@ -63,11 +63,11 @@ export default function TabsLayout() {
     const [householdModules, setHouseholdModules] = useState<HouseholdModulesState>(DEFAULT_HOUSEHOLD_MODULES);
 
     const activeTabRoute = useMemo<TabsRouteName | null>(() => {
-        if (segments[0] !== "(tabs)") {
+        if ((segments[0] as string) !== "(tabs)") {
             return null;
         }
 
-        const candidate = segments[1];
+        const candidate = segments[1] as string;
         if (
             candidate === "home"
             || candidate === "meal"
@@ -172,7 +172,7 @@ export default function TabsLayout() {
             return;
         }
 
-        router.replace("/(tabs)/home");
+        router.replace("/(app)/(tabs)/home");
     }, [activeTabRoute, householdModules, router]);
 
     return (

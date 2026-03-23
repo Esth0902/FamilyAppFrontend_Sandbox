@@ -34,7 +34,7 @@ test("parseEventDateTimeRange supports multi-day events", () => {
   expect(range?.startAt.getMonth()).toBe(2);
   expect(range?.startAt.getDate()).toBe(5);
   expect(range?.endAt.getDate()).toBe(6);
-  expect(range?.endAt.getTime() - range?.startAt.getTime()).toBe(3 * 60 * 60 * 1000);
+  expect(range!.endAt.getTime() - range!.startAt.getTime()).toBe(3 * 60 * 60 * 1000);
 });
 
 test("filterRecipesByQuery filters by recipe title", () => {
