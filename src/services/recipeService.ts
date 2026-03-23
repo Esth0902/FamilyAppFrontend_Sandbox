@@ -13,6 +13,21 @@ export type Recipe = {
     is_in_my_recipes?: boolean;
 };
 
+export type RecipeScope = "mine" | "all";
+
+export type RecipesPageMeta = {
+    current_page: number;
+    last_page: number;
+    per_page: number;
+    total: number;
+    has_more: boolean;
+};
+
+export type RecipesPage = {
+    data: Recipe[];
+    meta: RecipesPageMeta;
+};
+
 export type AiSuggestion = { title: string; description: string };
 export type AiPreviewIngredient = { name: string; quantity: number; unit: string; category: string };
 export type AiPreviewRecipe = {
@@ -23,24 +38,82 @@ export type AiPreviewRecipe = {
     ingredients: AiPreviewIngredient[];
 };
 
-const extractRecipesPayload = (payload: unknown): Recipe[] => {
+type RecipeListQueryParams = {
+    q?: string;
+    page?: number;
+    limit?: number;
+    type?: string;
+    scope?: RecipeScope;
+};
+
+const extractRecipesPayload = (payload: unknown): RecipesPage => {
+    const empty: RecipesPage = {
+        data: [],
+        meta: {
+            current_page: 1,
+            last_page: 1,
+            per_page: 0,
+            total: 0,
+            has_more: false,
+        },
+    };
+
     if (Array.isArray(payload)) {
-        return payload as Recipe[];
+        return {
+            data: payload as Recipe[],
+            meta: {
+                current_page: 1,
+                last_page: 1,
+                per_page: payload.length,
+                total: payload.length,
+                has_more: false,
+            },
+        };
     }
 
-    if (payload && typeof payload === "object") {
-        const maybeData = (payload as { data?: unknown }).data;
-        if (Array.isArray(maybeData)) {
-            return maybeData as Recipe[];
-        }
-
-        const maybeRecipes = (payload as { recipes?: unknown }).recipes;
-        if (Array.isArray(maybeRecipes)) {
-            return maybeRecipes as Recipe[];
-        }
+    if (!payload || typeof payload !== "object") {
+        return empty;
     }
 
-    return [];
+    const payloadObject = payload as {
+        data?: unknown;
+        recipes?: unknown;
+        meta?: {
+            current_page?: number;
+            last_page?: number;
+            per_page?: number;
+            total?: number;
+            has_more?: boolean;
+        };
+    };
+
+    const data = Array.isArray(payloadObject.data)
+        ? (payloadObject.data as Recipe[])
+        : Array.isArray(payloadObject.recipes)
+            ? (payloadObject.recipes as Recipe[])
+            : [];
+
+    const currentPage = Number(payloadObject.meta?.current_page ?? 1);
+    const lastPage = Number(payloadObject.meta?.last_page ?? 1);
+    const perPage = Number(payloadObject.meta?.per_page ?? data.length);
+    const total = Number(payloadObject.meta?.total ?? data.length);
+    const fallbackHasMore = Number.isFinite(currentPage)
+        && Number.isFinite(lastPage)
+        && currentPage < lastPage;
+    const hasMore = typeof payloadObject.meta?.has_more === "boolean"
+        ? payloadObject.meta.has_more
+        : fallbackHasMore;
+
+    return {
+        data,
+        meta: {
+            current_page: Number.isFinite(currentPage) ? currentPage : 1,
+            last_page: Number.isFinite(lastPage) ? lastPage : 1,
+            per_page: Number.isFinite(perPage) ? perPage : data.length,
+            total: Number.isFinite(total) ? total : data.length,
+            has_more: hasMore,
+        },
+    };
 };
 
 export const normalizeAiSuggestion = (value: any): AiSuggestion | null => {
@@ -83,8 +156,29 @@ export const normalizeAiPreviewRecipe = (value: any): AiPreviewRecipe | null => 
     };
 };
 
-export const fetchRecipes = async (): Promise<Recipe[]> => {
-    const data = await apiFetch("/recipes?scope=all");
+export const fetchRecipes = async ({
+    q,
+    page = 1,
+    limit = 20,
+    type,
+    scope = "all",
+}: RecipeListQueryParams = {}): Promise<RecipesPage> => {
+    const params = new URLSearchParams();
+    params.set("scope", scope);
+    params.set("page", String(page));
+    params.set("limit", String(limit));
+
+    const search = String(q ?? "").trim();
+    if (search.length > 0) {
+        params.set("q", search);
+    }
+
+    const typeFilter = String(type ?? "").trim();
+    if (typeFilter.length > 0 && typeFilter !== "all") {
+        params.set("type", typeFilter);
+    }
+
+    const data = await apiFetch(`/recipes?${params.toString()}`);
     return extractRecipesPayload(data);
 };
 
@@ -174,4 +268,3 @@ export const storeAiRecipe = async (payload: Record<string, unknown>): Promise<R
 
     return response as Recipe;
 };
-

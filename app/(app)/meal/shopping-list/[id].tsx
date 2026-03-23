@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from "react";
-import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { ActivityIndicator, Alert, FlatList, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -380,6 +380,134 @@ export default function ShoppingListDetailScreen() {
     }
   };
 
+  const renderPlannedRecipeItem = useCallback(
+    ({ item: recipe }: { item: PlannedRecipeSuggestion }) => {
+      const key = recipeKey(recipe);
+      const isExpanded = expandedRecipeKeys.includes(key);
+      const missingCount = recipe.ingredients.filter((ingredient) => !ingredient.already_in_list).length;
+
+      return (
+        <View style={[styles.recipeBlock, { borderColor: theme.icon, backgroundColor: theme.background }]}>
+          <View style={styles.recipeHeaderRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: theme.text, fontWeight: "700" }}>{recipe.recipe_title}</Text>
+              <Text style={{ color: theme.textSecondary, fontSize: 12 }}>
+                {formatMealSlot(recipe.date, recipe.meal_type)} - {recipe.servings} portions
+              </Text>
+            </View>
+
+            <View style={styles.recipeActionRow}>
+              {canManage ? (
+                <TouchableOpacity
+                  onPress={() => void addAllPlannedIngredients(recipe)}
+                  style={[
+                    styles.smallBtn,
+                    {
+                      backgroundColor: missingCount === 0 ? theme.icon : theme.tint,
+                      opacity: saving ? 0.7 : 1,
+                    },
+                  ]}
+                  disabled={saving || missingCount === 0}
+                >
+                  <Text style={styles.smallBtnText}>{missingCount === 0 ? "Ajoutés" : "Ajouter ingrédients"}</Text>
+                </TouchableOpacity>
+              ) : null}
+              <TouchableOpacity
+                onPress={() => toggleRecipeExpanded(recipe)}
+                style={[styles.expandBtn, { borderColor: theme.icon }]}
+              >
+                <MaterialCommunityIcons name={isExpanded ? "chevron-up" : "chevron-down"} size={20} color={theme.text} />
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          {isExpanded ? (
+            <View style={{ marginTop: 8 }}>
+              {recipe.ingredients.length > 0 ? (
+                recipe.ingredients.map((ingredient, index) => (
+                  <View key={`${key}-${index}`} style={[styles.itemRow, { borderColor: theme.icon, backgroundColor: theme.card }]}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ color: theme.text, fontWeight: "600" }}>{ingredient.name}</Text>
+                      <Text style={{ color: theme.textSecondary, fontSize: 12 }}>
+                        {ingredient.quantity} {ingredient.unit || ""}
+                        {ingredient.already_in_list ? " - déjà dans la liste" : ""}
+                      </Text>
+                    </View>
+                    {canManage ? (
+                      <TouchableOpacity
+                        onPress={() => void addPlannedIngredient(ingredient)}
+                        style={[
+                          styles.smallBtn,
+                          {
+                            backgroundColor: ingredient.already_in_list ? theme.icon : theme.tint,
+                            opacity: saving ? 0.7 : 1,
+                          },
+                        ]}
+                        disabled={saving || ingredient.already_in_list}
+                      >
+                        <Text style={styles.smallBtnText}>{ingredient.already_in_list ? "Ajouté" : "Ajouter"}</Text>
+                      </TouchableOpacity>
+                    ) : null}
+                  </View>
+                ))
+              ) : (
+                <Text style={{ color: theme.textSecondary }}>Aucun ingrédient détaillé pour cette recette.</Text>
+              )}
+            </View>
+          ) : null}
+        </View>
+      );
+    },
+    [addAllPlannedIngredients, addPlannedIngredient, canManage, expandedRecipeKeys, saving, theme.background, theme.card, theme.icon, theme.text, theme.textSecondary, theme.tint]
+  );
+
+  const renderShoppingItem = useCallback(
+    ({ item }: { item: ShoppingListItem }) => (
+      <View style={[styles.itemRow, { borderColor: theme.icon, backgroundColor: theme.background }]}>
+        <TouchableOpacity onPress={() => void toggleChecked(item)} style={{ paddingRight: 4 }}>
+          <MaterialCommunityIcons
+            name={item.is_checked ? "checkbox-marked" : "checkbox-blank-outline"}
+            size={22}
+            color={item.is_checked ? theme.tint : theme.textSecondary}
+          />
+        </TouchableOpacity>
+
+        <View style={{ flex: 1 }}>
+          <Text
+            style={[
+              { color: theme.text, fontWeight: "600" },
+              item.is_checked && { color: theme.textSecondary, textDecorationLine: "line-through" },
+            ]}
+          >
+            {item.name}
+          </Text>
+          <Text style={{ color: theme.textSecondary, fontSize: 12 }}>
+            {item.quantity || "-"} {item.unit || ""}{" "}
+            {item.is_manual_addition
+              ? item.created_by?.name
+                ? `- ajouté par ${item.created_by.name}`
+                : "- ajouté manuellement"
+              : ""}
+          </Text>
+          {item.is_checked && item.checked_by?.name ? (
+            <View style={[styles.checkedByTag, { backgroundColor: `${theme.tint}22`, borderColor: theme.tint }]}>
+              <Text style={[styles.checkedByTagText, { color: theme.tint }]}>
+                Coche par {item.checked_by.name}
+              </Text>
+            </View>
+          ) : null}
+        </View>
+
+        {canManage ? (
+          <TouchableOpacity onPress={() => void deleteItem(item.id)} disabled={saving}>
+            <MaterialCommunityIcons name="trash-can-outline" size={20} color="#CC4B4B" />
+          </TouchableOpacity>
+        ) : null}
+      </View>
+    ),
+    [canManage, deleteItem, saving, theme.background, theme.icon, theme.text, theme.textSecondary, theme.tint, toggleChecked]
+  );
+
   if (loading) {
     return (
       <View style={[styles.center, { backgroundColor: theme.background }]}>
@@ -412,83 +540,14 @@ export default function ShoppingListDetailScreen() {
           <Text style={[styles.cardTitle, { color: theme.text }]}>Repas planifiés</Text>
 
           {plannedRecipes.length > 0 ? (
-            plannedRecipes.map((recipe) => {
-              const key = recipeKey(recipe);
-              const isExpanded = expandedRecipeKeys.includes(key);
-              const missingCount = recipe.ingredients.filter((ingredient) => !ingredient.already_in_list).length;
-
-              return (
-                <View key={key} style={[styles.recipeBlock, { borderColor: theme.icon, backgroundColor: theme.background }]}>
-                  <View style={styles.recipeHeaderRow}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={{ color: theme.text, fontWeight: "700" }}>{recipe.recipe_title}</Text>
-                      <Text style={{ color: theme.textSecondary, fontSize: 12 }}>
-                        {formatMealSlot(recipe.date, recipe.meal_type)} - {recipe.servings} portions
-                      </Text>
-                    </View>
-
-                    <View style={styles.recipeActionRow}>
-                      {canManage ? (
-                        <TouchableOpacity
-                          onPress={() => void addAllPlannedIngredients(recipe)}
-                          style={[
-                            styles.smallBtn,
-                            {
-                              backgroundColor: missingCount === 0 ? theme.icon : theme.tint,
-                              opacity: saving ? 0.7 : 1,
-                            },
-                          ]}
-                          disabled={saving || missingCount === 0}
-                        >
-                          <Text style={styles.smallBtnText}>{missingCount === 0 ? "Ajoutés" : "Ajouter ingrédients"}</Text>
-                        </TouchableOpacity>
-                      ) : null}
-                      <TouchableOpacity
-                        onPress={() => toggleRecipeExpanded(recipe)}
-                        style={[styles.expandBtn, { borderColor: theme.icon }]}
-                      >
-                        <MaterialCommunityIcons name={isExpanded ? "chevron-up" : "chevron-down"} size={20} color={theme.text} />
-                      </TouchableOpacity>
-                    </View>
-                  </View>
-
-                  {isExpanded ? (
-                    <View style={{ marginTop: 8 }}>
-                      {recipe.ingredients.length > 0 ? (
-                        recipe.ingredients.map((ingredient, index) => (
-                          <View key={`${key}-${index}`} style={[styles.itemRow, { borderColor: theme.icon, backgroundColor: theme.card }]}>
-                            <View style={{ flex: 1 }}>
-                              <Text style={{ color: theme.text, fontWeight: "600" }}>{ingredient.name}</Text>
-                              <Text style={{ color: theme.textSecondary, fontSize: 12 }}>
-                                {ingredient.quantity} {ingredient.unit || ""}
-                                {ingredient.already_in_list ? " - déjà dans la liste" : ""}
-                              </Text>
-                            </View>
-                            {canManage ? (
-                              <TouchableOpacity
-                                onPress={() => void addPlannedIngredient(ingredient)}
-                                style={[
-                                  styles.smallBtn,
-                                  {
-                                    backgroundColor: ingredient.already_in_list ? theme.icon : theme.tint,
-                                    opacity: saving ? 0.7 : 1,
-                                  },
-                                ]}
-                                disabled={saving || ingredient.already_in_list}
-                              >
-                                <Text style={styles.smallBtnText}>{ingredient.already_in_list ? "Ajouté" : "Ajouter"}</Text>
-                              </TouchableOpacity>
-                            ) : null}
-                          </View>
-                        ))
-                      ) : (
-                        <Text style={{ color: theme.textSecondary }}>Aucun ingrédient détaillé pour cette recette.</Text>
-                      )}
-                    </View>
-                  ) : null}
-                </View>
-              );
-            })
+            <FlatList
+              data={plannedRecipes}
+              keyExtractor={(recipe) => recipeKey(recipe)}
+              renderItem={renderPlannedRecipeItem}
+              scrollEnabled={false}
+              removeClippedSubviews
+              ItemSeparatorComponent={() => <View style={{ height: 8 }} />}
+            />
           ) : (
             <Text style={{ color: theme.textSecondary }}>Aucun repas planifié à venir.</Text>
           )}
@@ -536,49 +595,14 @@ export default function ShoppingListDetailScreen() {
             Liste ({items.filter((item) => item.is_checked).length}/{items.length})
           </Text>
           {sortedItems.length > 0 ? (
-            sortedItems.map((item) => (
-              <View key={item.id} style={[styles.itemRow, { borderColor: theme.icon, backgroundColor: theme.background }]}>
-                <TouchableOpacity onPress={() => void toggleChecked(item)} style={{ paddingRight: 4 }}>
-                  <MaterialCommunityIcons
-                    name={item.is_checked ? "checkbox-marked" : "checkbox-blank-outline"}
-                    size={22}
-                    color={item.is_checked ? theme.tint : theme.textSecondary}
-                  />
-                </TouchableOpacity>
-
-                <View style={{ flex: 1 }}>
-                  <Text
-                    style={[
-                      { color: theme.text, fontWeight: "600" },
-                      item.is_checked && { color: theme.textSecondary, textDecorationLine: "line-through" },
-                    ]}
-                  >
-                    {item.name}
-                  </Text>
-                  <Text style={{ color: theme.textSecondary, fontSize: 12 }}>
-                    {item.quantity || "-"} {item.unit || ""}{" "}
-                    {item.is_manual_addition
-                      ? item.created_by?.name
-                        ? `- ajouté par ${item.created_by.name}`
-                        : "- ajouté manuellement"
-                      : ""}
-                  </Text>
-                  {item.is_checked && item.checked_by?.name ? (
-                    <View style={[styles.checkedByTag, { backgroundColor: `${theme.tint}22`, borderColor: theme.tint }]}>
-                      <Text style={[styles.checkedByTagText, { color: theme.tint }]}>
-                        Coche par {item.checked_by.name}
-                      </Text>
-                    </View>
-                  ) : null}
-                </View>
-
-                {canManage ? (
-                  <TouchableOpacity onPress={() => void deleteItem(item.id)} disabled={saving}>
-                    <MaterialCommunityIcons name="trash-can-outline" size={20} color="#CC4B4B" />
-                  </TouchableOpacity>
-                ) : null}
-              </View>
-            ))
+            <FlatList
+              data={sortedItems}
+              keyExtractor={(item) => String(item.id)}
+              renderItem={renderShoppingItem}
+              scrollEnabled={false}
+              removeClippedSubviews
+              ItemSeparatorComponent={() => <View style={{ height: 8 }} />}
+            />
           ) : (
             <Text style={{ color: theme.textSecondary }}>Aucun ingrédient dans cette liste.</Text>
           )}

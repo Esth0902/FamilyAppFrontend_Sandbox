@@ -34,7 +34,7 @@ export default function DashboardScreen() {
   const router = useRouter();
   const colorScheme = useColorScheme();
   const theme = Colors[colorScheme ?? "light"];
-  const { householdId, role, user } = useStoredUserState();
+  const { householdId, role } = useStoredUserState();
   const { dashboard, budgetBoard, calendarSummary, isInitialLoading, error, refreshDashboard } = useDashboardData({
     householdId,
   });
@@ -74,23 +74,14 @@ export default function DashboardScreen() {
   }, [householdId, refreshDashboard]);
 
   const isParent = role === "parent";
-  const userId = Number(user?.id ?? 0);
 
-  const pollsOpenCount = dashboard?.polls_open?.length ?? 0;
-  const pollsClosedCount = dashboard?.polls_closed?.length ?? 0;
-  const pollsTotalCount = dashboard?.polls?.length ?? 0;
-  const activePoll = dashboard?.active_poll ?? dashboard?.polls_open?.[0] ?? null;
-  const membersCount = dashboard?.members?.length ?? 0;
-  const activePollParticipants = activePoll?.voters_summary?.length ?? 0;
-  const myVotesCount = useMemo(() => {
-    if (!activePoll || userId <= 0) return 0;
-    return activePoll.voters_summary?.find((item) => item.user_id === userId)?.votes_count ?? 0;
-  }, [activePoll, userId]);
-  const remainingVotes = Math.max(0, (activePoll?.max_votes_per_user ?? 0) - myVotesCount);
+  const pollsOpenCount = dashboard?.polls_open_count ?? 0;
+  const pollsClosedCount = dashboard?.polls_closed_count ?? 0;
+  const pollsTotalCount = dashboard?.polls_total_count ?? pollsOpenCount + pollsClosedCount;
 
   const currency = (budgetBoard?.currency || "EUR").toUpperCase();
   const budgetEnabled = Boolean(budgetBoard?.budget_enabled);
-  const pendingRequests = budgetBoard?.pending_advance_requests?.length ?? 0;
+  const pendingRequests = dashboard?.budget_pending_requests ?? budgetBoard?.pending_advance_requests?.length ?? 0;
   const totalToPay = useMemo(() => {
     return (budgetBoard?.children ?? []).reduce((sum, child) => {
       return sum + computePaymentBreakdown(child).remainingToPay;
@@ -99,9 +90,9 @@ export default function DashboardScreen() {
   const childBudget = budgetBoard?.children?.[0] ?? null;
   const childToReceive = childBudget ? computePaymentBreakdown(childBudget).remainingToPay : 0;
 
-  const tasksSummary = dashboard?.tasks_summary;
-  const tasksEnabled = Boolean(tasksSummary?.enabled);
-  const tasksTodoCount = tasksSummary?.todo_count ?? 0;
+  const tasksTodoCount = dashboard?.tasks_todo_count ?? 0;
+  const tasksDoneCount = dashboard?.tasks_done_count ?? 0;
+  const tasksValidatedCount = dashboard?.tasks_validated_count ?? 0;
 
   const calendarEnabled = Boolean(calendarSummary?.calendar_enabled);
   const calendarEventsCount = calendarSummary?.events?.length ?? 0;
@@ -118,11 +109,6 @@ export default function DashboardScreen() {
         id: "polls",
         title: "Sondages repas",
         description: `Ouverts ${pollsOpenCount} | Clôturés ${pollsClosedCount} | Total ${pollsTotalCount}`,
-        extraDescription: activePoll
-          ? isParent
-            ? `Participation ${activePollParticipants}/${membersCount || 0}`
-            : `Mes votes ${myVotesCount}/${activePoll.max_votes_per_user} | Restants ${remainingVotes}`
-          : undefined,
         icon: "vote",
         accentColor: theme.tint,
         iconBackgroundColor: `${theme.tint}15`,
@@ -144,9 +130,7 @@ export default function DashboardScreen() {
       {
         id: "tasks",
         title: "Tâches",
-        description: tasksEnabled
-          ? `À faire ${tasksTodoCount} | Réalisées ${tasksSummary?.done_count ?? 0} | Validées ${tasksSummary?.validated_count ?? 0}`
-          : "Module tâches désactivé",
+        description: `À faire ${tasksTodoCount} | Réalisées ${tasksDoneCount} | Validées ${tasksValidatedCount}`,
         icon: "checkbox-marked-circle-outline",
         accentColor: theme.accentCool,
         iconBackgroundColor: `${theme.accentCool}18`,
@@ -165,8 +149,6 @@ export default function DashboardScreen() {
       },
     ],
     [
-      activePoll,
-      activePollParticipants,
       budgetEnabled,
       calendarEnabled,
       calendarEventsCount,
@@ -174,17 +156,13 @@ export default function DashboardScreen() {
       childToReceive,
       currency,
       isParent,
-      membersCount,
-      myVotesCount,
       pendingRequests,
       pollsClosedCount,
       pollsOpenCount,
       pollsTotalCount,
-      remainingVotes,
-      tasksEnabled,
-      tasksSummary?.done_count,
-      tasksSummary?.validated_count,
+      tasksDoneCount,
       tasksTodoCount,
+      tasksValidatedCount,
       theme.accentCool,
       theme.accentWarm,
       theme.tint,
@@ -299,4 +277,3 @@ const styles = StyleSheet.create({
     marginTop: 1,
   },
 });
-

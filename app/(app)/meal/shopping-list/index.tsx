@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from "react";
-import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { ActivityIndicator, Alert, FlatList, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { Stack, useFocusEffect, useRouter } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -50,16 +50,26 @@ export default function ShoppingListsHomeScreen() {
     });
   }, [lists]);
 
-  const loadLists = useCallback(async () => {
-    setLoading(true);
+  const loadLists = useCallback(async (options?: { silent?: boolean; showError?: boolean }) => {
+    const silent = options?.silent ?? false;
+    const showError = options?.showError ?? !silent;
+
+    if (!silent) {
+      setLoading(true);
+    }
+
     try {
       const response = (await apiFetch("/shopping-lists")) as ShoppingListHomePayload;
       setCanManage(Boolean(response?.can_manage));
       setLists(Array.isArray(response?.lists) ? response.lists : []);
     } catch (error: any) {
-      Alert.alert("Listes de courses", error?.message || "Impossible de charger les listes.");
+      if (showError) {
+        Alert.alert("Listes de courses", error?.message || "Impossible de charger les listes.");
+      }
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
   }, []);
 
@@ -69,7 +79,7 @@ export default function ShoppingListsHomeScreen() {
       let unsubscribeRealtime: (() => void) | null = null;
 
       const bootstrapRealtime = async () => {
-        await loadLists();
+        await loadLists({ silent: false, showError: true });
 
         if (!active) return;
 
@@ -78,7 +88,7 @@ export default function ShoppingListsHomeScreen() {
 
         unsubscribeRealtime = await subscribeToHouseholdRealtime(householdId, (message) => {
           if (message?.module !== "shopping_list") return;
-          void loadLists();
+          void loadLists({ silent: true, showError: false });
         }, (error) => {
           if (__DEV__) {
             console.warn("[shopping-list home] realtime disabled, fallback polling active", error);
@@ -90,7 +100,7 @@ export default function ShoppingListsHomeScreen() {
 
       const fallbackInterval = setInterval(() => {
         if (!active) return;
-        void loadLists();
+        void loadLists({ silent: true, showError: false });
       }, 12000);
 
       return () => {
@@ -124,7 +134,7 @@ export default function ShoppingListsHomeScreen() {
         setLists((prev) => [created, ...prev]);
         setNewListTitle("");
       } else {
-        await loadLists();
+        await loadLists({ silent: true, showError: true });
       }
     } catch (error: any) {
       Alert.alert("Listes de courses", error?.message || "Impossible de créer la liste.");
@@ -159,6 +169,30 @@ export default function ShoppingListsHomeScreen() {
       ]
     );
   };
+
+  const renderShoppingListRow = useCallback(
+    ({ item: list }: { item: ShoppingListSummary }) => (
+      <View style={[styles.listRow, { borderColor: theme.icon, backgroundColor: theme.background }]}>
+        <TouchableOpacity style={{ flex: 1 }} onPress={() => router.push(`/meal/shopping-list/${list.id}`)}>
+          <Text style={{ color: theme.text, fontWeight: "700" }}>{list.title}</Text>
+          <Text style={{ color: theme.textSecondary, fontSize: 12 }}>
+            {list.items_count} élément(s) - créée le {formatCreatedAt(list.created_at)}
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity onPress={() => router.push(`/meal/shopping-list/${list.id}`)} style={styles.iconBtn}>
+          <MaterialCommunityIcons name="chevron-right" size={22} color={theme.textSecondary} />
+        </TouchableOpacity>
+
+        {canManage ? (
+          <TouchableOpacity onPress={() => void deleteList(list)} disabled={saving} style={styles.iconBtn}>
+            <MaterialCommunityIcons name="trash-can-outline" size={20} color="#CC4B4B" />
+          </TouchableOpacity>
+        ) : null}
+      </View>
+    ),
+    [canManage, deleteList, router, saving, theme.background, theme.icon, theme.text, theme.textSecondary]
+  );
 
   if (loading) {
     return (
@@ -205,30 +239,15 @@ export default function ShoppingListsHomeScreen() {
         <View style={[styles.card, { backgroundColor: theme.card }]}>
           <Text style={[styles.cardTitle, { color: theme.text }]}>Listes existantes</Text>
 
-          {sortedLists.length > 0 ? (
-            sortedLists.map((list) => (
-              <View key={list.id} style={[styles.listRow, { borderColor: theme.icon, backgroundColor: theme.background }]}>
-                <TouchableOpacity style={{ flex: 1 }} onPress={() => router.push(`/meal/shopping-list/${list.id}`)}>
-                  <Text style={{ color: theme.text, fontWeight: "700" }}>{list.title}</Text>
-                  <Text style={{ color: theme.textSecondary, fontSize: 12 }}>
-                    {list.items_count} élément(s) - créée le {formatCreatedAt(list.created_at)}
-                  </Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity onPress={() => router.push(`/meal/shopping-list/${list.id}`)} style={styles.iconBtn}>
-                  <MaterialCommunityIcons name="chevron-right" size={22} color={theme.textSecondary} />
-                </TouchableOpacity>
-
-                {canManage ? (
-                  <TouchableOpacity onPress={() => void deleteList(list)} disabled={saving} style={styles.iconBtn}>
-                    <MaterialCommunityIcons name="trash-can-outline" size={20} color="#CC4B4B" />
-                  </TouchableOpacity>
-                ) : null}
-              </View>
-            ))
-          ) : (
-            <Text style={{ color: theme.textSecondary }}>Aucune liste pour le moment.</Text>
-          )}
+          <FlatList
+            data={sortedLists}
+            keyExtractor={(list) => String(list.id)}
+            renderItem={renderShoppingListRow}
+            scrollEnabled={false}
+            initialNumToRender={8}
+            removeClippedSubviews
+            ListEmptyComponent={<Text style={{ color: theme.textSecondary }}>Aucune liste pour le moment.</Text>}
+          />
         </View>
       </ScrollView>
     </View>
@@ -282,3 +301,4 @@ const styles = StyleSheet.create({
   },
   iconBtn: { padding: 4 },
 });
+

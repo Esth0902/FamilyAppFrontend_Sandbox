@@ -1,9 +1,10 @@
-import { useCallback } from "react";
+import { useCallback, useMemo } from "react";
 import {
+    keepPreviousData,
+    useInfiniteQuery,
     useMutation,
     useQuery,
     useQueryClient,
-    keepPreviousData,
 } from "@tanstack/react-query";
 import {
     deleteRecipe,
@@ -15,11 +16,17 @@ import {
     toggleRecipeSave,
     upsertRecipe,
     type Recipe,
+    type RecipeScope,
 } from "@/src/services/recipeService";
 import { queryKeys } from "@/src/query/query-keys";
+import { normalizeRecipeTypeValue } from "@/src/features/recipes/recipe-types";
 
 type UseRecipesArgs = {
     householdId: number | null;
+    scope?: RecipeScope;
+    searchQuery?: string;
+    typeFilter?: string;
+    limit?: number;
 };
 
 type UpsertRecipeMutationInput = {
@@ -27,17 +34,51 @@ type UpsertRecipeMutationInput = {
     recipeId?: number;
 };
 
-export const useRecipes = ({ householdId }: UseRecipesArgs) => {
+export const useRecipes = ({
+    householdId,
+    scope = "all",
+    searchQuery = "",
+    typeFilter = "all",
+    limit = 20,
+}: UseRecipesArgs) => {
     const queryClient = useQueryClient();
-    const recipesKey = queryKeys.recipes.all(householdId);
+
+    const normalizedSearchQuery = searchQuery.trim();
+    const normalizedTypeFilter = normalizeRecipeTypeValue(typeFilter);
+
+    const recipesKey = queryKeys.recipes.list(householdId, {
+        scope,
+        q: normalizedSearchQuery,
+        type: normalizedTypeFilter,
+        limit,
+    });
+    const recipesRootKey = queryKeys.recipes.root(householdId);
     const dietaryTagsKey = queryKeys.recipes.dietaryTags(householdId);
 
-    const recipesQuery = useQuery({
+    const recipesQuery = useInfiniteQuery({
         queryKey: recipesKey,
-        queryFn: fetchRecipes,
+        enabled: householdId !== null,
         staleTime: 30_000,
         placeholderData: keepPreviousData,
+        initialPageParam: 1,
+        queryFn: ({ pageParam }) => fetchRecipes({
+            scope,
+            q: normalizedSearchQuery.length > 0 ? normalizedSearchQuery : undefined,
+            type: normalizedTypeFilter !== "all" ? normalizedTypeFilter : undefined,
+            limit,
+            page: Number(pageParam),
+        }),
+        getNextPageParam: (lastPage) => {
+            return lastPage.meta.has_more
+                ? lastPage.meta.current_page + 1
+                : undefined;
+        },
     });
+
+    const recipes = useMemo(
+        () => recipesQuery.data?.pages.flatMap((page) => page.data) ?? [],
+        [recipesQuery.data]
+    );
 
     const dietaryTagsQuery = useQuery({
         queryKey: dietaryTagsKey,
@@ -46,23 +87,19 @@ export const useRecipes = ({ householdId }: UseRecipesArgs) => {
         queryFn: fetchHouseholdDietaryTags,
     });
 
+    const invalidateRecipes = useCallback(async () => {
+        await queryClient.invalidateQueries({
+            queryKey: recipesRootKey,
+        });
+    }, [queryClient, recipesRootKey]);
+
     const toggleSavedMutation = useMutation({
         mutationFn: async (recipe: Recipe) => {
             const currentlyInMine = recipe.is_in_my_recipes === true;
             return await toggleRecipeSave(recipe.id, currentlyInMine);
         },
-        onSuccess: (updatedRecipe, recipe) => {
-            if (!updatedRecipe) {
-                void queryClient.invalidateQueries({ queryKey: recipesKey });
-                return;
-            }
-
-            queryClient.setQueryData(recipesKey, (previous: Recipe[] | undefined) => {
-                if (!previous) {
-                    return previous;
-                }
-                return previous.map((item) => (item.id === recipe.id ? { ...item, ...updatedRecipe } : item));
-            });
+        onSuccess: () => {
+            void invalidateRecipes();
         },
     });
 
@@ -70,25 +107,8 @@ export const useRecipes = ({ householdId }: UseRecipesArgs) => {
         mutationFn: async ({ payload, recipeId }: UpsertRecipeMutationInput) => {
             return await upsertRecipe(payload, recipeId);
         },
-        onSuccess: (updatedRecipe, variables) => {
-            queryClient.setQueryData(recipesKey, (previous: Recipe[] | undefined) => {
-                if (!previous) {
-                    return previous;
-                }
-
-                const normalizedRecipe = {
-                    ...updatedRecipe,
-                    is_global: false,
-                    is_owned_by_household: true,
-                    is_in_my_recipes: true,
-                } as Recipe;
-
-                if (variables.recipeId) {
-                    return previous.map((item) => (item.id === updatedRecipe.id ? { ...item, ...normalizedRecipe } : item));
-                }
-
-                return [normalizedRecipe, ...previous];
-            });
+        onSuccess: () => {
+            void invalidateRecipes();
         },
     });
 
@@ -97,13 +117,8 @@ export const useRecipes = ({ householdId }: UseRecipesArgs) => {
             await deleteRecipe(recipeId);
             return recipeId;
         },
-        onSuccess: (deletedRecipeId) => {
-            queryClient.setQueryData(recipesKey, (previous: Recipe[] | undefined) => {
-                if (!previous) {
-                    return previous;
-                }
-                return previous.filter((recipe) => recipe.id !== deletedRecipeId);
-            });
+        onSuccess: () => {
+            void invalidateRecipes();
         },
     });
 
@@ -117,21 +132,8 @@ export const useRecipes = ({ householdId }: UseRecipesArgs) => {
 
     const storeAiRecipeMutation = useMutation({
         mutationFn: storeAiRecipe,
-        onSuccess: (storedRecipe) => {
-            queryClient.setQueryData(recipesKey, (previous: Recipe[] | undefined) => {
-                if (!previous) {
-                    return previous;
-                }
-                return [
-                    {
-                        ...storedRecipe,
-                        is_global: false,
-                        is_owned_by_household: true,
-                        is_in_my_recipes: true,
-                    },
-                    ...previous,
-                ];
-            });
+        onSuccess: () => {
+            void invalidateRecipes();
         },
     });
 
@@ -141,10 +143,13 @@ export const useRecipes = ({ householdId }: UseRecipesArgs) => {
     }, [dietaryTagsQuery, recipesQuery]);
 
     return {
-        recipes: (recipesQuery.data ?? []) as Recipe[],
+        recipes,
         householdDietaryTags: (dietaryTagsQuery.data ?? []) as string[],
         isInitialLoading: recipesQuery.isPending,
-        isRefreshing: recipesQuery.isRefetching,
+        isRefreshing: recipesQuery.isRefetching && !recipesQuery.isFetchingNextPage,
+        isFetchingNextPage: recipesQuery.isFetchingNextPage,
+        hasNextPage: recipesQuery.hasNextPage,
+        fetchNextPage: recipesQuery.fetchNextPage,
         recipesError: recipesQuery.error as Error | null,
         refreshRecipes,
         toggleGlobalRecipeInMine: toggleSavedMutation.mutateAsync,

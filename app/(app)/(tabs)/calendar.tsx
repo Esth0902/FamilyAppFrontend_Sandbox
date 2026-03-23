@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   ActivityIndicator,
   Alert,
+  FlatList,
   InteractionManager,
   Modal,
   Platform,
@@ -18,10 +19,11 @@ import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { Colors } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import { apiFetch } from "@/src/api/client";
+import { useDebounce } from "@/src/hooks/useDebounce";
+import { useRecipeSearch } from "@/src/hooks/useRecipeSearch";
 import { subscribeToHouseholdRealtime, subscribeToUserRealtime } from "@/src/realtime/client";
 import { useStoredUserState } from "@/src/session/user-cache";
 import {
-  filterRecipesByQuery,
   isTaskStatus,
   isValidIsoDate,
   isValidTime,
@@ -271,8 +273,26 @@ const formatMemberList = (members?: { name: string; reason?: string | null }[] |
     .join(", ");
 };
 
+const mergeRecipeOptions = (current: RecipeOption[], incoming: RecipeOption[]): RecipeOption[] => {
+  const merged = new Map<number, RecipeOption>();
+
+  current.forEach((recipe) => {
+    if (Number.isInteger(recipe.id) && recipe.id > 0) {
+      merged.set(recipe.id, recipe);
+    }
+  });
+
+  incoming.forEach((recipe) => {
+    if (Number.isInteger(recipe.id) && recipe.id > 0) {
+      merged.set(recipe.id, recipe);
+    }
+  });
+
+  return Array.from(merged.values());
+};
+
 const taskStatusLabel = (value: string) => {
-  if (isTaskStatus(value, TASK_STATUS_TODO)) return "À faire";
+  if (isTaskStatus(value, TASK_STATUS_TODO)) return "à faire";
   if (isTaskStatus(value, TASK_STATUS_DONE)) return "Réalisée";
   if (isTaskStatus(value, TASK_STATUS_CANCELLED)) return "Annulée";
   return value;
@@ -400,7 +420,6 @@ export default function CalendarScreen() {
   const [taskInstances, setTaskInstances] = useState<CalendarTaskInstance[]>([]);
   const [recipes, setRecipes] = useState<RecipeOption[]>([]);
   const hasLoadedOnceRef = useRef(false);
-  const recipesLoadedRef = useRef(false);
 
   const [editingEventId, setEditingEventId] = useState<number | null>(null);
   const [eventTitle, setEventTitle] = useState("");
@@ -438,6 +457,7 @@ export default function CalendarScreen() {
   const [mealPlanType, setMealPlanType] = useState<"matin" | "midi" | "soir">("soir");
   const [mealPlanRecipeId, setMealPlanRecipeId] = useState<number | null>(null);
   const [mealPlanSearch, setMealPlanSearch] = useState("");
+  const debouncedMealPlanSearch = useDebounce(mealPlanSearch, 400);
   const [mealPlanCustomTitle, setMealPlanCustomTitle] = useState("");
   const [mealPlanServings, setMealPlanServings] = useState("4");
   const [mealPlanNote, setMealPlanNote] = useState("");
@@ -459,6 +479,13 @@ export default function CalendarScreen() {
   const [taskDescription, setTaskDescription] = useState("");
   const [taskDueDate, setTaskDueDate] = useState(todayIso);
   const [taskEndDate, setTaskEndDate] = useState(todayIso);
+
+  const mealPlanRecipeSearch = useRecipeSearch({
+    householdId,
+    query: debouncedMealPlanSearch,
+    scope: "all",
+    limit: 10,
+  });
 
   const yearOptions = useMemo(() => {
     const currentYear = new Date().getFullYear();
@@ -678,11 +705,7 @@ export default function CalendarScreen() {
     }
 
     try {
-      const recipesRequest = recipesLoadedRef.current
-        ? Promise.resolve<RecipeOption[] | null>(null)
-        : (apiFetch("/recipes", { cacheTtlMs: 120_000, bypassCache }) as Promise<RecipeOption[]>);
-
-      const [calendarResult, tasksResult, recipesResult] = await Promise.allSettled([
+      const [calendarResult, tasksResult] = await Promise.allSettled([
         apiFetch(`/calendar/board?from=${calendarRange.from}&to=${calendarRange.to}`, {
           cacheTtlMs: 12_000,
           bypassCache,
@@ -691,7 +714,6 @@ export default function CalendarScreen() {
           cacheTtlMs: 12_000,
           bypassCache,
         }) as Promise<TaskBoardPayload>,
-        recipesRequest,
       ]);
 
       if (calendarResult.status !== "fulfilled") {
@@ -713,6 +735,17 @@ export default function CalendarScreen() {
       setEvents(Array.isArray(payload?.events) ? payload.events : []);
       setMealPlan(Array.isArray(payload?.meal_plan) ? payload.meal_plan : []);
 
+      const recipesFromMealPlan = (Array.isArray(payload?.meal_plan) ? payload.meal_plan : [])
+        .flatMap((entry) => (Array.isArray(entry?.recipes) ? entry.recipes : []))
+        .map((recipe) => ({
+          id: Number(recipe?.id ?? 0),
+          title: String(recipe?.title ?? "").trim(),
+          type: recipe?.type ? String(recipe.type) : null,
+        }))
+        .filter((recipe) => Number.isInteger(recipe.id) && recipe.id > 0 && recipe.title.length > 0);
+
+      setRecipes((previousRecipes) => mergeRecipeOptions(previousRecipes, recipesFromMealPlan));
+
       if (tasksResult.status === "fulfilled") {
         setTasksEnabled(Boolean(tasksResult.value?.tasks_enabled));
         setCanManageTaskInstances(Boolean(tasksResult.value?.can_manage_instances));
@@ -728,13 +761,6 @@ export default function CalendarScreen() {
         setTaskCurrentUserRole("enfant");
         setTaskAssigneeId(null);
         setTaskInstances([]);
-      }
-
-      if (recipesResult.status === "fulfilled" && Array.isArray(recipesResult.value)) {
-        setRecipes(recipesResult.value);
-        recipesLoadedRef.current = true;
-      } else if (!recipesLoadedRef.current) {
-        setRecipes([]);
       }
     } catch (error: any) {
       Alert.alert("Calendrier", error?.message || "Impossible de charger le calendrier.");
@@ -864,13 +890,23 @@ export default function CalendarScreen() {
     };
   }, [events, mealPlan]);
 
-  const recipeOptions = useMemo(() => {
-    return [...recipes].sort((left, right) => left.title.localeCompare(right.title, "fr-BE"));
-  }, [recipes]);
+  useEffect(() => {
+    if (!Array.isArray(mealPlanRecipeSearch.results) || mealPlanRecipeSearch.results.length === 0) {
+      return;
+    }
 
-  const filteredRecipeOptions = useMemo(() => {
-    return filterRecipesByQuery(recipeOptions, mealPlanSearch);
-  }, [mealPlanSearch, recipeOptions]);
+    setRecipes((previousRecipes) => mergeRecipeOptions(previousRecipes, mealPlanRecipeSearch.results));
+  }, [mealPlanRecipeSearch.results]);
+
+  const recipeOptions = useMemo(() => {
+    const trimmedSearch = mealPlanSearch.trim();
+    if (trimmedSearch.length === 0) {
+      return [] as RecipeOption[];
+    }
+
+    return [...mealPlanRecipeSearch.results].sort((left, right) => left.title.localeCompare(right.title, "fr-BE"));
+  }, [mealPlanRecipeSearch.results, mealPlanSearch]);
+  const filteredRecipeOptions = recipeOptions;
 
   const eventCountByDay = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -952,9 +988,315 @@ export default function CalendarScreen() {
       });
   }, [selectedDate, visibleTaskInstances]);
 
+  const renderSelectedDayMealItem = useCallback(
+    ({ item: entry }: { item: MealPlanEntry }) => (
+      <View
+        style={[styles.itemCard, { borderColor: theme.icon, backgroundColor: theme.background }]}
+      >
+        <View style={styles.itemHeaderRow}>
+          <View style={[styles.badge, { backgroundColor: `${mealTypeColor(entry.meal_type)}22` }]}>
+            <Text style={[styles.badgeText, { color: mealTypeColor(entry.meal_type) }]}>{mealTypeLabel(entry.meal_type)}</Text>
+          </View>
+          <Text style={[styles.itemMetaText, { color: theme.textSecondary, flex: 1, textAlign: "right" }]}>
+            {entry.custom_title?.trim()
+              ? "Repas libre"
+              : `${entry.recipes.length} recette${entry.recipes.length > 1 ? "s" : ""}`}
+          </Text>
+        </View>
+        <Text style={[styles.itemTitle, { color: theme.text }]}>
+          {entry.custom_title?.trim() || entry.recipes.map((recipe) => recipe.title).join(", ")}
+        </Text>
+        {entry.note ? (
+          <Text style={[styles.bodyText, { color: theme.textSecondary }]}>{entry.note}</Text>
+        ) : null}
+        {settings.absence_tracking_enabled ? (
+          <>
+            <Text style={[styles.itemMetaText, { color: theme.textSecondary }]}>
+              {entry.my_presence
+                ? `Votre présence: ${mealPresenceLabel(entry.my_presence.status)}`
+                : "Votre présence n'est pas encore confirmée."}
+            </Text>
+            {entry.my_presence?.reason ? (
+              <Text style={[styles.bodyText, { color: theme.textSecondary }]}>
+                Justification: {entry.my_presence.reason}
+              </Text>
+            ) : null}
+            <View style={styles.itemActionsRow}>
+              <TouchableOpacity
+                style={[
+                  styles.inlineActionBtn,
+                  { borderColor: theme.icon },
+                  entry.my_presence?.status === "present" && {
+                    borderColor: theme.tint,
+                    backgroundColor: `${theme.tint}16`,
+                  },
+                ]}
+                onPress={() => void submitMealPresence(entry.id, "present", null)}
+                disabled={saving}
+              >
+                <Text style={[styles.inlineActionText, { color: theme.text }]}>Je participe</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.inlineActionBtn,
+                  { borderColor: theme.icon },
+                  entry.my_presence?.status === "not_home" && {
+                    borderColor: theme.tint,
+                    backgroundColor: `${theme.tint}16`,
+                  },
+                ]}
+                onPress={() => openMealReasonModal(entry, "not_home")}
+                disabled={saving}
+              >
+                <Text style={[styles.inlineActionText, { color: theme.text }]}>Pas à la maison</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.inlineActionBtn,
+                  { borderColor: theme.icon },
+                  entry.my_presence?.status === "later" && {
+                    borderColor: theme.tint,
+                    backgroundColor: `${theme.tint}16`,
+                  },
+                ]}
+                onPress={() => openMealReasonModal(entry, "later")}
+                disabled={saving}
+              >
+                <Text style={[styles.inlineActionText, { color: theme.text }]}>Je mangerai plus tard</Text>
+              </TouchableOpacity>
+            </View>
+            {entry.presence_overview ? (
+              <View style={styles.inlineSummaryBlock}>
+                <Text style={[styles.itemMetaText, { color: theme.textSecondary }]}>
+                  Présents: {formatMemberList(entry.presence_overview.present)}
+                </Text>
+                <Text style={[styles.itemMetaText, { color: theme.textSecondary }]}>
+                  Pas à la maison: {formatMemberList(entry.presence_overview.not_home)}
+                </Text>
+                <Text style={[styles.itemMetaText, { color: theme.textSecondary }]}>
+                  Plus tard: {formatMemberList(entry.presence_overview.later)}
+                </Text>
+                <Text style={[styles.itemMetaText, { color: theme.textSecondary }]}>
+                  Sans réponse: {formatMemberList(entry.presence_overview.unanswered)}
+                </Text>
+              </View>
+            ) : null}
+          </>
+        ) : null}
+        {permissions.can_manage_meal_plan ? (
+          <View style={styles.itemActionsRow}>
+            <TouchableOpacity
+              style={[
+                styles.inlineActionBtn,
+                { borderColor: theme.icon, opacity: saving ? 0.45 : 1 },
+              ]}
+              onPress={() => void openMealPlanShoppingListPicker(entry)}
+              disabled={saving}
+            >
+              <MaterialCommunityIcons name="cart-plus" size={16} color={theme.tint} />
+              <Text style={[styles.inlineActionText, { color: theme.text }]}>Courses</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.inlineActionBtn, { borderColor: theme.icon }]}
+              onPress={() => openMealPlanEditor(entry)}
+              disabled={saving}
+            >
+              <MaterialCommunityIcons name="pencil-outline" size={16} color={theme.tint} />
+              <Text style={[styles.inlineActionText, { color: theme.text }]}>Modifier</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.inlineActionBtn, { borderColor: theme.icon }]}
+              onPress={() => confirmDeleteMealPlan(entry)}
+              disabled={saving}
+            >
+              <MaterialCommunityIcons name="delete-outline" size={16} color="#D96C6C" />
+              <Text style={[styles.inlineActionText, { color: theme.text }]}>Supprimer</Text>
+            </TouchableOpacity>
+          </View>
+        ) : null}
+      </View>
+    ),
+    [permissions.can_manage_meal_plan, saving, settings.absence_tracking_enabled, theme.background, theme.icon, theme.text, theme.textSecondary, theme.tint]
+  );
+
+  const renderSelectedDayTaskItem = useCallback(
+    ({ item: task }: { item: CalendarTaskInstance }) => (
+      <View
+        style={[styles.itemCard, { borderColor: theme.icon, backgroundColor: theme.background }]}
+      >
+        <View style={styles.itemHeaderRow}>
+          <Text style={[styles.itemTitle, { color: theme.text, flex: 1 }]}>{task.title}</Text>
+          <View style={[styles.badge, { backgroundColor: `${taskStatusColor(task.status)}22` }]}>
+            <Text style={[styles.badgeText, { color: taskStatusColor(task.status) }]}>
+              {taskStatusLabel(task.status)}
+            </Text>
+          </View>
+        </View>
+        <Text style={[styles.itemMetaText, { color: theme.textSecondary }]}>Assigné à: {taskAssigneeNames(task)}</Text>
+        {task.description ? (
+          <Text style={[styles.bodyText, { color: theme.textSecondary }]}>{task.description}</Text>
+        ) : null}
+        {task.validated_by_parent ? (
+          <Text style={[styles.itemMetaText, { color: "#2E8B78" }]}>Validée</Text>
+        ) : null}
+        {task.permissions.can_toggle || (task.permissions.can_validate && !task.validated_by_parent) ? (
+          <View style={styles.itemActionsRow}>
+            {task.permissions.can_toggle ? (
+              <TouchableOpacity
+                style={[styles.inlineActionBtn, { borderColor: theme.icon }]}
+                onPress={() => void toggleTaskInstance(task)}
+                disabled={saving}
+              >
+                <MaterialCommunityIcons
+                  name={isTaskStatus(task.status, TASK_STATUS_DONE) ? "backup-restore" : "check-bold"}
+                  size={16}
+                  color={theme.tint}
+                />
+                <Text style={[styles.inlineActionText, { color: theme.text }]}>
+                  {isTaskStatus(task.status, TASK_STATUS_DONE) ? "Remettre à faire" : "Marquer faite"}
+                </Text>
+              </TouchableOpacity>
+            ) : null}
+            {task.permissions.can_validate && !task.validated_by_parent ? (
+              <TouchableOpacity
+                style={[styles.inlineActionBtn, { borderColor: theme.icon }]}
+                onPress={() => void validateTaskInstance(task)}
+                disabled={saving}
+              >
+                <MaterialCommunityIcons name="check-decagram-outline" size={16} color="#2E8B78" />
+                <Text style={[styles.inlineActionText, { color: theme.text }]}>Valider</Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
+        ) : null}
+      </View>
+    ),
+    [saving, theme.background, theme.icon, theme.text, theme.textSecondary, theme.tint]
+  );
+
+  const renderSelectedDayEventItem = useCallback(
+    ({ item: event }: { item: CalendarEvent }) => (
+      <View
+        style={[styles.itemCard, { borderColor: theme.icon, backgroundColor: theme.background }]}
+      >
+        <View style={styles.itemHeaderRow}>
+          <Text style={[styles.itemTitle, { color: theme.text, flex: 1 }]}>{event.title}</Text>
+          <View
+            style={[
+              styles.badge,
+              { backgroundColor: event.is_shared_with_other_household ? "#50BFA522" : `${theme.icon}20` },
+            ]}
+          >
+            <Text
+              style={[
+                styles.badgeText,
+                { color: event.is_shared_with_other_household ? "#2E8B78" : theme.textSecondary },
+              ]}
+            >
+              {event.is_shared_with_other_household ? "Partagé" : "Privé"}
+            </Text>
+          </View>
+        </View>
+        <Text style={[styles.itemMetaText, { color: theme.textSecondary }]}>
+          {formatTimeRange(event.start_at, event.end_at)}
+        </Text>
+        {event.description ? (
+          <Text style={[styles.bodyText, { color: theme.textSecondary }]}>{event.description}</Text>
+        ) : null}
+        {event.created_by?.name ? (
+          <Text style={[styles.itemMetaText, { color: theme.textSecondary }]}>
+            Créé par {event.created_by.name}
+          </Text>
+        ) : null}
+        {event.permissions?.can_confirm_participation !== false ? (
+          <>
+            <Text style={[styles.itemMetaText, { color: theme.textSecondary }]}>
+              {event.my_participation
+                ? `Votre réponse: ${eventParticipationLabel(event.my_participation.status)}`
+                : "Votre participation n'est pas encore confirmée."}
+            </Text>
+            {event.my_participation?.reason ? (
+              <Text style={[styles.bodyText, { color: theme.textSecondary }]}>
+                Justification: {event.my_participation.reason}
+              </Text>
+            ) : null}
+            <View style={styles.itemActionsRow}>
+              <TouchableOpacity
+                style={[
+                  styles.inlineActionBtn,
+                  { borderColor: theme.icon },
+                  event.my_participation?.status === "participate" && {
+                    borderColor: theme.tint,
+                    backgroundColor: `${theme.tint}16`,
+                  },
+                ]}
+                onPress={() => void submitEventParticipation(event.id, "participate", null)}
+                disabled={saving}
+              >
+                <Text style={[styles.inlineActionText, { color: theme.text }]}>Je participe</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.inlineActionBtn,
+                  { borderColor: theme.icon },
+                  event.my_participation?.status === "not_participate" && {
+                    borderColor: theme.tint,
+                    backgroundColor: `${theme.tint}16`,
+                  },
+                ]}
+                onPress={() => openEventReasonModal(event)}
+                disabled={saving}
+              >
+                <Text style={[styles.inlineActionText, { color: theme.text }]}>Je ne participe pas</Text>
+              </TouchableOpacity>
+            </View>
+            {event.participation_overview ? (
+              <View style={styles.inlineSummaryBlock}>
+                <Text style={[styles.itemMetaText, { color: theme.textSecondary }]}>
+                  Participe: {formatMemberList(event.participation_overview.participate)}
+                </Text>
+                <Text style={[styles.itemMetaText, { color: theme.textSecondary }]}>
+                  Ne participe pas: {formatMemberList(event.participation_overview.not_participate)}
+                </Text>
+                <Text style={[styles.itemMetaText, { color: theme.textSecondary }]}>
+                  Sans réponse: {formatMemberList(event.participation_overview.unanswered)}
+                </Text>
+              </View>
+            ) : null}
+          </>
+        ) : null}
+        {event.permissions?.can_update || event.permissions?.can_delete ? (
+          <View style={styles.itemActionsRow}>
+            {event.permissions?.can_update ? (
+              <TouchableOpacity
+                style={[styles.inlineActionBtn, { borderColor: theme.icon }]}
+                onPress={() => openEventEditor(event)}
+                disabled={saving}
+              >
+                <MaterialCommunityIcons name="pencil-outline" size={16} color={theme.tint} />
+                <Text style={[styles.inlineActionText, { color: theme.text }]}>Modifier</Text>
+              </TouchableOpacity>
+            ) : null}
+            {event.permissions?.can_delete ? (
+              <TouchableOpacity
+                style={[styles.inlineActionBtn, { borderColor: theme.icon }]}
+                onPress={() => confirmDeleteEvent(event)}
+                disabled={saving}
+              >
+                <MaterialCommunityIcons name="delete-outline" size={16} color="#D96C6C" />
+                <Text style={[styles.inlineActionText, { color: theme.text }]}>Supprimer</Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
+        ) : null}
+      </View>
+    ),
+    [saving, theme.background, theme.icon, theme.text, theme.textSecondary, theme.tint]
+  );
+
   const selectedMealRecipe = useMemo(() => {
-    return recipeOptions.find((recipe) => recipe.id === mealPlanRecipeId) ?? null;
-  }, [mealPlanRecipeId, recipeOptions]);
+    return recipes.find((recipe) => recipe.id === mealPlanRecipeId) ?? null;
+  }, [mealPlanRecipeId, recipes]);
   const assignableTaskMembers = useMemo(() => {
     if (!Array.isArray(taskMembers) || taskMembers.length === 0) {
       return [];
@@ -1966,134 +2308,14 @@ export default function CalendarScreen() {
                 <Text style={[styles.sectionTitle, { color: theme.text }]}>Repas</Text>
               </View>
               {selectedDayMeals.length > 0 ? (
-                selectedDayMeals.map((entry) => (
-                  <View
-                    key={`meal-${entry.id}`}
-                    style={[styles.itemCard, { borderColor: theme.icon, backgroundColor: theme.background }]}
-                  >
-                    <View style={styles.itemHeaderRow}>
-                      <View style={[styles.badge, { backgroundColor: `${mealTypeColor(entry.meal_type)}22` }]}>
-                        <Text style={[styles.badgeText, { color: mealTypeColor(entry.meal_type) }]}>{mealTypeLabel(entry.meal_type)}</Text>
-                      </View>
-                      <Text style={[styles.itemMetaText, { color: theme.textSecondary, flex: 1, textAlign: "right" }]}>
-                        {entry.custom_title?.trim()
-                          ? "Repas libre"
-                          : `${entry.recipes.length} recette${entry.recipes.length > 1 ? "s" : ""}`}
-                      </Text>
-                    </View>
-                    <Text style={[styles.itemTitle, { color: theme.text }]}>
-                      {entry.custom_title?.trim() || entry.recipes.map((recipe) => recipe.title).join(", ")}
-                    </Text>
-                    {entry.note ? (
-                      <Text style={[styles.bodyText, { color: theme.textSecondary }]}>{entry.note}</Text>
-                    ) : null}
-                    {settings.absence_tracking_enabled ? (
-                      <>
-                        <Text style={[styles.itemMetaText, { color: theme.textSecondary }]}>
-                          {entry.my_presence
-                            ? `Votre présence: ${mealPresenceLabel(entry.my_presence.status)}`
-                            : "Votre présence n'est pas encore confirmée."}
-                        </Text>
-                        {entry.my_presence?.reason ? (
-                          <Text style={[styles.bodyText, { color: theme.textSecondary }]}>
-                            Justification: {entry.my_presence.reason}
-                          </Text>
-                        ) : null}
-                        <View style={styles.itemActionsRow}>
-                          <TouchableOpacity
-                            style={[
-                              styles.inlineActionBtn,
-                              { borderColor: theme.icon },
-                              entry.my_presence?.status === "present" && {
-                                borderColor: theme.tint,
-                                backgroundColor: `${theme.tint}16`,
-                              },
-                            ]}
-                            onPress={() => void submitMealPresence(entry.id, "present", null)}
-                            disabled={saving}
-                          >
-                            <Text style={[styles.inlineActionText, { color: theme.text }]}>Je participe</Text>
-                          </TouchableOpacity>
-                          <TouchableOpacity
-                            style={[
-                              styles.inlineActionBtn,
-                              { borderColor: theme.icon },
-                              entry.my_presence?.status === "not_home" && {
-                                borderColor: theme.tint,
-                                backgroundColor: `${theme.tint}16`,
-                              },
-                            ]}
-                            onPress={() => openMealReasonModal(entry, "not_home")}
-                            disabled={saving}
-                          >
-                            <Text style={[styles.inlineActionText, { color: theme.text }]}>Pas à la maison</Text>
-                          </TouchableOpacity>
-                          <TouchableOpacity
-                            style={[
-                              styles.inlineActionBtn,
-                              { borderColor: theme.icon },
-                              entry.my_presence?.status === "later" && {
-                                borderColor: theme.tint,
-                                backgroundColor: `${theme.tint}16`,
-                              },
-                            ]}
-                            onPress={() => openMealReasonModal(entry, "later")}
-                            disabled={saving}
-                          >
-                            <Text style={[styles.inlineActionText, { color: theme.text }]}>Je mangerai plus tard</Text>
-                          </TouchableOpacity>
-                        </View>
-                        {entry.presence_overview ? (
-                          <View style={styles.inlineSummaryBlock}>
-                            <Text style={[styles.itemMetaText, { color: theme.textSecondary }]}>
-                              Présents: {formatMemberList(entry.presence_overview.present)}
-                            </Text>
-                            <Text style={[styles.itemMetaText, { color: theme.textSecondary }]}>
-                              Pas à la maison: {formatMemberList(entry.presence_overview.not_home)}
-                            </Text>
-                            <Text style={[styles.itemMetaText, { color: theme.textSecondary }]}>
-                              Plus tard: {formatMemberList(entry.presence_overview.later)}
-                            </Text>
-                            <Text style={[styles.itemMetaText, { color: theme.textSecondary }]}>
-                              Sans réponse: {formatMemberList(entry.presence_overview.unanswered)}
-                            </Text>
-                          </View>
-                        ) : null}
-                      </>
-                    ) : null}
-                    {permissions.can_manage_meal_plan ? (
-                      <View style={styles.itemActionsRow}>
-                        <TouchableOpacity
-                          style={[
-                            styles.inlineActionBtn,
-                            { borderColor: theme.icon, opacity: saving ? 0.45 : 1 },
-                          ]}
-                          onPress={() => void openMealPlanShoppingListPicker(entry)}
-                          disabled={saving}
-                        >
-                          <MaterialCommunityIcons name="cart-plus" size={16} color={theme.tint} />
-                          <Text style={[styles.inlineActionText, { color: theme.text }]}>Courses</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                          style={[styles.inlineActionBtn, { borderColor: theme.icon }]}
-                          onPress={() => openMealPlanEditor(entry)}
-                          disabled={saving}
-                        >
-                          <MaterialCommunityIcons name="pencil-outline" size={16} color={theme.tint} />
-                          <Text style={[styles.inlineActionText, { color: theme.text }]}>Modifier</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                          style={[styles.inlineActionBtn, { borderColor: theme.icon }]}
-                          onPress={() => confirmDeleteMealPlan(entry)}
-                          disabled={saving}
-                        >
-                          <MaterialCommunityIcons name="delete-outline" size={16} color="#D96C6C" />
-                          <Text style={[styles.inlineActionText, { color: theme.text }]}>Supprimer</Text>
-                        </TouchableOpacity>
-                      </View>
-                    ) : null}
-                  </View>
-                ))
+                <FlatList
+                  data={selectedDayMeals}
+                  keyExtractor={(entry) => `meal-${entry.id}`}
+                  renderItem={renderSelectedDayMealItem}
+                  scrollEnabled={false}
+                  removeClippedSubviews
+                  ItemSeparatorComponent={() => <View style={{ height: 8 }} />}
+                />
               ) : (
                 <Text style={[styles.bodyText, { color: theme.textSecondary }]}>
                   Aucun repas validé pour cette journée.
@@ -2111,58 +2333,14 @@ export default function CalendarScreen() {
                   Le module tâches est désactivé pour ce foyer.
                 </Text>
               ) : selectedDayTasks.length > 0 ? (
-                selectedDayTasks.map((task) => (
-                  <View
-                    key={`task-${task.id}`}
-                    style={[styles.itemCard, { borderColor: theme.icon, backgroundColor: theme.background }]}
-                  >
-                    <View style={styles.itemHeaderRow}>
-                      <Text style={[styles.itemTitle, { color: theme.text, flex: 1 }]}>{task.title}</Text>
-                      <View style={[styles.badge, { backgroundColor: `${taskStatusColor(task.status)}22` }]}>
-                        <Text style={[styles.badgeText, { color: taskStatusColor(task.status) }]}>
-                          {taskStatusLabel(task.status)}
-                        </Text>
-                      </View>
-                    </View>
-                    <Text style={[styles.itemMetaText, { color: theme.textSecondary }]}>Assigné à: {taskAssigneeNames(task)}</Text>
-                    {task.description ? (
-                      <Text style={[styles.bodyText, { color: theme.textSecondary }]}>{task.description}</Text>
-                    ) : null}
-                    {task.validated_by_parent ? (
-                      <Text style={[styles.itemMetaText, { color: "#2E8B78" }]}>Validée</Text>
-                    ) : null}
-                    {task.permissions.can_toggle || (task.permissions.can_validate && !task.validated_by_parent) ? (
-                      <View style={styles.itemActionsRow}>
-                        {task.permissions.can_toggle ? (
-                          <TouchableOpacity
-                            style={[styles.inlineActionBtn, { borderColor: theme.icon }]}
-                            onPress={() => void toggleTaskInstance(task)}
-                            disabled={saving}
-                          >
-                            <MaterialCommunityIcons
-                              name={isTaskStatus(task.status, TASK_STATUS_DONE) ? "backup-restore" : "check-bold"}
-                              size={16}
-                              color={theme.tint}
-                            />
-                            <Text style={[styles.inlineActionText, { color: theme.text }]}>
-                              {isTaskStatus(task.status, TASK_STATUS_DONE) ? "Remettre   faire" : "Marquer faite"}
-                            </Text>
-                          </TouchableOpacity>
-                        ) : null}
-                        {task.permissions.can_validate && !task.validated_by_parent ? (
-                          <TouchableOpacity
-                            style={[styles.inlineActionBtn, { borderColor: theme.icon }]}
-                            onPress={() => void validateTaskInstance(task)}
-                            disabled={saving}
-                          >
-                            <MaterialCommunityIcons name="check-decagram-outline" size={16} color="#2E8B78" />
-                            <Text style={[styles.inlineActionText, { color: theme.text }]}>Valider</Text>
-                          </TouchableOpacity>
-                        ) : null}
-                      </View>
-                    ) : null}
-                  </View>
-                ))
+                <FlatList
+                  data={selectedDayTasks}
+                  keyExtractor={(task) => `task-${task.id}`}
+                  renderItem={renderSelectedDayTaskItem}
+                  scrollEnabled={false}
+                  removeClippedSubviews
+                  ItemSeparatorComponent={() => <View style={{ height: 8 }} />}
+                />
               ) : (
                 <Text style={[styles.bodyText, { color: theme.textSecondary }]}>
                   Aucune tâche prévue pour cette journée.
@@ -2176,123 +2354,14 @@ export default function CalendarScreen() {
                 <Text style={[styles.sectionTitle, { color: theme.text }]}>événements</Text>
               </View>
               {selectedDayEvents.length > 0 ? (
-                selectedDayEvents.map((event) => (
-                  <View
-                    key={`event-${event.id}`}
-                    style={[styles.itemCard, { borderColor: theme.icon, backgroundColor: theme.background }]}
-                  >
-                    <View style={styles.itemHeaderRow}>
-                      <Text style={[styles.itemTitle, { color: theme.text, flex: 1 }]}>{event.title}</Text>
-                      <View
-                        style={[
-                          styles.badge,
-                          { backgroundColor: event.is_shared_with_other_household ? "#50BFA522" : `${theme.icon}20` },
-                        ]}
-                      >
-                        <Text
-                          style={[
-                            styles.badgeText,
-                            { color: event.is_shared_with_other_household ? "#2E8B78" : theme.textSecondary },
-                          ]}
-                        >
-                          {event.is_shared_with_other_household ? "Partagé" : "Privé"}
-                        </Text>
-                      </View>
-                    </View>
-                    <Text style={[styles.itemMetaText, { color: theme.textSecondary }]}>
-                      {formatTimeRange(event.start_at, event.end_at)}
-                    </Text>
-                    {event.description ? (
-                      <Text style={[styles.bodyText, { color: theme.textSecondary }]}>{event.description}</Text>
-                    ) : null}
-                    {event.created_by?.name ? (
-                      <Text style={[styles.itemMetaText, { color: theme.textSecondary }]}>
-                        Créé par {event.created_by.name}
-                      </Text>
-                    ) : null}
-                    {event.permissions?.can_confirm_participation !== false ? (
-                      <>
-                        <Text style={[styles.itemMetaText, { color: theme.textSecondary }]}>
-                          {event.my_participation
-                            ? `Votre réponse: ${eventParticipationLabel(event.my_participation.status)}`
-                            : "Votre participation n'est pas encore confirmée."}
-                        </Text>
-                        {event.my_participation?.reason ? (
-                          <Text style={[styles.bodyText, { color: theme.textSecondary }]}>
-                            Justification: {event.my_participation.reason}
-                          </Text>
-                        ) : null}
-                        <View style={styles.itemActionsRow}>
-                          <TouchableOpacity
-                            style={[
-                              styles.inlineActionBtn,
-                              { borderColor: theme.icon },
-                              event.my_participation?.status === "participate" && {
-                                borderColor: theme.tint,
-                                backgroundColor: `${theme.tint}16`,
-                              },
-                            ]}
-                            onPress={() => void submitEventParticipation(event.id, "participate", null)}
-                            disabled={saving}
-                          >
-                            <Text style={[styles.inlineActionText, { color: theme.text }]}>Je participe</Text>
-                          </TouchableOpacity>
-                          <TouchableOpacity
-                            style={[
-                              styles.inlineActionBtn,
-                              { borderColor: theme.icon },
-                              event.my_participation?.status === "not_participate" && {
-                                borderColor: theme.tint,
-                                backgroundColor: `${theme.tint}16`,
-                              },
-                            ]}
-                            onPress={() => openEventReasonModal(event)}
-                            disabled={saving}
-                          >
-                            <Text style={[styles.inlineActionText, { color: theme.text }]}>Je ne participe pas</Text>
-                          </TouchableOpacity>
-                        </View>
-                        {event.participation_overview ? (
-                          <View style={styles.inlineSummaryBlock}>
-                            <Text style={[styles.itemMetaText, { color: theme.textSecondary }]}>
-                              Participe: {formatMemberList(event.participation_overview.participate)}
-                            </Text>
-                            <Text style={[styles.itemMetaText, { color: theme.textSecondary }]}>
-                              Ne participe pas: {formatMemberList(event.participation_overview.not_participate)}
-                            </Text>
-                            <Text style={[styles.itemMetaText, { color: theme.textSecondary }]}>
-                              Sans réponse: {formatMemberList(event.participation_overview.unanswered)}
-                            </Text>
-                          </View>
-                        ) : null}
-                      </>
-                    ) : null}
-                    {event.permissions?.can_update || event.permissions?.can_delete ? (
-                      <View style={styles.itemActionsRow}>
-                        {event.permissions?.can_update ? (
-                          <TouchableOpacity
-                            style={[styles.inlineActionBtn, { borderColor: theme.icon }]}
-                            onPress={() => openEventEditor(event)}
-                            disabled={saving}
-                          >
-                            <MaterialCommunityIcons name="pencil-outline" size={16} color={theme.tint} />
-                            <Text style={[styles.inlineActionText, { color: theme.text }]}>Modifier</Text>
-                          </TouchableOpacity>
-                        ) : null}
-                        {event.permissions?.can_delete ? (
-                          <TouchableOpacity
-                            style={[styles.inlineActionBtn, { borderColor: theme.icon }]}
-                            onPress={() => confirmDeleteEvent(event)}
-                            disabled={saving}
-                          >
-                            <MaterialCommunityIcons name="delete-outline" size={16} color="#D96C6C" />
-                            <Text style={[styles.inlineActionText, { color: theme.text }]}>Supprimer</Text>
-                          </TouchableOpacity>
-                        ) : null}
-                      </View>
-                    ) : null}
-                  </View>
-                ))
+                <FlatList
+                  data={selectedDayEvents}
+                  keyExtractor={(event) => `event-${event.id}`}
+                  renderItem={renderSelectedDayEventItem}
+                  scrollEnabled={false}
+                  removeClippedSubviews
+                  ItemSeparatorComponent={() => <View style={{ height: 8 }} />}
+                />
               ) : (
                 <Text style={[styles.bodyText, { color: theme.textSecondary }]}>
                   Aucun événement sur cette journée.
@@ -2401,6 +2470,7 @@ export default function CalendarScreen() {
                     placeholder="Rechercher une recette"
                     placeholderTextColor={theme.textSecondary}
                   />
+                  {mealPlanRecipeSearch.isFetching ? <ActivityIndicator size="small" color={theme.tint} /> : null}
                   {recipeOptions.length > 0 ? (
                     <ScrollView keyboardShouldPersistTaps="handled" horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.recipePickerRow}>
                       {filteredRecipeOptions.map((recipe) => (
@@ -2829,6 +2899,7 @@ export default function CalendarScreen() {
                         placeholder="Rechercher une recette"
                         placeholderTextColor={theme.textSecondary}
                       />
+                      {mealPlanRecipeSearch.isFetching ? <ActivityIndicator size="small" color={theme.tint} /> : null}
                       {recipeOptions.length > 0 ? (
                         <ScrollView keyboardShouldPersistTaps="handled" horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.recipePickerRow}>
                           {filteredRecipeOptions.map((recipe) => (
@@ -3423,3 +3494,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
 });
+
+
+

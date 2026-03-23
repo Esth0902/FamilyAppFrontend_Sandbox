@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   ActivityIndicator,
   Alert,
+  SectionList,
   ScrollView,
   StyleSheet,
   Text,
@@ -896,6 +897,115 @@ export default function TasksScreen() {
 
     return Object.entries(buckets);
   }, [visibleInstances]);
+
+  const groupedInstanceSections = useMemo(
+    () =>
+      groupedInstances.map(([date, dayInstances]) => ({
+        title: date,
+        data: dayInstances,
+      })),
+    [groupedInstances]
+  );
+
+  const renderGroupedInstanceItem = useCallback(
+    ({ item: instance }: { item: TaskInstance }) => (
+      <View
+        style={[styles.instanceCard, { borderColor: theme.icon, backgroundColor: theme.background }]}
+      >
+        <View style={{ flex: 1 }}>
+          <Text style={{ color: theme.text, fontWeight: "700" }}>{instance.title}</Text>
+          <Text style={{ color: theme.textSecondary, fontSize: 12 }}>
+            {(Array.isArray(instance.assignees) && instance.assignees.length > 0
+              ? instance.assignees.map((assignee) => assignee.name).join(", ")
+              : instance.assignee.name)}
+            {instance.template.recurrence !== "once" ? ` - ${recurrenceLabel(instance.template.recurrence)}` : ""}
+          </Text>
+          {instance.description ? (
+            <Text style={{ color: theme.textSecondary, fontSize: 12, marginTop: 2 }}>{instance.description}</Text>
+          ) : null}
+        </View>
+
+        <View style={styles.instanceActions}>
+          <View style={[
+            styles.statusBadge,
+            instance.status === STATUS_TODO && { backgroundColor: "#F5A62322" },
+            instance.status === STATUS_DONE && { backgroundColor: "#2ECC7126" },
+            instance.status === STATUS_CANCELLED && { backgroundColor: "#CC4B4B22" },
+          ]}>
+            <Text style={{ color: theme.textSecondary, fontSize: 11 }}>{instance.status}</Text>
+          </View>
+
+          <TouchableOpacity
+            onPress={() => void toggleInstance(instance)}
+            disabled={!instance.permissions.can_toggle || saving}
+            style={[styles.iconBtn, { borderColor: theme.icon, opacity: instance.permissions.can_toggle ? 1 : 0.4 }]}
+          >
+            <MaterialCommunityIcons
+              name={instance.status === STATUS_DONE ? "checkbox-marked-outline" : "checkbox-blank-outline"}
+              size={20}
+              color={theme.tint}
+            />
+          </TouchableOpacity>
+
+          {(currentUserId !== null
+            && (
+              (Array.isArray(instance.assignees) && instance.assignees.some((assignee) => Number(assignee.id) === currentUserId))
+              || (!Array.isArray(instance.assignees) && Number(instance.assignee.id) === currentUserId)
+            )
+            && members.some((member) => {
+              if (Array.isArray(instance.assignees) && instance.assignees.length > 0) {
+                return !instance.assignees.some((assignee) => Number(assignee.id) === Number(member.id));
+              }
+              return Number(member.id) !== Number(instance.assignee.id);
+            })) ? (
+            <TouchableOpacity
+              onPress={() => requestInstanceReassignment(instance)}
+              disabled={saving}
+              style={[styles.iconBtn, { borderColor: theme.icon }]}
+            >
+              <MaterialCommunityIcons name="account-switch-outline" size={20} color={theme.tint} />
+            </TouchableOpacity>
+          ) : null}
+
+          {instance.permissions.can_validate ? (
+            <TouchableOpacity
+              onPress={() => void validateInstance(instance)}
+              disabled={instance.validated_by_parent || saving}
+              style={[styles.iconBtn, { borderColor: theme.icon, opacity: instance.validated_by_parent ? 0.4 : 1 }]}
+            >
+              <MaterialCommunityIcons
+                name={instance.validated_by_parent ? "check-decagram" : "check-decagram-outline"}
+                size={20}
+                color={instance.validated_by_parent ? "#2ECC71" : theme.tint}
+              />
+            </TouchableOpacity>
+          ) : null}
+
+          {instance.permissions.can_cancel ? (
+            <TouchableOpacity
+              onPress={() => void toggleCancelled(instance)}
+              disabled={saving}
+              style={[styles.iconBtn, { borderColor: theme.icon }]}
+            >
+              <MaterialCommunityIcons
+                name={instance.status === STATUS_CANCELLED ? "restore" : "cancel"}
+                size={20}
+                color={instance.status === STATUS_CANCELLED ? theme.tint : "#CC4B4B"}
+              />
+            </TouchableOpacity>
+          ) : null}
+        </View>
+      </View>
+    ),
+    [currentUserId, members, saving, theme.background, theme.icon, theme.text, theme.textSecondary, theme.tint]
+  );
+
+  const renderGroupedInstanceHeader = useCallback(
+    ({ section }: { section: { title: string } }) => (
+      <Text style={[styles.dateTitle, { color: theme.textSecondary }]}>{formatDateLabel(section.title)}</Text>
+    ),
+    [theme.textSecondary]
+  );
 
   const applyTemplateRecurrence = (recurrence: "daily" | "weekly" | "monthly" | "once") => {
     setTemplateRecurrence(recurrence);
@@ -2267,102 +2377,17 @@ export default function TasksScreen() {
           {isPlannedModule ? (
             <View style={[styles.card, { backgroundColor: theme.card }]}>
               <Text style={[styles.cardTitle, { color: theme.text }]}>Tâches planifiées</Text>
-            {groupedInstances.length > 0 ? (
-              groupedInstances.map(([date, dayInstances]) => (
-                <View key={`date-${date}`} style={{ marginBottom: 12 }}>
-                  <Text style={[styles.dateTitle, { color: theme.textSecondary }]}>{formatDateLabel(date)}</Text>
-                  {dayInstances.map((instance) => (
-                    <View
-                      key={`instance-${instance.id}`}
-                      style={[styles.instanceCard, { borderColor: theme.icon, backgroundColor: theme.background }]}
-                    >
-                      <View style={{ flex: 1 }}>
-                        <Text style={{ color: theme.text, fontWeight: "700" }}>{instance.title}</Text>
-                        <Text style={{ color: theme.textSecondary, fontSize: 12 }}>
-                          {(Array.isArray(instance.assignees) && instance.assignees.length > 0
-                            ? instance.assignees.map((assignee) => assignee.name).join(", ")
-                            : instance.assignee.name)}
-                          {instance.template.recurrence !== "once" ? ` - ${recurrenceLabel(instance.template.recurrence)}` : ""}
-                        </Text>
-                        {instance.description ? (
-                          <Text style={{ color: theme.textSecondary, fontSize: 12, marginTop: 2 }}>{instance.description}</Text>
-                        ) : null}
-                      </View>
-
-                      <View style={styles.instanceActions}>
-                        <View style={[
-                          styles.statusBadge,
-                          instance.status === STATUS_TODO && { backgroundColor: "#F5A62322" },
-                          instance.status === STATUS_DONE && { backgroundColor: "#2ECC7126" },
-                          instance.status === STATUS_CANCELLED && { backgroundColor: "#CC4B4B22" },
-                        ]}>
-                          <Text style={{ color: theme.textSecondary, fontSize: 11 }}>{instance.status}</Text>
-                        </View>
-
-                        <TouchableOpacity
-                          onPress={() => void toggleInstance(instance)}
-                          disabled={!instance.permissions.can_toggle || saving}
-                          style={[styles.iconBtn, { borderColor: theme.icon, opacity: instance.permissions.can_toggle ? 1 : 0.4 }]}
-                        >
-                          <MaterialCommunityIcons
-                            name={instance.status === STATUS_DONE ? "checkbox-marked-outline" : "checkbox-blank-outline"}
-                            size={20}
-                            color={theme.tint}
-                          />
-                        </TouchableOpacity>
-
-                        {(currentUserId !== null
-                          && (
-                            (Array.isArray(instance.assignees) && instance.assignees.some((assignee) => Number(assignee.id) === currentUserId))
-                            || (!Array.isArray(instance.assignees) && Number(instance.assignee.id) === currentUserId)
-                          )
-                          && members.some((member) => {
-                            if (Array.isArray(instance.assignees) && instance.assignees.length > 0) {
-                              return !instance.assignees.some((assignee) => Number(assignee.id) === Number(member.id));
-                            }
-                            return Number(member.id) !== Number(instance.assignee.id);
-                          })) ? (
-                          <TouchableOpacity
-                            onPress={() => requestInstanceReassignment(instance)}
-                            disabled={saving}
-                            style={[styles.iconBtn, { borderColor: theme.icon }]}
-                          >
-                            <MaterialCommunityIcons name="account-switch-outline" size={20} color={theme.tint} />
-                          </TouchableOpacity>
-                        ) : null}
-
-                        {instance.permissions.can_validate ? (
-                          <TouchableOpacity
-                            onPress={() => void validateInstance(instance)}
-                            disabled={instance.validated_by_parent || saving}
-                            style={[styles.iconBtn, { borderColor: theme.icon, opacity: instance.validated_by_parent ? 0.4 : 1 }]}
-                          >
-                            <MaterialCommunityIcons
-                              name={instance.validated_by_parent ? "check-decagram" : "check-decagram-outline"}
-                              size={20}
-                              color={instance.validated_by_parent ? "#2ECC71" : theme.tint}
-                            />
-                          </TouchableOpacity>
-                        ) : null}
-
-                        {instance.permissions.can_cancel ? (
-                          <TouchableOpacity
-                            onPress={() => void toggleCancelled(instance)}
-                            disabled={saving}
-                            style={[styles.iconBtn, { borderColor: theme.icon }]}
-                          >
-                            <MaterialCommunityIcons
-                              name={instance.status === STATUS_CANCELLED ? "restore" : "cancel"}
-                              size={20}
-                              color={instance.status === STATUS_CANCELLED ? theme.tint : "#CC4B4B"}
-                            />
-                          </TouchableOpacity>
-                        ) : null}
-                      </View>
-                    </View>
-                  ))}
-                </View>
-              ))
+            {groupedInstanceSections.length > 0 ? (
+              <SectionList
+                sections={groupedInstanceSections}
+                keyExtractor={(instance) => `instance-${instance.id}`}
+                renderSectionHeader={renderGroupedInstanceHeader}
+                renderItem={renderGroupedInstanceItem}
+                scrollEnabled={false}
+                stickySectionHeadersEnabled={false}
+                ItemSeparatorComponent={() => <View style={{ height: 8 }} />}
+                SectionSeparatorComponent={() => <View style={{ height: 12 }} />}
+              />
             ) : (
               <Text style={{ color: theme.textSecondary }}>Aucune tâche sur cette semaine.</Text>
             )}
@@ -2651,5 +2676,6 @@ const styles = StyleSheet.create({
     alignSelf: "flex-end",
   },
 });
+
 
 

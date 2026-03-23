@@ -6,6 +6,7 @@ import {
     ActivityIndicator,
     TouchableOpacity,
     ScrollView,
+    FlatList,
     useColorScheme,
     Alert,
 } from "react-native";
@@ -220,25 +221,28 @@ export default function ConnectedHome() {
         [activeHouseholdId, onSwitchHousehold, router]
     );
 
-    const onRespondToNotification = async (
-        notification: PendingNotification,
-        action: "accept" | "refuse" | "cancel"
-    ) => {
-        setProcessingNotificationId(notification.id);
-        try {
-            const response = await respondToNotification(notification.id, notification.type, action);
-            const typedResponse = response as { user?: unknown } | null;
-            if (notification.type === "household_invite" && action === "accept" && typedResponse?.user) {
-                await persistStoredUser(typedResponse.user as Record<string, unknown>);
-            }
+    const onRespondToNotification = useCallback(
+        async (
+            notification: PendingNotification,
+            action: "accept" | "refuse" | "cancel"
+        ) => {
+            setProcessingNotificationId(notification.id);
+            try {
+                const response = await respondToNotification(notification.id, notification.type, action);
+                const typedResponse = response as { user?: unknown } | null;
+                if (notification.type === "household_invite" && action === "accept" && typedResponse?.user) {
+                    await persistStoredUser(typedResponse.user as Record<string, unknown>);
+                }
 
-            await refreshNotifications();
-        } catch (error: any) {
-            Alert.alert("Notification", error?.message || "Impossible de traiter cette notification.");
-        } finally {
-            setProcessingNotificationId(null);
-        }
-    };
+                await refreshNotifications();
+            } catch (error: any) {
+                Alert.alert("Notification", error?.message || "Impossible de traiter cette notification.");
+            } finally {
+                setProcessingNotificationId(null);
+            }
+        },
+        [refreshNotifications]
+    );
 
     const onLeaveHouseholdFromNotification = useCallback(
         async (notification: PendingNotification) => {
@@ -267,32 +271,39 @@ export default function ConnectedHome() {
         [activeHouseholdId, onSwitchHousehold, refreshNotifications]
     );
 
-    const onMarkNotificationRead = async (notification: PendingNotification) => {
-        setProcessingNotificationId(notification.id);
-        try {
-            await markNotificationRead(notification.id);
-            await refreshNotifications();
-        } catch (error: any) {
-            Alert.alert("Notification", error?.message || "Impossible de marquer la notification comme lue.");
-        } finally {
-            setProcessingNotificationId(null);
-        }
-    };
+    const onMarkNotificationRead = useCallback(
+        async (notification: PendingNotification) => {
+            setProcessingNotificationId(notification.id);
+            try {
+                await markNotificationRead(notification.id);
+                await refreshNotifications();
+            } catch (error: any) {
+                Alert.alert("Notification", error?.message || "Impossible de marquer la notification comme lue.");
+            } finally {
+                setProcessingNotificationId(null);
+            }
+        },
+        [refreshNotifications]
+    );
 
     const readableNotifications = useMemo(
         () => pendingNotifications.filter((notification) => !ACTION_REQUIRED_NOTIFICATION_TYPES.has(notification.type)),
         [pendingNotifications]
     );
 
-    const onMarkAllNotificationsRead = async () => {
+    const onMarkAllNotificationsRead = useCallback(async () => {
         if (readableNotifications.length <= 1) {
             return;
         }
 
         setProcessingBulkRead(true);
         try {
-            for (const notification of readableNotifications) {
-                await markNotificationRead(notification.id);
+            const results = await Promise.allSettled(
+                readableNotifications.map((notification) => markNotificationRead(notification.id))
+            );
+            const hasFailure = results.some((result) => result.status === "rejected");
+            if (hasFailure) {
+                Alert.alert("Notification", "Certaines notifications n'ont pas pu être marquées comme lues.");
             }
             await refreshNotifications();
         } catch (error: any) {
@@ -300,7 +311,7 @@ export default function ConnectedHome() {
         } finally {
             setProcessingBulkRead(false);
         }
-    };
+    }, [readableNotifications, refreshNotifications]);
 
     const onOpenNotification = useCallback(
         async (notification: PendingNotification) => {
@@ -319,6 +330,390 @@ export default function ConnectedHome() {
             router.push(target);
         },
         [activeHouseholdId, onSwitchHousehold, router]
+    );
+
+    const renderNotificationItem = useCallback(
+        ({ item: notification }: { item: PendingNotification }) => {
+            const isProcessing = processingNotificationId === notification.id;
+            const type = notification.type;
+            const data = notification.data;
+            const createdLabel = formatNotificationDate(notification.createdAt);
+            const inviterName = String(data.inviter_name ?? data.initiator_name ?? "").trim() || "Un parent";
+            const householdName = String(data.household_name ?? "").trim() || "ce foyer";
+            const invitedRole = String(data.invited_role ?? "") === "parent" ? "parent" : "enfant";
+            const requesterName = String(data.requester_name ?? data.requester_household_name ?? "").trim() || "Un foyer";
+            const taskName = String(data.task_name ?? "").trim() || "cette tâche";
+            const dueDate = formatDueDate(data.due_date);
+            const justification = resolveNotificationJustification(data);
+            const scheduledForLabel = formatNotificationDate(
+                typeof data.scheduled_for === "string" ? data.scheduled_for : null
+            );
+            const canOpenNotification = getNotificationNavigationTarget(notification) !== null;
+
+            return (
+                <TouchableOpacity
+                    style={[styles.notificationItem, { backgroundColor: `${theme.tint}12`, borderColor: `${theme.tint}2e` }]}
+                    activeOpacity={canOpenNotification ? 0.86 : 1}
+                    disabled={!canOpenNotification}
+                    onPress={() => {
+                        onOpenNotification(notification);
+                    }}
+                >
+                    {type === "household_invite" ? (
+                        <>
+                            <Text style={[styles.notificationText, { color: theme.text }]}>
+                                Invitation à rejoindre <Text style={styles.notificationStrong}>{householdName}</Text> de la part de{" "}
+                                <Text style={styles.notificationStrong}>{inviterName}</Text>.
+                            </Text>
+                            <Text style={[styles.notificationMeta, { color: theme.textSecondary }]}>
+                                Rôle proposé: {invitedRole === "parent" ? "Parent" : "Enfant"}
+                            </Text>
+                            {createdLabel ? (
+                                <Text style={[styles.notificationMeta, { color: theme.textSecondary }]}>Reçue le {createdLabel}</Text>
+                            ) : null}
+                            <View style={styles.notificationActions}>
+                                <TouchableOpacity
+                                    style={[styles.notificationActionBtn, { borderColor: theme.icon, backgroundColor: theme.background }]}
+                                    onPress={() => {
+                                        void onRespondToNotification(notification, "refuse");
+                                    }}
+                                    disabled={isProcessing || processingBulkRead}
+                                >
+                                    <Text style={[styles.notificationActionText, { color: theme.text }]}>
+                                        {isProcessing ? "..." : "Refuser"}
+                                    </Text>
+                                </TouchableOpacity>
+
+                                <TouchableOpacity
+                                    style={[styles.notificationActionBtn, { borderColor: theme.tint, backgroundColor: `${theme.tint}18` }]}
+                                    onPress={() => {
+                                        void onRespondToNotification(notification, "accept");
+                                    }}
+                                    disabled={isProcessing || processingBulkRead}
+                                >
+                                    {isProcessing ? (
+                                        <ActivityIndicator size="small" color={theme.tint} />
+                                    ) : (
+                                        <Text style={[styles.notificationActionText, { color: theme.tint }]}>Accepter</Text>
+                                    )}
+                                </TouchableOpacity>
+                            </View>
+                        </>
+                    ) : type === "household_link_request" ? (
+                        <>
+                            <Text style={[styles.notificationText, { color: theme.text }]}>
+                                Le foyer <Text style={styles.notificationStrong}>{requesterName}</Text> souhaite se connecter à{" "}
+                                <Text style={styles.notificationStrong}>{householdName}</Text>.
+                            </Text>
+                            {createdLabel ? (
+                                <Text style={[styles.notificationMeta, { color: theme.textSecondary }]}>Reçue le {createdLabel}</Text>
+                            ) : null}
+                            <View style={styles.notificationActions}>
+                                <TouchableOpacity
+                                    style={[styles.notificationActionBtn, { borderColor: theme.icon, backgroundColor: theme.background }]}
+                                    onPress={() => {
+                                        void onRespondToNotification(notification, "refuse");
+                                    }}
+                                    disabled={isProcessing || processingBulkRead}
+                                >
+                                    <Text style={[styles.notificationActionText, { color: theme.text }]}>
+                                        {isProcessing ? "..." : "Refuser"}
+                                    </Text>
+                                </TouchableOpacity>
+
+                                <TouchableOpacity
+                                    style={[styles.notificationActionBtn, { borderColor: theme.tint, backgroundColor: `${theme.tint}18` }]}
+                                    onPress={() => {
+                                        void onRespondToNotification(notification, "accept");
+                                    }}
+                                    disabled={isProcessing || processingBulkRead}
+                                >
+                                    {isProcessing ? (
+                                        <ActivityIndicator size="small" color={theme.tint} />
+                                    ) : (
+                                        <Text style={[styles.notificationActionText, { color: theme.tint }]}>Accepter</Text>
+                                    )}
+                                </TouchableOpacity>
+                            </View>
+                        </>
+                    ) : type === "task_reassignment_invite" ? (
+                        <>
+                            <Text style={[styles.notificationText, { color: theme.text }]}>
+                                <Text style={styles.notificationStrong}>{requesterName}</Text> vous demande de reprendre{" "}
+                                <Text style={styles.notificationStrong}>{taskName}</Text>.
+                            </Text>
+                            <Text style={[styles.notificationMeta, { color: theme.textSecondary }]}>
+                                Foyer: {householdName}
+                            </Text>
+                            {dueDate ? (
+                                <Text style={[styles.notificationMeta, { color: theme.textSecondary }]}>Échéance: {dueDate}</Text>
+                            ) : null}
+                            {createdLabel ? (
+                                <Text style={[styles.notificationMeta, { color: theme.textSecondary }]}>Reçue le {createdLabel}</Text>
+                            ) : null}
+                            <View style={styles.notificationActions}>
+                                <TouchableOpacity
+                                    style={[styles.notificationActionBtn, { borderColor: theme.icon, backgroundColor: theme.background }]}
+                                    onPress={() => {
+                                        void onRespondToNotification(notification, "refuse");
+                                    }}
+                                    disabled={isProcessing || processingBulkRead}
+                                >
+                                    <Text style={[styles.notificationActionText, { color: theme.text }]}>
+                                        {isProcessing ? "..." : "Refuser"}
+                                    </Text>
+                                </TouchableOpacity>
+
+                                <TouchableOpacity
+                                    style={[styles.notificationActionBtn, { borderColor: theme.tint, backgroundColor: `${theme.tint}18` }]}
+                                    onPress={() => {
+                                        void onRespondToNotification(notification, "accept");
+                                    }}
+                                    disabled={isProcessing || processingBulkRead}
+                                >
+                                    {isProcessing ? (
+                                        <ActivityIndicator size="small" color={theme.tint} />
+                                    ) : (
+                                        <Text style={[styles.notificationActionText, { color: theme.tint }]}>Accepter</Text>
+                                    )}
+                                </TouchableOpacity>
+                            </View>
+                        </>
+                    ) : type === "household_deletion_approval_request" ? (
+                        <>
+                            <Text style={[styles.notificationText, { color: theme.text }]}>
+                                <Text style={styles.notificationStrong}>{inviterName}</Text> demande la suppression du foyer{" "}
+                                <Text style={styles.notificationStrong}>{householdName}</Text>.
+                            </Text>
+                            {createdLabel ? (
+                                <Text style={[styles.notificationMeta, { color: theme.textSecondary }]}>Reçue le {createdLabel}</Text>
+                            ) : null}
+                            <View style={styles.notificationActions}>
+                                <TouchableOpacity
+                                    style={[styles.notificationActionBtn, { borderColor: theme.icon, backgroundColor: theme.background }]}
+                                    onPress={() => {
+                                        void onRespondToNotification(notification, "refuse");
+                                    }}
+                                    disabled={isProcessing || processingBulkRead}
+                                >
+                                    <Text style={[styles.notificationActionText, { color: theme.text }]}>
+                                        {isProcessing ? "..." : "Refuser"}
+                                    </Text>
+                                </TouchableOpacity>
+
+                                <TouchableOpacity
+                                    style={[styles.notificationActionBtn, { borderColor: theme.tint, backgroundColor: `${theme.tint}18` }]}
+                                    onPress={() => {
+                                        void onRespondToNotification(notification, "accept");
+                                    }}
+                                    disabled={isProcessing || processingBulkRead}
+                                >
+                                    {isProcessing ? (
+                                        <ActivityIndicator size="small" color={theme.tint} />
+                                    ) : (
+                                        <Text style={[styles.notificationActionText, { color: theme.tint }]}>Accepter</Text>
+                                    )}
+                                </TouchableOpacity>
+                            </View>
+                        </>
+                    ) : type === "household_deletion_cancel_window" ? (
+                        <>
+                            <Text style={[styles.notificationText, { color: theme.text }]}>
+                                Le foyer <Text style={styles.notificationStrong}>{householdName}</Text> sera supprimé dans 24h.
+                            </Text>
+                            {scheduledForLabel ? (
+                                <Text style={[styles.notificationMeta, { color: theme.textSecondary }]}>
+                                    Suppression prévue le {scheduledForLabel}
+                                </Text>
+                            ) : null}
+                            {createdLabel ? (
+                                <Text style={[styles.notificationMeta, { color: theme.textSecondary }]}>Reçue le {createdLabel}</Text>
+                            ) : null}
+                            <View style={styles.notificationActions}>
+                                <TouchableOpacity
+                                    style={[styles.notificationActionBtn, { borderColor: theme.accentWarm, backgroundColor: `${theme.accentWarm}18` }]}
+                                    onPress={() => {
+                                        void onRespondToNotification(notification, "cancel");
+                                    }}
+                                    disabled={isProcessing || processingBulkRead}
+                                >
+                                    {isProcessing ? (
+                                        <ActivityIndicator size="small" color={theme.accentWarm} />
+                                    ) : (
+                                        <Text style={[styles.notificationActionText, { color: theme.accentWarm }]}>
+                                            Annuler la suppression
+                                        </Text>
+                                    )}
+                                </TouchableOpacity>
+                            </View>
+                        </>
+                    ) : type === "household_deletion_request_refused" ? (
+                        <>
+                            <Text style={[styles.notificationText, { color: theme.text }]}>
+                                {notification.body}
+                            </Text>
+                            {createdLabel ? (
+                                <Text style={[styles.notificationMeta, { color: theme.textSecondary }]}>Reçue le {createdLabel}</Text>
+                            ) : null}
+                            <View style={styles.notificationActions}>
+                                <TouchableOpacity
+                                    style={[styles.notificationActionBtn, { borderColor: theme.icon, backgroundColor: theme.background }]}
+                                    onPress={() => {
+                                        void onMarkNotificationRead(notification);
+                                    }}
+                                    disabled={isProcessing || processingBulkRead}
+                                >
+                                    <Text style={[styles.notificationActionText, { color: theme.text }]}>
+                                        {isProcessing ? "..." : "Marquer comme lu"}
+                                    </Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                    style={[styles.notificationActionBtn, { borderColor: theme.tint, backgroundColor: `${theme.tint}18` }]}
+                                    onPress={() => {
+                                        void onLeaveHouseholdFromNotification(notification);
+                                    }}
+                                    disabled={isProcessing || processingBulkRead}
+                                >
+                                    {isProcessing ? (
+                                        <ActivityIndicator size="small" color={theme.tint} />
+                                    ) : (
+                                        <Text style={[styles.notificationActionText, { color: theme.tint }]}>Quitter le foyer</Text>
+                                    )}
+                                </TouchableOpacity>
+                            </View>
+                        </>
+                    ) : (
+                        <>
+                            <Text style={[styles.notificationText, { color: theme.text }]}>
+                                <Text style={styles.notificationStrong}>{notification.title}</Text>
+                            </Text>
+                            <Text style={[styles.notificationMeta, { color: theme.textSecondary }]}>{notification.body}</Text>
+                            {justification ? (
+                                <Text style={[styles.notificationMeta, { color: theme.textSecondary }]}>
+                                    Justification: {justification}
+                                </Text>
+                            ) : null}
+                            {createdLabel ? (
+                                <Text style={[styles.notificationMeta, { color: theme.textSecondary }]}>Reçue le {createdLabel}</Text>
+                            ) : null}
+                            <View style={styles.notificationActions}>
+                                <TouchableOpacity
+                                    style={[styles.notificationActionBtn, { borderColor: theme.tint, backgroundColor: `${theme.tint}18` }]}
+                                    onPress={() => {
+                                        void onMarkNotificationRead(notification);
+                                    }}
+                                    disabled={isProcessing || processingBulkRead}
+                                >
+                                    {isProcessing ? (
+                                        <ActivityIndicator size="small" color={theme.tint} />
+                                    ) : (
+                                        <Text style={[styles.notificationActionText, { color: theme.tint }]}>Marquer comme lu</Text>
+                                    )}
+                                </TouchableOpacity>
+                            </View>
+                        </>
+                    )}
+                </TouchableOpacity>
+            );
+        },
+        [
+            onLeaveHouseholdFromNotification,
+            onMarkNotificationRead,
+            onOpenNotification,
+            onRespondToNotification,
+            processingBulkRead,
+            processingNotificationId,
+            theme,
+        ]
+    );
+
+    const renderHouseholdItem = useCallback(
+        ({ item: household }: { item: ReturnType<typeof normalizeHouseholds>[number] }) => {
+            const isActive = household.id === activeHouseholdId;
+            const isParent = household.role === "parent";
+            const isSwitching = switchingHouseholdId === household.id;
+
+            return (
+                <View
+                    style={[styles.householdCard, { backgroundColor: theme.card, borderColor: `${theme.icon}33` }]}
+                >
+                    <View style={[styles.accentStrip, { backgroundColor: isActive ? theme.tint : theme.accentCool }]} />
+                    <View style={styles.cardContent}>
+                        <View style={styles.cardHeaderRow}>
+                            <Text style={[styles.cardTitle, { color: theme.text }]}>{household.name}</Text>
+                            <View style={styles.cardActionRow}>
+                                <View style={[styles.rolePill, { backgroundColor: isParent ? `${theme.tint}18` : `${theme.icon}18` }]}>
+                                    <Text style={[styles.rolePillText, { color: theme.textSecondary }]}>
+                                        {isParent ? "Parent" : "Enfant"}
+                                    </Text>
+                                </View>
+                                {isParent ? (
+                                    <TouchableOpacity
+                                        onPress={() => {
+                                            void onEditHouseholdConfig(household.id);
+                                        }}
+                                        style={[styles.householdSettingsButton, { borderColor: theme.icon }]}
+                                        disabled={isSwitching}
+                                    >
+                                        <MaterialCommunityIcons name="cog-outline" size={20} color={theme.tint} />
+                                    </TouchableOpacity>
+                                ) : null}
+                            </View>
+                        </View>
+
+                        <View style={styles.householdActionsRow}>
+                            <TouchableOpacity
+                                style={[
+                                    styles.primaryButton,
+                                    {
+                                        backgroundColor: isActive ? `${theme.tint}18` : theme.tint,
+                                        borderColor: theme.tint,
+                                        borderWidth: 1,
+                                    },
+                                ]}
+                                onPress={() => {
+                                    if (!isActive) {
+                                        void onSwitchHousehold(household.id);
+                                    }
+                                }}
+                                disabled={isActive || isSwitching}
+                            >
+                                {isSwitching ? (
+                                    <ActivityIndicator size="small" color={isActive ? theme.tint : "#FFFFFF"} />
+                                ) : (
+                                    <Text style={[styles.primaryButtonText, { color: isActive ? theme.tint : "#FFFFFF" }]}>
+                                        {isActive ? "Foyer actif" : "Activer ce foyer"}
+                                    </Text>
+                                )}
+                            </TouchableOpacity>
+
+                            <TouchableOpacity
+                                style={[styles.secondaryButton, { borderColor: theme.icon }]}
+                                onPress={() => {
+                                    void onOpenHouseholdDashboard(household.id);
+                                }}
+                                disabled={isSwitching}
+                            >
+                                <Text style={[styles.secondaryButtonText, { color: theme.text }]}>Tableau de bord</Text>
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+                </View>
+            );
+        },
+        [
+            activeHouseholdId,
+            onEditHouseholdConfig,
+            onOpenHouseholdDashboard,
+            onSwitchHousehold,
+            switchingHouseholdId,
+            theme.accentCool,
+            theme.card,
+            theme.icon,
+            theme.text,
+            theme.textSecondary,
+            theme.tint,
+        ]
     );
 
     const onLogout = async () => {
@@ -423,371 +818,29 @@ export default function ConnectedHome() {
                                 {"Aucune notification pour l'instant."}
                             </Text>
                         ) : (
-                            pendingNotifications.map((notification) => {
-                                const isProcessing = processingNotificationId === notification.id;
-                                const type = notification.type;
-                                const data = notification.data;
-                                const createdLabel = formatNotificationDate(notification.createdAt);
-                                const inviterName = String(data.inviter_name ?? data.initiator_name ?? "").trim() || "Un parent";
-                                const householdName = String(data.household_name ?? "").trim() || "ce foyer";
-                                const invitedRole = String(data.invited_role ?? "") === "parent" ? "parent" : "enfant";
-                                const requesterName = String(data.requester_name ?? data.requester_household_name ?? "").trim() || "Un foyer";
-                                const taskName = String(data.task_name ?? "").trim() || "cette tâche";
-                                const dueDate = formatDueDate(data.due_date);
-                                const justification = resolveNotificationJustification(data);
-                                const scheduledForLabel = formatNotificationDate(
-                                    typeof data.scheduled_for === "string" ? data.scheduled_for : null
-                                );
-                                const canOpenNotification = getNotificationNavigationTarget(notification) !== null;
-
-                                return (
-                                    <TouchableOpacity
-                                        key={`notif-${notification.id}`}
-                                        style={[styles.notificationItem, { backgroundColor: `${theme.tint}12`, borderColor: `${theme.tint}2e` }]}
-                                        activeOpacity={canOpenNotification ? 0.86 : 1}
-                                        disabled={!canOpenNotification}
-                                        onPress={() => {
-                                            onOpenNotification(notification);
-                                        }}
-                                    >
-                                        {type === "household_invite" ? (
-                                            <>
-                                                <Text style={[styles.notificationText, { color: theme.text }]}>
-                                                    Invitation à rejoindre <Text style={styles.notificationStrong}>{householdName}</Text> de la part de{" "}
-                                                    <Text style={styles.notificationStrong}>{inviterName}</Text>.
-                                                </Text>
-                                                <Text style={[styles.notificationMeta, { color: theme.textSecondary }]}> 
-                                                    Rôle proposé: {invitedRole === "parent" ? "Parent" : "Enfant"}
-                                                </Text>
-                                                {createdLabel ? (
-                                                    <Text style={[styles.notificationMeta, { color: theme.textSecondary }]}>Reçue le {createdLabel}</Text>
-                                                ) : null}
-                                                <View style={styles.notificationActions}>
-                                                    <TouchableOpacity
-                                                        style={[styles.notificationActionBtn, { borderColor: theme.icon, backgroundColor: theme.background }]}
-                                                        onPress={() => {
-                                                            void onRespondToNotification(notification, "refuse");
-                                                        }}
-                                                        disabled={isProcessing || processingBulkRead}
-                                                    >
-                                                        <Text style={[styles.notificationActionText, { color: theme.text }]}>
-                                                            {isProcessing ? "..." : "Refuser"}
-                                                        </Text>
-                                                    </TouchableOpacity>
-
-                                                    <TouchableOpacity
-                                                        style={[styles.notificationActionBtn, { borderColor: theme.tint, backgroundColor: `${theme.tint}18` }]}
-                                                        onPress={() => {
-                                                            void onRespondToNotification(notification, "accept");
-                                                        }}
-                                                        disabled={isProcessing || processingBulkRead}
-                                                    >
-                                                        {isProcessing ? (
-                                                            <ActivityIndicator size="small" color={theme.tint} />
-                                                        ) : (
-                                                            <Text style={[styles.notificationActionText, { color: theme.tint }]}>Accepter</Text>
-                                                        )}
-                                                    </TouchableOpacity>
-                                                </View>
-                                            </>
-                                        ) : type === "household_link_request" ? (
-                                            <>
-                                                <Text style={[styles.notificationText, { color: theme.text }]}>
-                                                    Le foyer <Text style={styles.notificationStrong}>{requesterName}</Text> souhaite se connecter à{" "}
-                                                    <Text style={styles.notificationStrong}>{householdName}</Text>.
-                                                </Text>
-                                                {createdLabel ? (
-                                                    <Text style={[styles.notificationMeta, { color: theme.textSecondary }]}>Reçue le {createdLabel}</Text>
-                                                ) : null}
-                                                <View style={styles.notificationActions}>
-                                                    <TouchableOpacity
-                                                        style={[styles.notificationActionBtn, { borderColor: theme.icon, backgroundColor: theme.background }]}
-                                                        onPress={() => {
-                                                            void onRespondToNotification(notification, "refuse");
-                                                        }}
-                                                        disabled={isProcessing || processingBulkRead}
-                                                    >
-                                                        <Text style={[styles.notificationActionText, { color: theme.text }]}>
-                                                            {isProcessing ? "..." : "Refuser"}
-                                                        </Text>
-                                                    </TouchableOpacity>
-
-                                                    <TouchableOpacity
-                                                        style={[styles.notificationActionBtn, { borderColor: theme.tint, backgroundColor: `${theme.tint}18` }]}
-                                                        onPress={() => {
-                                                            void onRespondToNotification(notification, "accept");
-                                                        }}
-                                                        disabled={isProcessing || processingBulkRead}
-                                                    >
-                                                        {isProcessing ? (
-                                                            <ActivityIndicator size="small" color={theme.tint} />
-                                                        ) : (
-                                                            <Text style={[styles.notificationActionText, { color: theme.tint }]}>Accepter</Text>
-                                                        )}
-                                                    </TouchableOpacity>
-                                                </View>
-                                            </>
-                                        ) : type === "task_reassignment_invite" ? (
-                                            <>
-                                        <Text style={[styles.notificationText, { color: theme.text }]}> 
-                                            <Text style={styles.notificationStrong}>{requesterName}</Text> vous demande de reprendre{" "}
-                                            <Text style={styles.notificationStrong}>{taskName}</Text>.
-                                        </Text>
-                                        <Text style={[styles.notificationMeta, { color: theme.textSecondary }]}>
-                                            Foyer: {householdName}
-                                        </Text>
-                                        {dueDate ? (
-                                            <Text style={[styles.notificationMeta, { color: theme.textSecondary }]}>Échéance: {dueDate}</Text>
-                                        ) : null}
-                                                {createdLabel ? (
-                                                    <Text style={[styles.notificationMeta, { color: theme.textSecondary }]}>Reçue le {createdLabel}</Text>
-                                                ) : null}
-                                                <View style={styles.notificationActions}>
-                                                    <TouchableOpacity
-                                                        style={[styles.notificationActionBtn, { borderColor: theme.icon, backgroundColor: theme.background }]}
-                                                        onPress={() => {
-                                                            void onRespondToNotification(notification, "refuse");
-                                                        }}
-                                                        disabled={isProcessing || processingBulkRead}
-                                                    >
-                                                        <Text style={[styles.notificationActionText, { color: theme.text }]}>
-                                                            {isProcessing ? "..." : "Refuser"}
-                                                        </Text>
-                                                    </TouchableOpacity>
-
-                                                    <TouchableOpacity
-                                                        style={[styles.notificationActionBtn, { borderColor: theme.tint, backgroundColor: `${theme.tint}18` }]}
-                                                        onPress={() => {
-                                                            void onRespondToNotification(notification, "accept");
-                                                        }}
-                                                        disabled={isProcessing || processingBulkRead}
-                                                    >
-                                                        {isProcessing ? (
-                                                            <ActivityIndicator size="small" color={theme.tint} />
-                                                        ) : (
-                                                            <Text style={[styles.notificationActionText, { color: theme.tint }]}>Accepter</Text>
-                                                        )}
-                                                    </TouchableOpacity>
-                                                </View>
-                                            </>
-                                        ) : type === "household_deletion_approval_request" ? (
-                                            <>
-                                                <Text style={[styles.notificationText, { color: theme.text }]}>
-                                                    <Text style={styles.notificationStrong}>{inviterName}</Text> demande la suppression du foyer{" "}
-                                                    <Text style={styles.notificationStrong}>{householdName}</Text>.
-                                                </Text>
-                                                {createdLabel ? (
-                                                    <Text style={[styles.notificationMeta, { color: theme.textSecondary }]}>Reçue le {createdLabel}</Text>
-                                                ) : null}
-                                                <View style={styles.notificationActions}>
-                                                    <TouchableOpacity
-                                                        style={[styles.notificationActionBtn, { borderColor: theme.icon, backgroundColor: theme.background }]}
-                                                        onPress={() => {
-                                                            void onRespondToNotification(notification, "refuse");
-                                                        }}
-                                                        disabled={isProcessing || processingBulkRead}
-                                                    >
-                                                        <Text style={[styles.notificationActionText, { color: theme.text }]}>
-                                                            {isProcessing ? "..." : "Refuser"}
-                                                        </Text>
-                                                    </TouchableOpacity>
-
-                                                    <TouchableOpacity
-                                                        style={[styles.notificationActionBtn, { borderColor: theme.tint, backgroundColor: `${theme.tint}18` }]}
-                                                        onPress={() => {
-                                                            void onRespondToNotification(notification, "accept");
-                                                        }}
-                                                        disabled={isProcessing || processingBulkRead}
-                                                    >
-                                                        {isProcessing ? (
-                                                            <ActivityIndicator size="small" color={theme.tint} />
-                                                        ) : (
-                                                            <Text style={[styles.notificationActionText, { color: theme.tint }]}>Accepter</Text>
-                                                        )}
-                                                    </TouchableOpacity>
-                                                </View>
-                                            </>
-                                        ) : type === "household_deletion_cancel_window" ? (
-                                            <>
-                                                <Text style={[styles.notificationText, { color: theme.text }]}>
-                                                    Le foyer <Text style={styles.notificationStrong}>{householdName}</Text> sera supprimé dans 24h.
-                                                </Text>
-                                                {scheduledForLabel ? (
-                                                    <Text style={[styles.notificationMeta, { color: theme.textSecondary }]}>
-                                                        Suppression prévue le {scheduledForLabel}
-                                                    </Text>
-                                                ) : null}
-                                                {createdLabel ? (
-                                                    <Text style={[styles.notificationMeta, { color: theme.textSecondary }]}>Reçue le {createdLabel}</Text>
-                                                ) : null}
-                                                <View style={styles.notificationActions}>
-                                                    <TouchableOpacity
-                                                        style={[styles.notificationActionBtn, { borderColor: theme.accentWarm, backgroundColor: `${theme.accentWarm}18` }]}
-                                                        onPress={() => {
-                                                            void onRespondToNotification(notification, "cancel");
-                                                        }}
-                                                        disabled={isProcessing || processingBulkRead}
-                                                    >
-                                                        {isProcessing ? (
-                                                            <ActivityIndicator size="small" color={theme.accentWarm} />
-                                                        ) : (
-                                                            <Text style={[styles.notificationActionText, { color: theme.accentWarm }]}>
-                                                                Annuler la suppression
-                                                            </Text>
-                                                        )}
-                                                    </TouchableOpacity>
-                                                </View>
-                                            </>
-                                        ) : type === "household_deletion_request_refused" ? (
-                                            <>
-                                                <Text style={[styles.notificationText, { color: theme.text }]}>
-                                                    {notification.body}
-                                                </Text>
-                                                {createdLabel ? (
-                                                    <Text style={[styles.notificationMeta, { color: theme.textSecondary }]}>Reçue le {createdLabel}</Text>
-                                                ) : null}
-                                                <View style={styles.notificationActions}>
-                                                    <TouchableOpacity
-                                                        style={[styles.notificationActionBtn, { borderColor: theme.icon, backgroundColor: theme.background }]}
-                                                        onPress={() => {
-                                                            void onMarkNotificationRead(notification);
-                                                        }}
-                                                        disabled={isProcessing || processingBulkRead}
-                                                    >
-                                                        <Text style={[styles.notificationActionText, { color: theme.text }]}>
-                                                            {isProcessing ? "..." : "Marquer comme lu"}
-                                                        </Text>
-                                                    </TouchableOpacity>
-                                                    <TouchableOpacity
-                                                        style={[styles.notificationActionBtn, { borderColor: theme.tint, backgroundColor: `${theme.tint}18` }]}
-                                                        onPress={() => {
-                                                            void onLeaveHouseholdFromNotification(notification);
-                                                        }}
-                                                        disabled={isProcessing || processingBulkRead}
-                                                    >
-                                                        {isProcessing ? (
-                                                            <ActivityIndicator size="small" color={theme.tint} />
-                                                        ) : (
-                                                            <Text style={[styles.notificationActionText, { color: theme.tint }]}>Quitter le foyer</Text>
-                                                        )}
-                                                    </TouchableOpacity>
-                                                </View>
-                                            </>
-                                        ) : (
-                                            <>
-                                                <Text style={[styles.notificationText, { color: theme.text }]}>
-                                                    <Text style={styles.notificationStrong}>{notification.title}</Text>
-                                                </Text>
-                                                <Text style={[styles.notificationMeta, { color: theme.textSecondary }]}>{notification.body}</Text>
-                                                {justification ? (
-                                                    <Text style={[styles.notificationMeta, { color: theme.textSecondary }]}>
-                                                        Justification: {justification}
-                                                    </Text>
-                                                ) : null}
-                                                {createdLabel ? (
-                                                    <Text style={[styles.notificationMeta, { color: theme.textSecondary }]}>Reçue le {createdLabel}</Text>
-                                                ) : null}
-                                                <View style={styles.notificationActions}>
-                                                    <TouchableOpacity
-                                                        style={[styles.notificationActionBtn, { borderColor: theme.tint, backgroundColor: `${theme.tint}18` }]}
-                                                        onPress={() => {
-                                                            void onMarkNotificationRead(notification);
-                                                        }}
-                                                        disabled={isProcessing || processingBulkRead}
-                                                    >
-                                                        {isProcessing ? (
-                                                            <ActivityIndicator size="small" color={theme.tint} />
-                                                        ) : (
-                                                            <Text style={[styles.notificationActionText, { color: theme.tint }]}>Marquer comme lu</Text>
-                                                        )}
-                                                    </TouchableOpacity>
-                                                </View>
-                                            </>
-                                        )}
-                                    </TouchableOpacity>
-                                );
-                            })
+                            <FlatList
+                                data={pendingNotifications}
+                                keyExtractor={(notification) => `notif-${notification.id}`}
+                                renderItem={renderNotificationItem}
+                                scrollEnabled={false}
+                                removeClippedSubviews
+                                initialNumToRender={8}
+                                ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
+                            />
                         )}
                     </View>
                 ) : null}
 
                 {households.length > 0 ? (
-                    <View style={styles.householdList}>
-                        {households.map((household) => {
-                            const isActive = household.id === activeHouseholdId;
-                            const isParent = household.role === "parent";
-                            const isSwitching = switchingHouseholdId === household.id;
-
-                            return (
-                                <View
-                                    key={`household-${household.id}`}
-                                    style={[styles.householdCard, { backgroundColor: theme.card, borderColor: `${theme.icon}33` }]}
-                                >
-                                    <View style={[styles.accentStrip, { backgroundColor: isActive ? theme.tint : theme.accentCool }]} />
-                                    <View style={styles.cardContent}>
-                                        <View style={styles.cardHeaderRow}>
-                                            <Text style={[styles.cardTitle, { color: theme.text }]}>{household.name}</Text>
-                                            <View style={styles.cardActionRow}>
-                                                <View style={[styles.rolePill, { backgroundColor: isParent ? `${theme.tint}18` : `${theme.icon}18` }]}> 
-                                                    <Text style={[styles.rolePillText, { color: theme.textSecondary }]}> 
-                                                        {isParent ? "Parent" : "Enfant"}
-                                                    </Text>
-                                                </View>
-                                                {isParent ? (
-                                                    <TouchableOpacity
-                                                        onPress={() => {
-                                                            void onEditHouseholdConfig(household.id);
-                                                        }}
-                                                        style={[styles.householdSettingsButton, { borderColor: theme.icon }]}
-                                                        disabled={isSwitching}
-                                                    >
-                                                        <MaterialCommunityIcons name="cog-outline" size={20} color={theme.tint} />
-                                                    </TouchableOpacity>
-                                                ) : null}
-                                            </View>
-                                        </View>
-
-                                        <View style={styles.householdActionsRow}>
-                                            <TouchableOpacity
-                                                style={[
-                                                    styles.primaryButton,
-                                                    {
-                                                        backgroundColor: isActive ? `${theme.tint}18` : theme.tint,
-                                                        borderColor: theme.tint,
-                                                        borderWidth: 1,
-                                                    },
-                                                ]}
-                                                onPress={() => {
-                                                    if (!isActive) {
-                                                        void onSwitchHousehold(household.id);
-                                                    }
-                                                }}
-                                                disabled={isActive || isSwitching}
-                                            >
-                                                {isSwitching ? (
-                                                    <ActivityIndicator size="small" color={isActive ? theme.tint : "#FFFFFF"} />
-                                                ) : (
-                                                    <Text style={[styles.primaryButtonText, { color: isActive ? theme.tint : "#FFFFFF" }]}> 
-                                                        {isActive ? "Foyer actif" : "Activer ce foyer"}
-                                                    </Text>
-                                                )}
-                                            </TouchableOpacity>
-
-                                            <TouchableOpacity
-                                                style={[styles.secondaryButton, { borderColor: theme.icon }]}
-                                                onPress={() => {
-                                                    void onOpenHouseholdDashboard(household.id);
-                                                }}
-                                                disabled={isSwitching}
-                                            >
-                                                <Text style={[styles.secondaryButtonText, { color: theme.text }]}>Tableau de bord</Text>
-                                            </TouchableOpacity>
-                                        </View>
-                                    </View>
-                                </View>
-                            );
-                        })}
-                    </View>
+                    <FlatList
+                        data={households}
+                        keyExtractor={(household) => `household-${household.id}`}
+                        renderItem={renderHouseholdItem}
+                        scrollEnabled={false}
+                        removeClippedSubviews
+                        initialNumToRender={5}
+                        ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
+                    />
                 ) : (
                     <View style={[styles.householdCard, { backgroundColor: theme.card, borderColor: `${theme.icon}33` }]}> 
                         <View style={[styles.accentStrip, { backgroundColor: theme.accentCool }]} />

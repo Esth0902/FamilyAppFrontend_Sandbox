@@ -1,7 +1,7 @@
 /* eslint-env jest */
 import { act, renderHook, waitFor } from "@testing-library/react-native";
 import { useRecipes } from "@/src/hooks/useRecipes";
-import type { Recipe } from "@/src/services/recipeService";
+import type { Recipe, RecipesPage } from "@/src/services/recipeService";
 import * as recipeService from "@/src/services/recipeService";
 import { createQueryClientWrapper } from "@/tests/jest/utils/query-client";
 
@@ -27,33 +27,54 @@ const toggleRecipeSaveMock = recipeService.toggleRecipeSave as jest.MockedFuncti
   typeof recipeService.toggleRecipeSave
 >;
 
+const toPage = (recipes: Recipe[]): RecipesPage => ({
+  data: recipes,
+  meta: {
+    current_page: 1,
+    last_page: 1,
+    per_page: recipes.length,
+    total: recipes.length,
+    has_more: false,
+  },
+});
+
 describe("useRecipes", () => {
   beforeEach(() => {
     jest.clearAllMocks();
   });
 
-  it("loads recipes and updates cache on toggle save", async () => {
-    const initialRecipes: Recipe[] = [
-      {
-        id: 10,
-        title: "Quiche",
-        description: null,
-        type: "plat",
-        is_in_my_recipes: false,
-      },
-    ];
+  it("loads recipes and refetches after toggle save mutation", async () => {
+    const initialRecipe: Recipe = {
+      id: 10,
+      title: "Quiche",
+      description: null,
+      type: "plat",
+      is_in_my_recipes: false,
+    };
 
-    fetchRecipesMock.mockResolvedValue(initialRecipes);
+    fetchRecipesMock
+      .mockResolvedValueOnce(toPage([initialRecipe]))
+      .mockResolvedValue(toPage([{ ...initialRecipe, is_in_my_recipes: true }]));
     fetchHouseholdDietaryTagsMock.mockResolvedValue(["Sans lactose"]);
     toggleRecipeSaveMock.mockResolvedValue({
-      ...initialRecipes[0],
+      ...initialRecipe,
       is_in_my_recipes: true,
     });
 
     const { Wrapper } = createQueryClientWrapper();
-    const { result } = renderHook(() => useRecipes({ householdId: 12 }), {
-      wrapper: Wrapper,
-    });
+    const { result } = renderHook(
+      () =>
+        useRecipes({
+          householdId: 12,
+          scope: "mine",
+          searchQuery: "",
+          typeFilter: "all",
+          limit: 20,
+        }),
+      {
+        wrapper: Wrapper,
+      }
+    );
 
     await waitFor(() => {
       expect(result.current.isInitialLoading).toBe(false);
@@ -63,7 +84,7 @@ describe("useRecipes", () => {
     expect(result.current.householdDietaryTags).toEqual(["Sans lactose"]);
 
     await act(async () => {
-      await result.current.toggleGlobalRecipeInMine(initialRecipes[0]);
+      await result.current.toggleGlobalRecipeInMine(initialRecipe);
     });
 
     await waitFor(() => {

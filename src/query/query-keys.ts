@@ -7,7 +7,34 @@ export const queryKeys = {
     pendingNotificationsRoot: () => ["home", "pending-notifications"] as const,
   },
   recipes: {
+    root: (householdId: number | null) => ["recipes", householdId ?? 0] as const,
     all: (householdId: number | null) => ["recipes", "all", householdId ?? 0] as const,
+    list: (
+      householdId: number | null,
+      params: { scope: "mine" | "all"; q: string; type: string; limit: number }
+    ) =>
+      [
+        "recipes",
+        householdId ?? 0,
+        "list",
+        params.scope,
+        params.q,
+        params.type,
+        params.limit,
+      ] as const,
+    search: (
+      householdId: number | null,
+      params: { scope: "mine" | "all"; q: string; type: string; limit: number }
+    ) =>
+      [
+        "recipes",
+        householdId ?? 0,
+        "search",
+        params.scope,
+        params.q,
+        params.type,
+        params.limit,
+      ] as const,
     dietaryTags: (householdId: number | null) => ["recipes", "dietary-tags", householdId ?? 0] as const,
   },
   dashboard: {

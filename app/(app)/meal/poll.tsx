@@ -20,7 +20,8 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Colors } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import { apiFetch } from "@/src/api/client";
-import { filterRecipesByTitleQuery } from "@/src/features/recipes/recipe-search";
+import { useDebounce } from "@/src/hooks/useDebounce";
+import { useRecipeSearch } from "@/src/hooks/useRecipeSearch";
 import {
   addIngredientsToShoppingList,
   buildShoppingIngredientsFromRecipeSelections,
@@ -206,9 +207,9 @@ const normalizeAiPreviewRecipe = (payload: any): AiPreviewRecipe | null => {
     const quantity = Number.isFinite(quantityRaw) && quantityRaw > 0 ? quantityRaw : 1;
 
     return {
-      name: String(ingredient?.name ?? "ingredient").trim() || "ingrédient",
+      name: String(ingredient?.name ?? "ingredient").trim() || "ingr�dient",
       quantity,
-      unit: String(ingredient?.unit ?? "unite").trim() || "unité",
+      unit: String(ingredient?.unit ?? "unite").trim() || "unit�",
       category: String(ingredient?.category ?? "autre").trim() || "autre",
     };
   });
@@ -220,6 +221,24 @@ const normalizeAiPreviewRecipe = (payload: any): AiPreviewRecipe | null => {
     type: String(payload?.type ?? "plat principal"),
     ingredients,
   };
+};
+
+const mergeUniqueRecipes = (current: Recipe[], incoming: Recipe[]): Recipe[] => {
+  const merged = new Map<number, Recipe>();
+
+  current.forEach((recipe) => {
+    if (Number.isInteger(recipe.id) && recipe.id > 0) {
+      merged.set(recipe.id, recipe);
+    }
+  });
+
+  incoming.forEach((recipe) => {
+    if (Number.isInteger(recipe.id) && recipe.id > 0) {
+      merged.set(recipe.id, recipe);
+    }
+  });
+
+  return Array.from(merged.values());
 };
 
 export default function MealPollScreen() {
@@ -249,6 +268,7 @@ export default function MealPollScreen() {
     return new Date(now.getFullYear(), now.getMonth(), 1);
   });
   const [searchRecipe, setSearchRecipe] = useState("");
+  const debouncedSearchRecipe = useDebounce(searchRecipe, 400);
   const [selectedRecipeIdsForCreation, setSelectedRecipeIdsForCreation] = useState<number[]>([]);
 
   const [manualTitle, setManualTitle] = useState("");
@@ -262,6 +282,7 @@ export default function MealPollScreen() {
   const [selectedRecipeIdsForValidation, setSelectedRecipeIdsForValidation] = useState<number[]>([]);
   const [mealPlanAssignments, setMealPlanAssignments] = useState<Record<string, MealPlanAssignment>>({});
   const [validationSearchRecipe, setValidationSearchRecipe] = useState("");
+  const debouncedValidationSearchRecipe = useDebounce(validationSearchRecipe, 400);
   const [validationManualTitle, setValidationManualTitle] = useState("");
   const [showPollBuilder, setShowPollBuilder] = useState(false);
 
@@ -278,6 +299,19 @@ export default function MealPollScreen() {
   const [newShoppingListTitle, setNewShoppingListTitle] = useState(defaultShoppingListTitle());
   const [selectedAssignmentKeysForShopping, setSelectedAssignmentKeysForShopping] = useState<string[]>([]);
 
+  const creationRecipeSearch = useRecipeSearch({
+    householdId,
+    query: debouncedSearchRecipe,
+    scope: "all",
+    limit: 12,
+  });
+  const validationRecipeSearch = useRecipeSearch({
+    householdId,
+    query: debouncedValidationSearchRecipe,
+    scope: "all",
+    limit: 6,
+  });
+
   const recipesById = useMemo(() => {
     const map = new Map<number, Recipe>();
     recipes.forEach((recipe) => map.set(recipe.id, recipe));
@@ -285,13 +319,25 @@ export default function MealPollScreen() {
   }, [recipes]);
 
   const filteredCreationRecipes = useMemo(() => {
-    if (searchRecipe.trim().length === 0) return [];
-    return filterRecipesByTitleQuery(recipes, searchRecipe);
-  }, [recipes, searchRecipe]);
+    return creationRecipeSearch.results;
+  }, [creationRecipeSearch.results]);
 
   const filteredValidationRecipes = useMemo(() => {
-    return filterRecipesByTitleQuery(recipes, validationSearchRecipe);
-  }, [recipes, validationSearchRecipe]);
+    return validationRecipeSearch.results;
+  }, [validationRecipeSearch.results]);
+
+  useEffect(() => {
+    if (creationRecipeSearch.results.length === 0 && validationRecipeSearch.results.length === 0) {
+      return;
+    }
+
+    setRecipes((previousRecipes) =>
+      mergeUniqueRecipes(previousRecipes, [
+        ...creationRecipeSearch.results,
+        ...validationRecipeSearch.results,
+      ])
+    );
+  }, [creationRecipeSearch.results, validationRecipeSearch.results]);
 
   const selectedCreationRecipes = useMemo(
     () => selectedRecipeIdsForCreation.map((id) => recipesById.get(id)).filter(Boolean) as Recipe[],
@@ -354,11 +400,15 @@ export default function MealPollScreen() {
         setDefaultServings(4);
       }
 
-      const [recipesResponse, pollResponse] = await Promise.all([apiFetch("/recipes"), apiFetch("/meal-polls/active")]);
-      const fetchedRecipes = Array.isArray(recipesResponse) ? recipesResponse : [];
+      const pollResponse = await apiFetch("/meal-polls/active");
       const poll: Poll | null = pollResponse?.poll ?? null;
 
-      setRecipes(fetchedRecipes);
+      const pollRecipes = Array.isArray(poll?.options)
+        ? poll.options
+          .map((option) => option.recipe)
+          .filter((recipe): recipe is Recipe => Boolean(recipe?.id && recipe?.title))
+        : [];
+      setRecipes((previousRecipes) => mergeUniqueRecipes(previousRecipes, pollRecipes));
       setActivePoll(poll);
 
       if (poll) {
@@ -409,7 +459,7 @@ export default function MealPollScreen() {
       }
     } catch (error: any) {
       if (showError) {
-        Alert.alert("Sondage", error?.message || "Impossible de charger les données.");
+        Alert.alert("Sondage", error?.message || "Impossible de charger les donn�es.");
       }
     } finally {
       if (!silent) {
@@ -555,14 +605,14 @@ export default function MealPollScreen() {
 
   const savePoll = async () => {
     if (selectedRecipeIdsForCreation.length < 2) {
-      Alert.alert("Sondage", "Sélectionne au moins 2 plats.");
+      Alert.alert("Sondage", "S�lectionne au moins 2 plats.");
       return;
     }
 
     const selectedCount = selectedRecipeIdsForCreation.length;
     const clampedMaxVotesPerUser = clamp(maxVotesPerUser, 1, 20);
     if (clampedMaxVotesPerUser > selectedCount) {
-      Alert.alert("Sondage", "Le nombre de votes par personne ne peut pas dépasser le nombre de plats selectionnés.");
+      Alert.alert("Sondage", "Le nombre de votes par personne ne peut pas d�passer le nombre de plats selectionn�s.");
       return;
     }
 
@@ -572,12 +622,12 @@ export default function MealPollScreen() {
     const parsedEndDate = parseOptionalIsoDate(endDate);
 
     if (!parsedStartDate || !parsedEndDate) {
-      Alert.alert("Sondage", "Renseigne une date de début et de fin valides (YYYY-MM-DD).");
+      Alert.alert("Sondage", "Renseigne une date de d�but et de fin valides (YYYY-MM-DD).");
       return;
     }
 
     if (parsedEndDate < parsedStartDate) {
-      Alert.alert("Sondage", "La date de fin doit être postérieure à la date de début.");
+      Alert.alert("Sondage", "La date de fin doit �tre post�rieure � la date de d�but.");
       return;
     }
 
@@ -612,7 +662,7 @@ export default function MealPollScreen() {
       setManualTitle("");
       setAiPreview(null);
 
-      Alert.alert("Sondage", isEditingOpenPoll ? "Sondage modifié." : "Sondage ouvert.");
+      Alert.alert("Sondage", isEditingOpenPoll ? "Sondage modifi�." : "Sondage ouvert.");
     } catch (error: any) {
       Alert.alert("Sondage", error?.message || "Impossible d'enregistrer ce sondage.");
     } finally {
@@ -634,14 +684,14 @@ export default function MealPollScreen() {
         body: JSON.stringify({
           title,
           type: "plat principal",
-          description: "Ajout manuel depuis création du sondage",
-          instructions: "A compléter",
+          description: "Ajout manuel depuis cr�ation du sondage",
+          instructions: "A compl�ter",
           base_servings: 1,
           ingredients: [{ name: "ingredient", quantity: 1, unit: "unite" }],
         }),
       });
 
-      setRecipes((prev) => [recipe, ...prev]);
+      setRecipes((prev) => mergeUniqueRecipes(prev, [recipe]));
       setSelectedRecipeIdsForCreation((prev) => (prev.includes(recipe.id) ? prev : [...prev, recipe.id]));
       setManualTitle("");
     } catch (error: any) {
@@ -666,12 +716,12 @@ export default function MealPollScreen() {
       });
       const normalizedPreview = normalizeAiPreviewRecipe(preview);
       if (!normalizedPreview) {
-        Alert.alert("IA", "La réponse IA est invalide. Réessaie avec un autre intitulé.");
+        Alert.alert("IA", "La r�ponse IA est invalide. R�essaie avec un autre intitul�.");
         return;
       }
       setAiPreview(normalizedPreview);
     } catch (error: any) {
-      Alert.alert("IA", error?.message || "Impossible de générer la recette IA.");
+      Alert.alert("IA", error?.message || "Impossible de g�n�rer la recette IA.");
     } finally {
       setAiLoading(false);
     }
@@ -691,11 +741,11 @@ export default function MealPollScreen() {
         }),
       });
 
-      setRecipes((prev) => [recipe, ...prev]);
+      setRecipes((prev) => mergeUniqueRecipes(prev, [recipe]));
       setSelectedRecipeIdsForCreation((prev) => (prev.includes(recipe.id) ? prev : [...prev, recipe.id]));
       setAiPreview(null);
       setManualTitle("");
-      Alert.alert("IA", "Recette IA enregistrée.");
+      Alert.alert("IA", "Recette IA enregistr�e.");
     } catch (error: any) {
       Alert.alert("IA", error?.message || "Impossible d'enregistrer la recette IA.");
     } finally {
@@ -724,7 +774,7 @@ export default function MealPollScreen() {
     if (!activePoll || activePoll.status !== "open") return;
 
     if (draftVoteOptionIds.length !== activePoll.max_votes_per_user) {
-      Alert.alert("Vote", `Sélectionne exactement ${activePoll.max_votes_per_user} plats.`);
+      Alert.alert("Vote", `S�lectionne exactement ${activePoll.max_votes_per_user} plats.`);
       runLimitShake();
       return;
     }
@@ -738,7 +788,7 @@ export default function MealPollScreen() {
 
       setActivePoll(response?.poll ?? null);
       runVoteSuccess();
-      Alert.alert("Vote", "Ton vote est enregistré.");
+      Alert.alert("Vote", "Ton vote est enregistr�.");
     } catch (error: any) {
       Alert.alert("Vote", error?.message || "Impossible d'enregistrer le vote.");
     } finally {
@@ -767,9 +817,9 @@ export default function MealPollScreen() {
         setSelectedRecipeIdsForValidation(defaults);
       }
 
-      Alert.alert("Sondage", "Sondage clôturé.");
+      Alert.alert("Sondage", "Sondage cl�tur�.");
     } catch (error: any) {
-      Alert.alert("Sondage", error?.message || "Impossible de clôturer le sondage.");
+      Alert.alert("Sondage", error?.message || "Impossible de cl�turer le sondage.");
     } finally {
       setSaving(false);
     }
@@ -787,8 +837,8 @@ export default function MealPollScreen() {
     }
 
     Alert.alert(
-      "Clôturer le sondage",
-      "Il n'y a aucun vote pour ce sondage, clôturer ?",
+      "Cl�turer le sondage",
+      "Il n'y a aucun vote pour ce sondage, cl�turer ?",
       [
         { text: "Annuler", style: "cancel" },
         { text: "Confirmer", style: "destructive", onPress: () => void closePoll() },
@@ -858,7 +908,7 @@ export default function MealPollScreen() {
     }
 
     if (sortedAssignments.length === 0) {
-      Alert.alert("Liste de courses", "Planifie au moins un repas avant d'ajouter des ingrédients.");
+      Alert.alert("Liste de courses", "Planifie au moins un repas avant d'ajouter des ingr�dients.");
       return;
     }
 
@@ -900,7 +950,7 @@ export default function MealPollScreen() {
     );
 
     if (selectedAssignments.length === 0) {
-      Alert.alert("Liste de courses", "Sélectionne au moins un repas planifié.");
+      Alert.alert("Liste de courses", "S�lectionne au moins un repas planifi�.");
       return;
     }
 
@@ -912,7 +962,7 @@ export default function MealPollScreen() {
       if (useNewShoppingList) {
         const created = await createShoppingList(newShoppingListTitle);
         if (!created?.id) {
-          Alert.alert("Liste de courses", "Impossible de créer la nouvelle liste.");
+          Alert.alert("Liste de courses", "Impossible de cr�er la nouvelle liste.");
           return;
         }
         targetListId = created.id;
@@ -920,7 +970,7 @@ export default function MealPollScreen() {
       }
 
       if (!targetListId) {
-        Alert.alert("Liste de courses", "Choisis une liste existante ou crée-en une nouvelle.");
+        Alert.alert("Liste de courses", "Choisis une liste existante ou cr�e-en une nouvelle.");
         return;
       }
 
@@ -931,7 +981,7 @@ export default function MealPollScreen() {
       const ingredients = await buildShoppingIngredientsFromRecipeSelections(recipeSelections);
 
       if (ingredients.length === 0) {
-        Alert.alert("Liste de courses", "Aucun ingrédient exploitable à ajouter.");
+        Alert.alert("Liste de courses", "Aucun ingr�dient exploitable � ajouter.");
         return;
       }
 
@@ -940,14 +990,14 @@ export default function MealPollScreen() {
 
       Alert.alert(
         "Liste de courses",
-        `${addedCount} ingrédient(s) ajouté(s) à "${targetListTitle}".`,
+        `${addedCount} ingr�dient(s) ajout�(s) � "${targetListTitle}".`,
         [
           { text: "Fermer", style: "cancel" },
           { text: "Voir la liste", onPress: () => router.push(`/meal/shopping-list/${targetListId}`) },
         ]
       );
     } catch (error: any) {
-      Alert.alert("Liste de courses", error?.message || "Impossible d'ajouter les ingrédients sélectionnés.");
+      Alert.alert("Liste de courses", error?.message || "Impossible d'ajouter les ingr�dients s�lectionn�s.");
     } finally {
       setSaving(false);
     }
@@ -962,7 +1012,7 @@ export default function MealPollScreen() {
   const addManualValidationRecipe = async () => {
     const title = validationManualTitle.trim();
     if (!title) {
-      Alert.alert("Validation", "Donne un nom au repas à ajouter.");
+      Alert.alert("Validation", "Donne un nom au repas � ajouter.");
       return;
     }
 
@@ -973,14 +1023,14 @@ export default function MealPollScreen() {
         body: JSON.stringify({
           title,
           type: "plat principal",
-          description: "Ajoutée lors de la validation du sondage",
-          instructions: "A compléter",
+          description: "Ajout�e lors de la validation du sondage",
+          instructions: "A compl�ter",
           base_servings: 1,
           ingredients: [{ name: "ingredient", quantity: 1, unit: "unite" }],
         }),
       });
 
-      setRecipes((prev) => [recipe, ...prev]);
+      setRecipes((prev) => mergeUniqueRecipes(prev, [recipe]));
       setSelectedRecipeIdsForValidation((prev) => (prev.includes(recipe.id) ? prev : [...prev, recipe.id]));
       setValidationManualTitle("");
       openPlanner(recipe.id);
@@ -1006,7 +1056,7 @@ export default function MealPollScreen() {
     );
 
     if (selectedRecipeIds.length === 0) {
-      Alert.alert("Validation", "Sélectionne au moins une recette.");
+      Alert.alert("Validation", "S�lectionne au moins une recette.");
       return;
     }
 
@@ -1032,7 +1082,7 @@ export default function MealPollScreen() {
       setSelectedRecipeIdsForValidation(selectedFromApi);
       setActivePoll(response?.poll ?? null);
 
-      Alert.alert("Validation", "Sondage validé et menu de la semaine enregistré.");
+      Alert.alert("Validation", "Sondage valid� et menu de la semaine enregistr�.");
     } catch (error: any) {
       Alert.alert("Validation", error?.message || "Impossible de valider le sondage.");
     } finally {
@@ -1046,11 +1096,11 @@ export default function MealPollScreen() {
     return (
       <View style={[styles.card, { backgroundColor: theme.card }]}> 
         <Text style={[styles.cardTitle, { color: theme.text }]}>
-          {isEditingOpenPoll ? "Modifier le sondage ouvert" : "Créer le sondage de la semaine"}
+          {isEditingOpenPoll ? "Modifier le sondage ouvert" : "Cr�er le sondage de la semaine"}
         </Text>
         {isEditingOpenPoll ? (
           <Text style={[styles.helperText, { color: theme.textSecondary }]}>
-            Corrige les paramètres puis enregistre les modifications.
+            Corrige les param�tres puis enregistre les modifications.
           </Text>
         ) : null}
 
@@ -1064,7 +1114,7 @@ export default function MealPollScreen() {
 
         <View style={[styles.settingsGrid, { marginTop: 6 }]}> 
           <View style={[styles.settingCard, { borderColor: theme.icon, backgroundColor: theme.background }]}> 
-            <Text style={[styles.settingLabel, { color: theme.text }]}>Durée (heures)</Text>
+            <Text style={[styles.settingLabel, { color: theme.text }]}>Dur�e (heures)</Text>
             <View style={styles.stepperRow}>
               <TouchableOpacity
                 onPress={() => setDurationHours((prev) => clamp(prev - 1, 1, 168))}
@@ -1102,7 +1152,7 @@ export default function MealPollScreen() {
           </View>
         </View>
 
-        <Text style={[styles.label, { color: theme.text, marginTop: 12 }]}>Période de planification</Text>
+        <Text style={[styles.label, { color: theme.text, marginTop: 12 }]}>P�riode de planification</Text>
         <View style={styles.planningDatesRow}>
           <TouchableOpacity
             onPress={() => openPlanningPicker("start")}
@@ -1124,7 +1174,7 @@ export default function MealPollScreen() {
           </TouchableOpacity>
         </View>
 
-        <Text style={[styles.label, { color: theme.text, marginTop: 12 }]}>Rechercher dans mon répertoire</Text>
+        <Text style={[styles.label, { color: theme.text, marginTop: 12 }]}>Rechercher dans mon r�pertoire</Text>
         <View style={[styles.searchBox, { borderColor: theme.icon, backgroundColor: theme.background }]}> 
           <MaterialCommunityIcons name="magnify" size={20} color={theme.textSecondary} />
           <TextInput
@@ -1138,8 +1188,8 @@ export default function MealPollScreen() {
 
         {searchRecipe.trim().length > 0 ? (
           <>
-            <Text style={[styles.label, { color: theme.text, marginTop: 12 }]}>Résultats de recherche</Text>
-            {filteredCreationRecipes.length > 0 ? (
+            <Text style={[styles.label, { color: theme.text, marginTop: 12 }]}>R�sultats de recherche</Text>
+            {creationRecipeSearch.isFetching ? (<ActivityIndicator size="small" color={theme.tint} />) : filteredCreationRecipes.length > 0 ? (
               <View style={styles.recipeGrid}>
                 {filteredCreationRecipes.slice(0, 12).map((recipe) => {
                   const selected = selectedRecipeIdsForCreation.includes(recipe.id);
@@ -1170,7 +1220,7 @@ export default function MealPollScreen() {
               </View>
             ) : (
               <View style={[styles.suggestionsBox, { borderColor: theme.icon, backgroundColor: theme.background }]}> 
-                <Text style={{ color: theme.textSecondary, padding: 10 }}>Aucune recette trouvée.</Text>
+                <Text style={{ color: theme.textSecondary, padding: 10 }}>Aucune recette trouv�e.</Text>
               </View>
             )}
           </>
@@ -1204,7 +1254,7 @@ export default function MealPollScreen() {
               ]}
               disabled={aiLoading}
             >
-              {aiLoading ? <ActivityIndicator size="small" color={theme.tint} /> : <Text style={[styles.smallActionBtnText, { color: theme.text }]}>Demander à l&apos;IA</Text>}
+              {aiLoading ? <ActivityIndicator size="small" color={theme.tint} /> : <Text style={[styles.smallActionBtnText, { color: theme.text }]}>Demander � l&apos;IA</Text>}
             </TouchableOpacity>
           </View>
         </View>
@@ -1223,7 +1273,7 @@ export default function MealPollScreen() {
           </View>
         ) : null}
 
-        <Text style={[styles.label, { color: theme.text, marginTop: 12 }]}>Plats selectionnés</Text>
+        <Text style={[styles.label, { color: theme.text, marginTop: 12 }]}>Plats selectionn�s</Text>
         <View style={styles.chipsRow}>
           {selectedCreationRecipes.length > 0 &&(
             selectedCreationRecipes.map((recipe) => (
@@ -1286,10 +1336,10 @@ export default function MealPollScreen() {
       <View style={[styles.card, { backgroundColor: theme.card }]}> 
         <Text style={[styles.cardTitle, { color: theme.text }]}>{activePoll.title || "Sondage de la semaine"}</Text>
         <Text style={[styles.cardText, { color: theme.textSecondary }]}>Ouvert le {formatDateTime(activePoll.starts_at)}</Text>
-        <Text style={[styles.cardText, { color: theme.textSecondary }]}>Fin prévue le {formatDateTime(activePoll.ends_at)}</Text>
+        <Text style={[styles.cardText, { color: theme.textSecondary }]}>Fin pr�vue le {formatDateTime(activePoll.ends_at)}</Text>
 
         <Animated.View style={[styles.voteCounterBox, { borderColor: theme.icon, backgroundColor: theme.background }, shakeStyle]}>
-          <Text style={[styles.voteCounterTitle, { color: theme.text }]}>Choisis tes plats préférés :</Text>
+          <Text style={[styles.voteCounterTitle, { color: theme.text }]}>Choisis tes plats pr�f�r�s :</Text>
           <Text style={[styles.voteCounterValue, { color: theme.tint }]}>{draftVoteOptionIds.length} / {activePoll.max_votes_per_user}</Text>
         </Animated.View>
 
@@ -1315,7 +1365,7 @@ export default function MealPollScreen() {
 
                 <View style={styles.voteCardFooter}>
                   <Text style={{ color: selected ? theme.tint : theme.textSecondary, fontSize: 12, fontWeight: "700" }}>
-                    {selected ? "Selectionné" : "Choisir"}
+                    {selected ? "Selectionn�" : "Choisir"}
                   </Text>
                   <MaterialCommunityIcons
                     name={selected ? "star" : "star-outline"}
@@ -1348,7 +1398,7 @@ export default function MealPollScreen() {
               </View>
             ))
           ) : (
-            <Text style={{ color: theme.textSecondary }}>Personne n&apos;a voté pour le moment.</Text>
+            <Text style={{ color: theme.textSecondary }}>Personne n&apos;a vot� pour le moment.</Text>
           )}
         </View>
 
@@ -1366,7 +1416,7 @@ export default function MealPollScreen() {
               style={[styles.secondaryBtn, { borderColor: theme.icon, backgroundColor: theme.background, opacity: saving ? 0.6 : 1 }]}
               disabled={saving}
             >
-              <Text style={{ color: theme.text, fontWeight: "700" }}>Clôturer le sondage</Text>
+              <Text style={{ color: theme.text, fontWeight: "700" }}>Cl�turer le sondage</Text>
             </TouchableOpacity>
           </>
         ) : null}
@@ -1394,7 +1444,7 @@ export default function MealPollScreen() {
 
     return (
       <View style={[styles.card, { backgroundColor: theme.card }]}> 
-        <Text style={[styles.cardTitle, { color: theme.text }]}>Résultats du sondage</Text>
+        <Text style={[styles.cardTitle, { color: theme.text }]}>R�sultats du sondage</Text>
         <Text style={[styles.cardText, { color: theme.textSecondary }]}>Classement des plats</Text>
 
         {closedRanking.map((option, index) => {
@@ -1448,6 +1498,7 @@ export default function MealPollScreen() {
                 placeholder="Rechercher une recette du foyer"
                 placeholderTextColor={theme.textSecondary}
               />
+              {validationRecipeSearch.isFetching ? <ActivityIndicator size="small" color={theme.tint} /> : null}
 
               {validationSearchRecipe.trim().length > 0 ? (
                 <View style={[styles.suggestionsBox, { borderColor: theme.icon, backgroundColor: theme.card }]}> 
@@ -1502,7 +1553,7 @@ export default function MealPollScreen() {
                   );
                 })
               ) : (
-                <Text style={{ color: theme.textSecondary }}>Aucun repas planifié pour l&apos;instant.</Text>
+                <Text style={{ color: theme.textSecondary }}>Aucun repas planifi� pour l&apos;instant.</Text>
               )}
             </View>
             <TouchableOpacity
@@ -1513,7 +1564,7 @@ export default function MealPollScreen() {
               ]}
               disabled={saving || sortedAssignments.length === 0}
             >
-              <Text style={{ color: theme.text, fontWeight: "700" }}>Ajouter à la liste de courses</Text>
+              <Text style={{ color: theme.text, fontWeight: "700" }}>Ajouter � la liste de courses</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -1538,7 +1589,7 @@ export default function MealPollScreen() {
 
     return (
       <View style={[styles.card, { backgroundColor: theme.card }]}> 
-        <Text style={[styles.cardTitle, { color: theme.text }]}>Sondage validé</Text>
+        <Text style={[styles.cardTitle, { color: theme.text }]}>Sondage valid�</Text>
         <Text style={[styles.cardText, { color: theme.textSecondary }]}>Plats retenus</Text>
 
         {selectedIds.length > 0 ? (
@@ -1551,7 +1602,7 @@ export default function MealPollScreen() {
             );
           })
         ) : (
-          <Text style={{ color: theme.textSecondary }}>Aucune recette validée détectée.</Text>
+          <Text style={{ color: theme.textSecondary }}>Aucune recette valid�e d�tect�e.</Text>
         )}
 
         {sortedAssignments.length > 0 ? (
@@ -1579,7 +1630,7 @@ export default function MealPollScreen() {
             style={[styles.secondaryBtn, { borderColor: theme.icon, backgroundColor: theme.background }]}
             disabled={saving}
           >
-            <Text style={{ color: theme.text, fontWeight: "700" }}>Ajouter à la liste de courses</Text>
+            <Text style={{ color: theme.text, fontWeight: "700" }}>Ajouter � la liste de courses</Text>
           </TouchableOpacity>
         ) : null}
       </View>
@@ -1619,7 +1670,7 @@ export default function MealPollScreen() {
           <View style={[styles.card, { backgroundColor: theme.card, alignItems: "center" }]}> 
             <MaterialCommunityIcons name="vote-outline" size={44} color={theme.tint} />
             <Text style={[styles.cardTitle, { color: theme.text, textAlign: "center", marginTop: 10 }]}>Aucun sondage actif</Text>
-            <Text style={[styles.cardText, { color: theme.textSecondary, textAlign: "center" }]}>Un sondage doit être ouvert pour démarrer les votes.</Text>
+            <Text style={[styles.cardText, { color: theme.textSecondary, textAlign: "center" }]}>Un sondage doit �tre ouvert pour d�marrer les votes.</Text>
           </View>
         ) : activePoll.status === "open" ? (
           renderVotingView()
@@ -1641,7 +1692,7 @@ export default function MealPollScreen() {
           <View style={[styles.bottomSheet, { backgroundColor: theme.card, borderTopColor: theme.icon }]}>
             <View style={styles.bottomSheetHandle} />
             <Text style={[styles.cardTitle, { color: theme.text, marginBottom: 10 }]}>
-              {planningPickerTarget === "start" ? "Date de début" : "Date de fin"}
+              {planningPickerTarget === "start" ? "Date de d�but" : "Date de fin"}
             </Text>
 
             <View style={styles.calendarHeaderRow}>
@@ -1765,8 +1816,8 @@ export default function MealPollScreen() {
 
       <ShoppingListPickerModal
         visible={shoppingPickerVisible}
-        title="Ajouter le repas à la liste de courses"
-        confirmLabel="Ajouter les ingrédients"
+        title="Ajouter le repas � la liste de courses"
+        confirmLabel="Ajouter les ingr�dients"
         theme={theme}
         saving={saving}
         lists={shoppingLists}
@@ -1780,7 +1831,7 @@ export default function MealPollScreen() {
         onConfirm={() => void confirmPollShoppingListSelection()}
         extraContent={
           <View>
-            <Text style={[styles.label, { color: theme.text }]}>Repas planifiés à inclure</Text>
+            <Text style={[styles.label, { color: theme.text }]}>Repas planifi�s � inclure</Text>
             <View style={{ gap: 8 }}>
               {sortedAssignments.map((assignment) => {
                 const recipe = recipesById.get(assignment.recipe_id);
@@ -2262,4 +2313,5 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
 });
+
 

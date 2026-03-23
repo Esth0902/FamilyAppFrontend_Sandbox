@@ -76,9 +76,12 @@ export default function RootLayout() {
     const user = useAuthStore((state) => state.user);
     const authHydrated = useAuthStore((state) => state.hydrated);
     const authReady = authHydrated && authBootstrapped;
+    const userId = Number(user?.id ?? 0);
+    const hasUserId = Number.isFinite(userId) && userId > 0;
+    const userMustChangePassword = !!user?.must_change_password;
 
     useEffect(() => {
-        if (!authReady || !token || user?.must_change_password) {
+        if (!authReady || !token || userMustChangePassword) {
             return;
         }
 
@@ -89,8 +92,6 @@ export default function RootLayout() {
 
         const bootstrapNotifications = async () => {
             try {
-                const currentUser = user;
-
                 let Notifications: NotificationsModule | null = null;
                 if (!isExpoGo) {
                     Notifications = await loadNotificationsModule();
@@ -263,9 +264,8 @@ export default function RootLayout() {
                     }
                 };
 
-                const parsedUserId = Number(currentUser?.id ?? 0);
-                if (Number.isFinite(parsedUserId) && parsedUserId > 0) {
-                    const unsubscribe = await subscribeToUserRealtime(parsedUserId, (message) => {
+                if (hasUserId) {
+                    const unsubscribe = await subscribeToUserRealtime(userId, (message) => {
                         const module = String(message?.module ?? "");
                         if (module !== "notifications") {
                             return;
@@ -322,7 +322,7 @@ export default function RootLayout() {
                 notificationResponseSubscription.remove();
             }
         };
-    }, [authReady, router, token, user]);
+    }, [authReady, hasUserId, router, token, userId, userMustChangePassword]);
 
     useEffect(() => {
         let isCancelled = false;
@@ -376,7 +376,7 @@ export default function RootLayout() {
         ? nestedSegment
         : rootSegment;
     const hasToken = !!token;
-    const mustChangePassword = !!user?.must_change_password;
+    const mustChangePassword = userMustChangePassword;
     const hasHousehold = !!(user?.household_id || (Array.isArray(user?.households) && user.households.length > 0));
     const isPublicRoute = rootSegment === "(auth)"
         || currentSegment === ""

@@ -89,6 +89,24 @@ export const normalizeStoredUser = (
   };
 };
 
+const serializeUserSnapshot = (user: StoredUser | null): string => {
+  try {
+    return JSON.stringify(user ?? null);
+  } catch {
+    return "";
+  }
+};
+
+export const areUserSnapshotsEqual = (
+  left: StoredUser | null,
+  right: StoredUser | null
+): boolean => {
+  if (left === right) {
+    return true;
+  }
+  return serializeUserSnapshot(left) === serializeUserSnapshot(right);
+};
+
 const toHouseholdId = (user: StoredUser | null): number | null => {
   return toPositiveInteger(user?.household_id) ?? toPositiveInteger(user?.households?.[0]?.id);
 };
@@ -141,7 +159,7 @@ export const refreshStoredUserFromStorage = async (): Promise<StoredUserState> =
   const snapshot = await hydrateAuthState();
   const normalizedUser = normalizeStoredUser(snapshot.user as StoredUser | null);
 
-  if (normalizedUser !== snapshot.user) {
+  if (!areUserSnapshotsEqual(normalizedUser, snapshot.user as StoredUser | null)) {
     setAuthState({ user: normalizedUser });
   }
 

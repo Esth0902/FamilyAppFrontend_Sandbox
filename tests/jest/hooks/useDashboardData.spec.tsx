@@ -30,9 +30,12 @@ describe("useDashboardData", () => {
   });
 
   it("aggregates data and refreshes with bypass cache", async () => {
-    fetchDashboardSummaryMock.mockResolvedValue({ members: [{ id: 1 }] });
+    fetchDashboardSummaryMock.mockResolvedValue({
+      polls_open_count: 2,
+      tasks_todo_count: 5,
+    });
     fetchDashboardBudgetBoardMock.mockResolvedValue({
-      pocket_money_enabled: true,
+      budget_enabled: true,
     } as never);
     fetchDashboardCalendarSummaryMock.mockResolvedValue({
       calendar_enabled: true,
@@ -48,8 +51,9 @@ describe("useDashboardData", () => {
       expect(result.current.isInitialLoading).toBe(false);
     });
 
-    expect(result.current.dashboard?.members?.[0]?.id).toBe(1);
-    expect(result.current.budgetBoard?.pocket_money_enabled).toBe(true);
+    expect(result.current.dashboard?.polls_open_count).toBe(2);
+    expect(result.current.dashboard?.tasks_todo_count).toBe(5);
+    expect(result.current.budgetBoard?.budget_enabled).toBe(true);
     expect(result.current.calendarSummary?.calendar_enabled).toBe(true);
 
     await act(async () => {

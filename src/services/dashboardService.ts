@@ -23,12 +23,13 @@ export type DashboardTaskSummary = {
 };
 
 export type DashboardResponse = {
-  polls_open?: DashboardPoll[];
-  polls_closed?: DashboardPoll[];
-  polls?: DashboardPoll[];
-  active_poll?: DashboardPoll | null;
-  tasks_summary?: DashboardTaskSummary;
-  members?: { id: number }[];
+  polls_total_count?: number;
+  polls_open_count?: number;
+  polls_closed_count?: number;
+  tasks_todo_count?: number;
+  tasks_done_count?: number;
+  tasks_validated_count?: number;
+  budget_pending_requests?: number;
 };
 
 export type CalendarSummaryResponse = {
