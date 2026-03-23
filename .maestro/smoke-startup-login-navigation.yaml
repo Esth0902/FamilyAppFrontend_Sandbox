@@ -1,0 +1,12 @@
+appId: com.esther0902.frontend
+name: Smoke - Startup Login Navigation
+tags:
+  - smoke
+---
+- launchApp:
+    clearState: true
+- assertVisible: "FamilyFlow"
+- tapOn: "Se connecter"
+- assertVisible: "Se connecter"
+- back
+- assertVisible: "FamilyFlow"
