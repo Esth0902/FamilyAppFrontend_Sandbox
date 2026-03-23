@@ -1,139 +1,57 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
-import {
-  ActivityIndicator,
-  Alert,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-} from "react-native";
+import React, { useCallback, useEffect, useMemo } from "react";
+import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Stack, useFocusEffect, useRouter } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Colors } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
-import { apiFetch } from "@/src/api/client";
-import {
-  BudgetBoardPayload,
-  computePaymentBreakdown,
-  formatMoney,
-} from "@/src/budget/common";
-import { toIsoDate } from "@/src/utils/date";
+import { computePaymentBreakdown, formatMoney } from "@/src/budget/common";
+import { AppCard } from "@/src/components/ui/AppCard";
+import { EmptyState } from "@/src/components/ui/EmptyState";
+import { ScreenHeader } from "@/src/components/ui/ScreenHeader";
+import { useDashboardData } from "@/src/hooks/useDashboardData";
 import { subscribeToHouseholdRealtime } from "@/src/realtime/client";
 import { useStoredUserState } from "@/src/session/user-cache";
 
-type DashboardVoterSummary = {
-  user_id: number;
-  votes_count: number;
-};
+type DashboardRoute =
+  | "/dashboard/sondages"
+  | "/dashboard/budget"
+  | "/dashboard/tasks"
+  | "/dashboard/calendar";
 
-type DashboardPoll = {
-  id: number;
-  status: "open" | "closed" | "validated";
-  max_votes_per_user: number;
-  total_votes: number;
-  voters_summary?: DashboardVoterSummary[];
-};
-
-type DashboardTaskSummary = {
-  enabled: boolean;
-  todo_count?: number;
-  done_count?: number;
-  validated_count?: number;
-};
-
-type DashboardResponse = {
-  polls_open?: DashboardPoll[];
-  polls_closed?: DashboardPoll[];
-  polls?: DashboardPoll[];
-  active_poll?: DashboardPoll | null;
-  tasks_summary?: DashboardTaskSummary;
-  members?: { id: number }[];
-};
-
-type CalendarSummaryResponse = {
-  calendar_enabled?: boolean;
-  events?: unknown[];
-  meal_plan?: unknown[];
-};
-
-type ApiError = {
-  status?: number;
-  message?: string;
-};
-
-const monthRange = () => {
-  const now = new Date();
-  const start = new Date(now.getFullYear(), now.getMonth(), 1);
-  const end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-  return {
-    from: toIsoDate(start),
-    to: toIsoDate(end),
-  };
+type DashboardCard = {
+  id: string;
+  title: string;
+  description: string;
+  extraDescription?: string;
+  icon: keyof typeof MaterialCommunityIcons.glyphMap;
+  accentColor: string;
+  iconBackgroundColor: string;
+  route: DashboardRoute;
 };
 
 export default function DashboardScreen() {
   const router = useRouter();
-  const insets = useSafeAreaInsets();
   const colorScheme = useColorScheme();
   const theme = Colors[colorScheme ?? "light"];
   const { householdId, role, user } = useStoredUserState();
-
-  const [loading, setLoading] = useState(true);
-  const [dashboard, setDashboard] = useState<DashboardResponse | null>(null);
-  const [budgetBoard, setBudgetBoard] = useState<BudgetBoardPayload | null>(null);
-  const [calendarSummary, setCalendarSummary] = useState<CalendarSummaryResponse | null>(null);
-
-  const loadDashboard = useCallback(async (options?: { silent?: boolean; bypassCache?: boolean }) => {
-    const silent = options?.silent ?? false;
-    const bypassCache = options?.bypassCache === true;
-    if (!silent) {
-      setLoading(true);
-    }
-
-    const range = monthRange();
-
-    try {
-      const [dashboardResponse, budgetResponse, calendarResponse] = await Promise.all([
-        apiFetch("/dashboard", { cacheTtlMs: 20_000, bypassCache }),
-        apiFetch("/budget/board", { cacheTtlMs: 20_000, bypassCache }).catch((error: ApiError) => {
-          if (error?.status === 403 || error?.status === 404) {
-            return null;
-          }
-          throw error;
-        }),
-        apiFetch(`/calendar/board?from=${range.from}&to=${range.to}`, { cacheTtlMs: 15_000, bypassCache }).catch((error: ApiError) => {
-          if (error?.status === 403 || error?.status === 404) {
-            return null;
-          }
-          throw error;
-        }),
-      ]);
-
-      setDashboard((dashboardResponse ?? null) as DashboardResponse | null);
-      setBudgetBoard((budgetResponse ?? null) as BudgetBoardPayload | null);
-      setCalendarSummary((calendarResponse ?? null) as CalendarSummaryResponse | null);
-    } catch (error: any) {
-      Alert.alert("Dashboard", error?.message || "Impossible de charger le dashboard.");
-    } finally {
-      if (!silent) {
-        setLoading(false);
-      }
-    }
-  }, []);
+  const { dashboard, budgetBoard, calendarSummary, isInitialLoading, error, refreshDashboard } = useDashboardData({
+    householdId,
+  });
 
   useFocusEffect(
     useCallback(() => {
-      void loadDashboard({ silent: false });
-    }, [loadDashboard])
+      void refreshDashboard();
+    }, [refreshDashboard])
   );
 
   useEffect(() => {
-    if (!householdId) {
-      return;
-    }
+    if (!error) return;
+    Alert.alert("Dashboard", error.message || "Impossible de charger le dashboard.");
+  }, [error]);
+
+  useEffect(() => {
+    if (!householdId) return;
 
     let unsubscribeRealtime: (() => void) | null = null;
     let active = true;
@@ -142,15 +60,8 @@ export default function DashboardScreen() {
       unsubscribeRealtime = await subscribeToHouseholdRealtime(householdId, (message) => {
         if (!active) return;
         const module = String(message?.module ?? "");
-        if (
-          module !== "tasks"
-          && module !== "meal_poll"
-          && module !== "budget"
-          && module !== "calendar"
-        ) {
-          return;
-        }
-        void loadDashboard({ silent: true, bypassCache: true });
+        if (module !== "tasks" && module !== "meal_poll" && module !== "budget" && module !== "calendar") return;
+        void refreshDashboard({ bypassCache: true });
       });
     };
 
@@ -158,11 +69,9 @@ export default function DashboardScreen() {
 
     return () => {
       active = false;
-      if (unsubscribeRealtime) {
-        unsubscribeRealtime();
-      }
+      if (unsubscribeRealtime) unsubscribeRealtime();
     };
-  }, [householdId, loadDashboard]);
+  }, [householdId, refreshDashboard]);
 
   const isParent = role === "parent";
   const userId = Number(user?.id ?? 0);
@@ -198,7 +107,92 @@ export default function DashboardScreen() {
   const calendarEventsCount = calendarSummary?.events?.length ?? 0;
   const calendarMealsCount = calendarSummary?.meal_plan?.length ?? 0;
 
-  if (loading) {
+  const cardThemeStyle = useMemo(
+    () => ({ backgroundColor: theme.card, borderColor: theme.icon }),
+    [theme.card, theme.icon]
+  );
+
+  const cards = useMemo<DashboardCard[]>(
+    () => [
+      {
+        id: "polls",
+        title: "Sondages repas",
+        description: `Ouverts ${pollsOpenCount} | Clôturés ${pollsClosedCount} | Total ${pollsTotalCount}`,
+        extraDescription: activePoll
+          ? isParent
+            ? `Participation ${activePollParticipants}/${membersCount || 0}`
+            : `Mes votes ${myVotesCount}/${activePoll.max_votes_per_user} | Restants ${remainingVotes}`
+          : undefined,
+        icon: "vote",
+        accentColor: theme.tint,
+        iconBackgroundColor: `${theme.tint}15`,
+        route: "/dashboard/sondages",
+      },
+      {
+        id: "budget",
+        title: "Budget",
+        description: budgetEnabled
+          ? isParent
+            ? `À payer ${formatMoney(totalToPay, currency)} | En attente ${pendingRequests}`
+            : `À recevoir ${formatMoney(childToReceive, currency)}`
+          : "Module budget désactivé",
+        icon: "piggy-bank-outline",
+        accentColor: theme.tint,
+        iconBackgroundColor: `${theme.tint}15`,
+        route: "/dashboard/budget",
+      },
+      {
+        id: "tasks",
+        title: "Tâches",
+        description: tasksEnabled
+          ? `À faire ${tasksTodoCount} | Réalisées ${tasksSummary?.done_count ?? 0} | Validées ${tasksSummary?.validated_count ?? 0}`
+          : "Module tâches désactivé",
+        icon: "checkbox-marked-circle-outline",
+        accentColor: theme.accentCool,
+        iconBackgroundColor: `${theme.accentCool}18`,
+        route: "/dashboard/tasks",
+      },
+      {
+        id: "calendar",
+        title: "Calendrier",
+        description: calendarEnabled
+          ? `Événements ${calendarEventsCount} | Repas planifiés ${calendarMealsCount}`
+          : "Module calendrier désactivé",
+        icon: "calendar-month-outline",
+        accentColor: theme.accentWarm,
+        iconBackgroundColor: `${theme.accentWarm}18`,
+        route: "/dashboard/calendar",
+      },
+    ],
+    [
+      activePoll,
+      activePollParticipants,
+      budgetEnabled,
+      calendarEnabled,
+      calendarEventsCount,
+      calendarMealsCount,
+      childToReceive,
+      currency,
+      isParent,
+      membersCount,
+      myVotesCount,
+      pendingRequests,
+      pollsClosedCount,
+      pollsOpenCount,
+      pollsTotalCount,
+      remainingVotes,
+      tasksEnabled,
+      tasksSummary?.done_count,
+      tasksSummary?.validated_count,
+      tasksTodoCount,
+      theme.accentCool,
+      theme.accentWarm,
+      theme.tint,
+      totalToPay,
+    ]
+  );
+
+  if (isInitialLoading && !dashboard && !budgetBoard && !calendarSummary) {
     return (
       <View style={[styles.center, { backgroundColor: theme.background }]}>
         <ActivityIndicator size="large" color={theme.tint} />
@@ -206,122 +200,68 @@ export default function DashboardScreen() {
     );
   }
 
+  if (error && !dashboard && !budgetBoard && !calendarSummary) {
+    return (
+      <View style={[styles.container, { backgroundColor: theme.background }]}>
+        <Stack.Screen options={{ headerShown: false }} />
+        <ScreenHeader
+          title="Dashboard"
+          subtitle="Clique pour voir le détail"
+          withBackButton
+          onBackPress={() => router.replace("/(tabs)/home")}
+          safeTop
+          showBorder
+        />
+        <ScrollView contentContainerStyle={styles.content}>
+          <EmptyState
+            icon="cloud-alert-outline"
+            title="Impossible de charger le dashboard"
+            message={error.message || "Vérifie ta connexion puis réessaie."}
+            actionLabel="Réessayer"
+            onActionPress={() => {
+              void refreshDashboard({ bypassCache: true });
+            }}
+          />
+        </ScrollView>
+      </View>
+    );
+  }
+
   return (
-    <View style={[styles.container, { backgroundColor: theme.background }]}> 
+    <View style={[styles.container, { backgroundColor: theme.background }]}>
       <Stack.Screen options={{ headerShown: false }} />
 
-      <View style={[styles.header, { borderBottomColor: theme.icon, paddingTop: Math.max(insets.top, 12) }]}>
-        <TouchableOpacity onPress={() => router.replace("/(tabs)/home")} style={[styles.backBtn, { borderColor: theme.icon }]}>
-          <MaterialCommunityIcons name="arrow-left" size={20} color={theme.tint} />
-        </TouchableOpacity>
-        <View style={{ flex: 1 }}>
-          <Text style={[styles.headerTitle, { color: theme.text }]}>Dashboard</Text>
-          <Text style={[styles.headerSubtitle, { color: theme.textSecondary }]}>Cliquer pour voir le détail</Text>
-        </View>
-      </View>
+      <ScreenHeader
+        title="Dashboard"
+        subtitle="Clique pour voir le détail"
+        withBackButton
+        onBackPress={() => router.replace("/(tabs)/home")}
+        safeTop
+        showBorder
+      />
 
       <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
-        <TouchableOpacity
-          style={[styles.card, { backgroundColor: theme.card, borderColor: theme.icon }]}
-          onPress={() => router.push("/dashboard/sondages")}
-          activeOpacity={0.8}
-        >
-          <View style={[styles.cardAccent, { backgroundColor: theme.tint }]} />
-          <View style={styles.cardContent}>
-            <View style={[styles.iconContainer, { backgroundColor: `${theme.tint}15` }]}> 
-              <MaterialCommunityIcons name="vote" size={26} color={theme.tint} />
+        {cards.map((card) => (
+          <AppCard
+            key={card.id}
+            style={[styles.card, cardThemeStyle]}
+            accentColor={card.accentColor}
+            onPress={() => router.push(card.route)}
+            activeOpacity={0.8}
+          >
+            <View style={[styles.iconContainer, { backgroundColor: card.iconBackgroundColor }]}>
+              <MaterialCommunityIcons name={card.icon} size={24} color={card.accentColor} />
             </View>
             <View style={styles.textContainer}>
-              <Text style={[styles.cardTitle, { color: theme.text }]}>Sondages repas</Text>
-              <Text style={[styles.cardDescription, { color: theme.textSecondary }]}> 
-                Ouverts {pollsOpenCount} | Clôturés {pollsClosedCount} | Total {pollsTotalCount}
-              </Text>
-              {activePoll ? (
-                <Text style={[styles.cardDescription, { color: theme.textSecondary }]}> 
-                  {isParent
-                    ? `Participation ${activePollParticipants}/${membersCount || 0}`
-                    : `Mes votes ${myVotesCount}/${activePoll.max_votes_per_user} | Restants ${remainingVotes}`}
-                </Text>
+              <Text style={[styles.cardTitle, { color: theme.text }]}>{card.title}</Text>
+              <Text style={[styles.cardDescription, { color: theme.textSecondary }]}>{card.description}</Text>
+              {card.extraDescription ? (
+                <Text style={[styles.cardDescription, { color: theme.textSecondary }]}>{card.extraDescription}</Text>
               ) : null}
             </View>
             <MaterialCommunityIcons name="chevron-right" size={20} color={theme.textSecondary} />
-          </View>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.card, { backgroundColor: theme.card, borderColor: theme.icon }]}
-          onPress={() => router.push("/dashboard/budget")}
-          activeOpacity={0.8}
-        >
-          <View style={[styles.cardAccent, { backgroundColor: "#4DABFF" }]} />
-          <View style={styles.cardContent}>
-            <View style={[styles.iconContainer, { backgroundColor: "rgba(77, 171, 255, 0.15)" }]}> 
-              <MaterialCommunityIcons name="piggy-bank-outline" size={24} color="#4DABFF" />
-            </View>
-            <View style={styles.textContainer}>
-              <Text style={[styles.cardTitle, { color: theme.text }]}>Budget</Text>
-              {budgetEnabled ? (
-                <Text style={[styles.cardDescription, { color: theme.textSecondary }]}> 
-                  {isParent
-                    ? `À payer ${formatMoney(totalToPay, currency)} | En attente ${pendingRequests}`
-                    : `À recevoir ${formatMoney(childToReceive, currency)}`}
-                </Text>
-              ) : (
-                <Text style={[styles.cardDescription, { color: theme.textSecondary }]}>Module budget désactivé</Text>
-              )}
-            </View>
-            <MaterialCommunityIcons name="chevron-right" size={20} color={theme.textSecondary} />
-          </View>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.card, { backgroundColor: theme.card, borderColor: theme.icon }]}
-          onPress={() => router.push("/dashboard/tasks")}
-          activeOpacity={0.8}
-        >
-          <View style={[styles.cardAccent, { backgroundColor: "#50BFA5" }]} />
-          <View style={styles.cardContent}>
-            <View style={[styles.iconContainer, { backgroundColor: "rgba(80, 191, 165, 0.15)" }]}> 
-              <MaterialCommunityIcons name="checkbox-marked-circle-outline" size={24} color="#50BFA5" />
-            </View>
-            <View style={styles.textContainer}>
-              <Text style={[styles.cardTitle, { color: theme.text }]}>Tâches</Text>
-              {tasksEnabled ? (
-                <Text style={[styles.cardDescription, { color: theme.textSecondary }]}> 
-                  À faire {tasksTodoCount} | Réalisées {tasksSummary?.done_count ?? 0} | Validées {tasksSummary?.validated_count ?? 0}
-                </Text>
-              ) : (
-                <Text style={[styles.cardDescription, { color: theme.textSecondary }]}>Module tâches désactivé</Text>
-              )}
-            </View>
-            <MaterialCommunityIcons name="chevron-right" size={20} color={theme.textSecondary} />
-          </View>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.card, { backgroundColor: theme.card, borderColor: theme.icon }]}
-          onPress={() => router.push("/dashboard/calendar")}
-          activeOpacity={0.8}
-        >
-          <View style={[styles.cardAccent, { backgroundColor: theme.accentWarm }]} />
-          <View style={styles.cardContent}>
-            <View style={[styles.iconContainer, { backgroundColor: `${theme.accentWarm}18` }]}> 
-              <MaterialCommunityIcons name="calendar-month-outline" size={24} color={theme.accentWarm} />
-            </View>
-            <View style={styles.textContainer}>
-              <Text style={[styles.cardTitle, { color: theme.text }]}>Calendrier</Text>
-              {calendarEnabled ? (
-                <Text style={[styles.cardDescription, { color: theme.textSecondary }]}> 
-                  Événements {calendarEventsCount} | Repas planifiés {calendarMealsCount}
-                </Text>
-              ) : (
-                <Text style={[styles.cardDescription, { color: theme.textSecondary }]}>Module calendrier désactivé</Text>
-              )}
-            </View>
-            <MaterialCommunityIcons name="chevron-right" size={20} color={theme.textSecondary} />
-          </View>
-        </TouchableOpacity>
-
+          </AppCard>
+        ))}
       </ScrollView>
     </View>
   );
@@ -334,48 +274,9 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   container: { flex: 1 },
-  header: {
-    minHeight: 60,
-    paddingHorizontal: 20,
-    paddingVertical: 8,
-    borderBottomWidth: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-  },
-  backBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    borderWidth: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    marginTop: 2,
-  },
-  headerTitle: { fontSize: 18, fontWeight: "700" },
-  headerSubtitle: { marginTop: 2, fontSize: 13, lineHeight: 18 },
   content: { padding: 16, paddingBottom: 40, gap: 10 },
   card: {
-    borderRadius: 15,
-    overflow: "hidden",
-    flexDirection: "row",
-    borderWidth: 1,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 6,
-    elevation: 2,
-  },
-  cardAccent: {
-    width: 6,
-    height: "100%",
-  },
-  cardContent: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    padding: 14,
-    gap: 10,
+    minHeight: 86,
   },
   iconContainer: {
     width: 46,
@@ -398,3 +299,4 @@ const styles = StyleSheet.create({
     marginTop: 1,
   },
 });
+

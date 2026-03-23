@@ -12,10 +12,12 @@ import {
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useQueryClient } from "@tanstack/react-query";
 
 import { Colors } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
-import { apiFetch } from "@/src/api/client";
+import { apiFetch, getApiErrorMessage } from "@/src/api/client";
+import { queryKeys } from "@/src/query/query-keys";
 import { subscribeToHouseholdRealtime, subscribeToUserRealtime } from "@/src/realtime/client";
 import { useStoredUserState } from "@/src/session/user-cache";
 
@@ -267,6 +269,7 @@ const isTaskModuleKey = (value: unknown): value is TaskModuleKey =>
 export default function TasksScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const queryClient = useQueryClient();
   const params = useLocalSearchParams<{ module?: string | string[] }>();
   const colorScheme = useColorScheme();
   const theme = Colors[colorScheme ?? "light"];
@@ -454,6 +457,32 @@ export default function TasksScreen() {
     () => templates.filter((template) => template.recurrence !== "once"),
     [templates]
   );
+  const invalidateTaskCaches = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: ["tasks"] });
+    if (householdId !== null) {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.dashboard.root(householdId) });
+    }
+  }, [householdId, queryClient]);
+  const withOptimisticInstanceUpdate = useCallback(
+    (instanceId: number, updater: (instance: TaskInstance) => TaskInstance) => {
+      let rollbackSnapshot: TaskInstance[] | null = null;
+      setInstances((prev) => {
+        rollbackSnapshot = prev;
+        return prev.map((instance) => (
+          instance.id === instanceId ? updater(instance) : instance
+        ));
+      });
+
+      return () => {
+        if (rollbackSnapshot) {
+          setInstances(rollbackSnapshot);
+          return;
+        }
+        void loadBoardRef.current({ silent: true });
+      };
+    },
+    []
+  );
 
   const toggleManualAssignee = useCallback((memberId: number) => {
     setSelectedAssigneeIds((prev) => {
@@ -534,7 +563,7 @@ export default function TasksScreen() {
       setTemplates(Array.isArray(payload?.templates) ? payload.templates : []);
       setInstances(Array.isArray(payload?.instances) ? payload.instances : []);
     } catch (error: any) {
-      Alert.alert("Tâches", error?.message || "Impossible de charger les tâches.");
+      Alert.alert("Tâches", getApiErrorMessage(error, "Impossible de charger les tâches."));
     } finally {
       if (!silent) {
         setLoading(false);
@@ -1076,8 +1105,9 @@ export default function TasksScreen() {
 
       resetTemplateForm();
       await loadBoard({ silent: true });
+      invalidateTaskCaches();
     } catch (error: any) {
-      Alert.alert("Tâches", error?.message || "Impossible de sauvegarder cette routine.");
+      Alert.alert("Tâches", getApiErrorMessage(error, "Impossible de sauvegarder cette routine."));
     } finally {
       setSaving(false);
     }
@@ -1099,8 +1129,9 @@ export default function TasksScreen() {
                 resetTemplateForm();
               }
               await loadBoard({ silent: true });
+              invalidateTaskCaches();
             } catch (error: any) {
-              Alert.alert("Tâches", error?.message || "Impossible de supprimer cette routine.");
+              Alert.alert("Tâches", getApiErrorMessage(error, "Impossible de supprimer cette routine."));
             } finally {
               setSaving(false);
             }
@@ -1160,8 +1191,9 @@ export default function TasksScreen() {
         setSelectedAssigneeIds([currentUserId]);
       }
       await loadBoard({ silent: true });
+      invalidateTaskCaches();
     } catch (error: any) {
-      Alert.alert("Tâches", error?.message || "Impossible de créer cette tâche.");
+      Alert.alert("Tâches", getApiErrorMessage(error, "Impossible de créer cette tâche."));
     } finally {
       setSaving(false);
     }
@@ -1172,6 +1204,12 @@ export default function TasksScreen() {
     }
 
     const nextStatus = instance.status === STATUS_DONE ? STATUS_TODO : STATUS_DONE;
+    const rollback = withOptimisticInstanceUpdate(instance.id, (current) => ({
+      ...current,
+      status: nextStatus,
+      completed_at: nextStatus === STATUS_DONE ? new Date().toISOString() : null,
+      validated_by_parent: nextStatus === STATUS_TODO ? false : current.validated_by_parent,
+    }));
 
     setSaving(true);
     try {
@@ -1179,9 +1217,11 @@ export default function TasksScreen() {
         method: "PATCH",
         body: JSON.stringify({ status: nextStatus }),
       });
-      await loadBoard({ silent: true });
+      invalidateTaskCaches();
+      void loadBoard({ silent: true });
     } catch (error: any) {
-      Alert.alert("Tâches", error?.message || "Impossible de mettre à jour le statut.");
+      rollback();
+      Alert.alert("Tâches", getApiErrorMessage(error, "Impossible de mettre à jour le statut."));
     } finally {
       setSaving(false);
     }
@@ -1193,6 +1233,12 @@ export default function TasksScreen() {
     }
 
     const nextStatus = instance.status === STATUS_CANCELLED ? STATUS_TODO : STATUS_CANCELLED;
+    const rollback = withOptimisticInstanceUpdate(instance.id, (current) => ({
+      ...current,
+      status: nextStatus,
+      completed_at: nextStatus === STATUS_CANCELLED ? null : current.completed_at,
+      validated_by_parent: nextStatus === STATUS_CANCELLED ? false : current.validated_by_parent,
+    }));
 
     setSaving(true);
     try {
@@ -1200,9 +1246,11 @@ export default function TasksScreen() {
         method: "PATCH",
         body: JSON.stringify({ status: nextStatus }),
       });
-      await loadBoard({ silent: true });
+      invalidateTaskCaches();
+      void loadBoard({ silent: true });
     } catch (error: any) {
-      Alert.alert("Tâches", error?.message || "Impossible de modifier cette tâche.");
+      rollback();
+      Alert.alert("Tâches", getApiErrorMessage(error, "Impossible de modifier cette tâche."));
     } finally {
       setSaving(false);
     }
@@ -1212,15 +1260,21 @@ export default function TasksScreen() {
     if (!instance.permissions.can_validate || instance.validated_by_parent) {
       return;
     }
+    const rollback = withOptimisticInstanceUpdate(instance.id, (current) => ({
+      ...current,
+      validated_by_parent: true,
+    }));
 
     setSaving(true);
     try {
       await apiFetch(`/tasks/instances/${instance.id}/validate`, {
         method: "POST",
       });
-      await loadBoard({ silent: true });
+      invalidateTaskCaches();
+      void loadBoard({ silent: true });
     } catch (error: any) {
-      Alert.alert("Tâches", error?.message || "Impossible de valider cette tâche.");
+      rollback();
+      Alert.alert("Tâches", getApiErrorMessage(error, "Impossible de valider cette tâche."));
     } finally {
       setSaving(false);
     }
@@ -1235,8 +1289,9 @@ export default function TasksScreen() {
       });
       Alert.alert("Tâches", "Demande envoyée.");
       await loadBoard({ silent: true });
+      invalidateTaskCaches();
     } catch (error: any) {
-      Alert.alert("Tâches", error?.message || "Impossible d'envoyer la demande.");
+      Alert.alert("Tâches", getApiErrorMessage(error, "Impossible d'envoyer la demande."));
     } finally {
       setSaving(false);
     }

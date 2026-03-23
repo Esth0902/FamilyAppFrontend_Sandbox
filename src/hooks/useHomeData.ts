@@ -1,6 +1,7 @@
 import { useCallback, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toPositiveInt } from "@/src/notifications/navigation";
+import { queryKeys } from "@/src/query/query-keys";
 import {
     fetchHomeProfile,
     fetchPendingNotifications,
@@ -22,7 +23,7 @@ export const useHomeData = ({ token, user }: UseHomeDataArgs) => {
     const queryClient = useQueryClient();
 
     const profileQuery = useQuery({
-        queryKey: ["home", "profile", token ?? "anonymous", user?.household_id ?? 0],
+        queryKey: queryKeys.home.profile(token, user?.household_id),
         enabled: !!token,
         staleTime: 30_000,
         queryFn: async () => {
@@ -48,10 +49,9 @@ export const useHomeData = ({ token, user }: UseHomeDataArgs) => {
     });
 
     const notificationsQuery = useQuery({
-        queryKey: ["home", "pending-notifications", token ?? "anonymous"],
+        queryKey: queryKeys.home.pendingNotifications(token),
         enabled: !!token,
         staleTime: 10_000,
-        refetchInterval: 60_000,
         queryFn: fetchPendingNotifications,
     });
 
@@ -74,7 +74,7 @@ export const useHomeData = ({ token, user }: UseHomeDataArgs) => {
 
     const invalidateNotifications = useCallback(async () => {
         await queryClient.invalidateQueries({
-            queryKey: ["home", "pending-notifications"],
+            queryKey: queryKeys.home.pendingNotificationsRoot(),
         });
     }, [queryClient]);
 
@@ -89,4 +89,3 @@ export const useHomeData = ({ token, user }: UseHomeDataArgs) => {
         invalidateNotifications,
     };
 };
-

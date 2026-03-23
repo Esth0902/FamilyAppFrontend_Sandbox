@@ -13,11 +13,11 @@ export const RECIPE_TYPE_FILTERS = [
 
 const RECIPE_TYPE_ALIASES: Record<string, string> = {
     "petit-déjeuner": "petit-déjeuner",
-    "petit-dÃ©jeuner": "petit-déjeuner",
-    "petit-dÃƒÂ©jeuner": "petit-déjeuner",
+    "petit-dejeuner": "petit-déjeuner",
+    "petit-d?jeuner": "petit-déjeuner",
     "entrée": "entrée",
-    "entrÃ©e": "entrée",
-    "entrÃƒÂ©e": "entrée",
+    entree: "entrée",
+    "entr?e": "entrée",
     "plat principal": "plat principal",
     dessert: "dessert",
     collation: "collation",

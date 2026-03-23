@@ -7,26 +7,180 @@ const resolvedApiBaseUrl = resolvePublicApiUrl();
 export const API_BASE_URL = resolvedApiBaseUrl ? trimRightSlash(resolvedApiBaseUrl) : null;
 
 const parseJsonSafe = async (response: Response) => {
-    const text = await response.text();
-    if (!text) {
-        return null;
-    }
+  const text = await response.text();
+  if (!text) {
+    return null;
+  }
 
-    try {
-        return JSON.parse(text);
-    } catch {
-        return null;
-    }
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
 };
 
-type ApiFetchOptions = RequestInit & {
-    cacheTtlMs?: number;
-    bypassCache?: boolean;
+export type ApiFetchOptions = RequestInit & {
+  cacheTtlMs?: number;
+  bypassCache?: boolean;
 };
 
 type CachedApiResponse = {
-    expiresAt: number;
-    data: unknown;
+  expiresAt: number;
+  data: unknown;
+};
+
+export type ApiErrorCode =
+  | "CONFIG"
+  | "NETWORK"
+  | "UNAUTHORIZED"
+  | "FORBIDDEN"
+  | "NOT_FOUND"
+  | "RATE_LIMIT"
+  | "VALIDATION"
+  | "SERVER"
+  | "UNKNOWN";
+
+export type ApiErrorInput = {
+  status: number;
+  code: ApiErrorCode;
+  message: string;
+  data?: unknown;
+  method: string;
+  endpoint: string;
+  retryable: boolean;
+  cause?: unknown;
+};
+
+export class ApiClientError extends Error {
+  status: number;
+  code: ApiErrorCode;
+  data: unknown;
+  method: string;
+  endpoint: string;
+  retryable: boolean;
+
+  constructor(input: ApiErrorInput) {
+    super(input.message);
+    this.name = "ApiClientError";
+    this.status = input.status;
+    this.code = input.code;
+    this.data = input.data ?? null;
+    this.method = input.method;
+    this.endpoint = input.endpoint;
+    this.retryable = input.retryable;
+    if (input.cause !== undefined) {
+      (this as Error & { cause?: unknown }).cause = input.cause;
+    }
+  }
+}
+
+export const isApiClientError = (error: unknown): error is ApiClientError =>
+  error instanceof ApiClientError;
+
+export const isApiUnauthorizedError = (error: unknown): boolean =>
+  isApiClientError(error) && error.status === 401;
+
+export const getApiErrorMessage = (error: unknown, fallback = "Une erreur est survenue."): string => {
+  if (isApiClientError(error)) {
+    return error.message || fallback;
+  }
+  if (error && typeof error === "object" && "message" in error) {
+    const message = String((error as { message?: unknown }).message ?? "").trim();
+    return message.length > 0 ? message : fallback;
+  }
+  return fallback;
+};
+
+const isRetryableStatus = (status: number): boolean => {
+  if (status <= 0) {
+    return true;
+  }
+  if (status === 408 || status === 425 || status === 429) {
+    return true;
+  }
+  return status >= 500;
+};
+
+const mapStatusToCode = (status: number): ApiErrorCode => {
+  if (status === 0) return "NETWORK";
+  if (status === 400 || status === 422) return "VALIDATION";
+  if (status === 401) return "UNAUTHORIZED";
+  if (status === 403) return "FORBIDDEN";
+  if (status === 404) return "NOT_FOUND";
+  if (status === 429) return "RATE_LIMIT";
+  if (status >= 500) return "SERVER";
+  return "UNKNOWN";
+};
+
+const buildDefaultMessage = (status: number): string => {
+  if (status === 0) {
+    return "Connexion impossible. Vérifie ta connexion internet.";
+  }
+  if (status === 401) {
+    return "Session expirée. Reconnecte-toi pour continuer.";
+  }
+  if (status === 403) {
+    return "Action non autorisée pour ce compte.";
+  }
+  if (status === 404) {
+    return "Ressource introuvable.";
+  }
+  if (status === 429) {
+    return "Trop de requêtes. Réessaie dans quelques secondes.";
+  }
+  if (status >= 500) {
+    return "Serveur temporairement indisponible. Réessaie dans un instant.";
+  }
+  return `Erreur HTTP ${status}`;
+};
+
+const extractApiMessage = (status: number, data: unknown): string => {
+  if (data && typeof data === "object") {
+    const obj = data as Record<string, unknown>;
+    const explicitMessage = String(obj.message ?? "").trim();
+    if (explicitMessage.length > 0) {
+      return explicitMessage;
+    }
+
+    const validationErrors = obj.errors;
+    if (validationErrors && typeof validationErrors === "object") {
+      const firstField = Object.keys(validationErrors as Record<string, unknown>)[0];
+      if (firstField) {
+        const firstValue = (validationErrors as Record<string, unknown>)[firstField];
+        if (Array.isArray(firstValue) && firstValue.length > 0) {
+          const firstError = String(firstValue[0] ?? "").trim();
+          if (firstError.length > 0) {
+            return firstError;
+          }
+        }
+      }
+    }
+  }
+
+  return buildDefaultMessage(status);
+};
+
+const normalizeApiError = (
+  input: unknown,
+  context: { status: number; data?: unknown; method: string; endpoint: string }
+): ApiClientError => {
+  if (isApiClientError(input)) {
+    return input;
+  }
+
+  const status = Number.isFinite(context.status) ? Math.trunc(context.status) : 0;
+  const code = mapStatusToCode(status);
+  const message = extractApiMessage(status, context.data);
+  return new ApiClientError({
+    status,
+    code,
+    message,
+    data: context.data ?? null,
+    method: context.method,
+    endpoint: context.endpoint,
+    retryable: isRetryableStatus(status),
+    cause: input,
+  });
 };
 
 const apiResponseCache = new Map<string, CachedApiResponse>();
@@ -34,145 +188,161 @@ const inFlightGetRequests = new Map<string, Promise<unknown>>();
 const MAX_CACHE_ENTRIES = 80;
 
 const buildCacheKey = (method: string, url: string, householdId: number | null) =>
-    `${method}:${url}:h${householdId ?? 0}`;
+  `${method}:${url}:h${householdId ?? 0}`;
 
 const pruneApiCache = () => {
-    while (apiResponseCache.size > MAX_CACHE_ENTRIES) {
-        const firstKey = apiResponseCache.keys().next().value;
-        if (typeof firstKey !== "string") {
-            break;
-        }
-        apiResponseCache.delete(firstKey);
+  while (apiResponseCache.size > MAX_CACHE_ENTRIES) {
+    const firstKey = apiResponseCache.keys().next().value;
+    if (typeof firstKey !== "string") {
+      break;
     }
+    apiResponseCache.delete(firstKey);
+  }
 };
 
 const getCachedResponse = (cacheKey: string): { hit: boolean; data: unknown } => {
-    const cached = apiResponseCache.get(cacheKey);
-    if (!cached) {
-        return { hit: false, data: null };
-    }
-    if (cached.expiresAt <= Date.now()) {
-        apiResponseCache.delete(cacheKey);
-        return { hit: false, data: null };
-    }
-    return { hit: true, data: cached.data };
+  const cached = apiResponseCache.get(cacheKey);
+  if (!cached) {
+    return { hit: false, data: null };
+  }
+  if (cached.expiresAt <= Date.now()) {
+    apiResponseCache.delete(cacheKey);
+    return { hit: false, data: null };
+  }
+  return { hit: true, data: cached.data };
 };
 
 const setCachedResponse = (cacheKey: string, data: unknown, ttlMs: number) => {
-    if (!Number.isFinite(ttlMs) || ttlMs <= 0) {
-        return;
-    }
-    apiResponseCache.set(cacheKey, {
-        expiresAt: Date.now() + ttlMs,
-        data,
-    });
-    pruneApiCache();
+  if (!Number.isFinite(ttlMs) || ttlMs <= 0) {
+    return;
+  }
+  apiResponseCache.set(cacheKey, {
+    expiresAt: Date.now() + ttlMs,
+    data,
+  });
+  pruneApiCache();
 };
 
 const clearApiCache = () => {
-    apiResponseCache.clear();
-    inFlightGetRequests.clear();
+  apiResponseCache.clear();
+  inFlightGetRequests.clear();
 };
 
 export const apiFetch = async (endpoint: string, options: ApiFetchOptions = {}) => {
-    if (!API_BASE_URL) {
-        throw {
-            status: 0,
-            message: "Configuration API manquante (EXPO_PUBLIC_API_URL ou EXPO_PUBLIC_API_URL_LOCAL/ONLINE).",
-        };
+  if (!API_BASE_URL) {
+    throw new ApiClientError({
+      status: 0,
+      code: "CONFIG",
+      message: "Configuration API manquante (EXPO_PUBLIC_API_URL ou EXPO_PUBLIC_API_URL_LOCAL/ONLINE).",
+      method: String(options.method ?? "GET").toUpperCase(),
+      endpoint,
+      retryable: false,
+    });
+  }
+
+  const cleanEndpoint = endpoint.startsWith("/") ? endpoint : `/${endpoint}`;
+  const url = `${API_BASE_URL}${cleanEndpoint}`;
+
+  const authSnapshot = getAuthStateSnapshot();
+  const hydratedAuth = authSnapshot.hydrated ? authSnapshot : await hydrateAuthState();
+  const token = hydratedAuth.token;
+  const rawUser = hydratedAuth.user;
+  let activeHouseholdId: number | null = null;
+
+  if (rawUser) {
+    const candidate = Number((rawUser as { household_id?: number | string }).household_id ?? 0);
+    if (Number.isFinite(candidate) && candidate > 0) {
+      activeHouseholdId = Math.trunc(candidate);
+    }
+  }
+
+  const {
+    cacheTtlMs: rawCacheTtlMs,
+    bypassCache: rawBypassCache,
+    ...requestOptions
+  } = options;
+
+  const method = String(requestOptions.method ?? "GET").toUpperCase();
+  const isGet = method === "GET";
+  const cacheTtlMs = Number.isFinite(rawCacheTtlMs) ? Number(rawCacheTtlMs) : 0;
+  const bypassCache = rawBypassCache === true;
+  const cacheKey = buildCacheKey(method, url, activeHouseholdId);
+
+  if (isGet && !bypassCache && cacheTtlMs > 0) {
+    const cached = getCachedResponse(cacheKey);
+    if (cached.hit) {
+      return cached.data;
+    }
+    const inFlight = inFlightGetRequests.get(cacheKey);
+    if (inFlight) {
+      return inFlight;
+    }
+  }
+
+  const headers: Record<string, string> = {
+    Accept: "application/json",
+    "Content-Type": "application/json",
+    ...(requestOptions.headers as Record<string, string>),
+  };
+
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+  if (activeHouseholdId) {
+    headers["X-Household-Id"] = String(activeHouseholdId);
+  }
+
+  const requestPromise = (async () => {
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        ...requestOptions,
+        method,
+        headers,
+      });
+    } catch (networkError) {
+      throw normalizeApiError(networkError, {
+        status: 0,
+        method,
+        endpoint: cleanEndpoint,
+      });
     }
 
-    const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
-    const url = `${API_BASE_URL}${cleanEndpoint}`;
+    const data = await parseJsonSafe(response);
 
-    const authSnapshot = getAuthStateSnapshot();
-    const hydratedAuth = authSnapshot.hydrated ? authSnapshot : await hydrateAuthState();
-    const token = hydratedAuth.token;
-    const rawUser = hydratedAuth.user;
-    let activeHouseholdId: number | null = null;
+    if (!response.ok) {
+      const normalizedError = normalizeApiError(data, {
+        status: response.status,
+        data,
+        method,
+        endpoint: cleanEndpoint,
+      });
 
-    if (rawUser) {
-        const candidate = Number((rawUser as { household_id?: number | string }).household_id ?? 0);
-        if (Number.isFinite(candidate) && candidate > 0) {
-            activeHouseholdId = Math.trunc(candidate);
-        }
+      if (normalizedError.status === 401) {
+        clearApiCache();
+        await logoutAuth();
+      }
+
+      throw normalizedError;
     }
 
-    const {
-        cacheTtlMs: rawCacheTtlMs,
-        bypassCache: rawBypassCache,
-        ...requestOptions
-    } = options;
-
-    const method = String(requestOptions.method ?? "GET").toUpperCase();
-    const isGet = method === "GET";
-    const cacheTtlMs = Number.isFinite(rawCacheTtlMs) ? Number(rawCacheTtlMs) : 0;
-    const bypassCache = rawBypassCache === true;
-    const cacheKey = buildCacheKey(method, url, activeHouseholdId);
-
-    if (isGet && !bypassCache && cacheTtlMs > 0) {
-        const cached = getCachedResponse(cacheKey);
-        if (cached.hit) {
-            return cached.data;
-        }
-        const inFlight = inFlightGetRequests.get(cacheKey);
-        if (inFlight) {
-            return inFlight;
-        }
+    if (!isGet) {
+      clearApiCache();
+    } else if (!bypassCache && cacheTtlMs > 0) {
+      setCachedResponse(cacheKey, data, cacheTtlMs);
     }
 
-    const headers: Record<string, string> = {
-        'Accept': 'application/json',
-        'Content-Type': 'application/json',
-        ...(requestOptions.headers as Record<string, string>),
-    };
+    return data;
+  })();
 
-    if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
+  if (isGet && !bypassCache && cacheTtlMs > 0) {
+    inFlightGetRequests.set(cacheKey, requestPromise);
+    try {
+      return await requestPromise;
+    } finally {
+      inFlightGetRequests.delete(cacheKey);
     }
-    if (activeHouseholdId) {
-        headers['X-Household-Id'] = String(activeHouseholdId);
-    }
+  }
 
-    const requestPromise = (async () => {
-        const response = await fetch(url, {
-            ...requestOptions,
-            method,
-            headers,
-        });
-
-        const data = await parseJsonSafe(response);
-
-        if (!response.ok) {
-            if (response.status === 401) {
-                clearApiCache();
-                await logoutAuth();
-            }
-
-            throw {
-                status: response.status,
-                message: data?.message || `Erreur HTTP ${response.status}`,
-                data,
-            };
-        }
-
-        if (!isGet) {
-            clearApiCache();
-        } else if (!bypassCache && cacheTtlMs > 0) {
-            setCachedResponse(cacheKey, data, cacheTtlMs);
-        }
-
-        return data;
-    })();
-
-    if (isGet && !bypassCache && cacheTtlMs > 0) {
-        inFlightGetRequests.set(cacheKey, requestPromise);
-        try {
-            return await requestPromise;
-        } finally {
-            inFlightGetRequests.delete(cacheKey);
-        }
-    }
-
-    return requestPromise;
+  return requestPromise;
 };

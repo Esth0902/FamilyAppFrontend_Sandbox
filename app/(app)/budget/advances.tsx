@@ -1,13 +1,13 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
-import { useFocusEffect, useRouter } from "expo-router";
+import { useRouter } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Colors } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import { apiFetch } from "@/src/api/client";
-import { subscribeToHouseholdRealtime } from "@/src/realtime/client";
+import { useRealtimeRefetch } from "@/src/hooks/useRealtimeRefetch";
 import { useStoredUserState } from "@/src/session/user-cache";
 import {
   BudgetBoardPayload,
@@ -63,25 +63,21 @@ export default function BudgetAdvancesScreen() {
     }
   }, []);
 
-  useFocusEffect(useCallback(() => { void loadBoard({ silent: false }); }, [loadBoard]));
+  useRealtimeRefetch({
+    householdId,
+    module: "budget",
+    refresh: loadBoard,
+    focusOptions: { silent: false },
+    realtimeOptions: { silent: true },
+  });
 
-  useEffect(() => {
-    if (!householdId) return;
-    let unsubscribeRealtime: (() => void) | null = null;
-    let active = true;
-    const bindRealtime = async () => {
-      unsubscribeRealtime = await subscribeToHouseholdRealtime(householdId, (message) => {
-        if (!active) return;
-        if (message?.module !== "budget") return;
-        void loadBoard({ silent: true });
-      });
-    };
-    void bindRealtime();
-    return () => {
-      active = false;
-      if (unsubscribeRealtime) unsubscribeRealtime();
-    };
-  }, [householdId, loadBoard]);
+  const onBackPress = useCallback(() => {
+    if (router.canGoBack()) {
+      router.back();
+      return;
+    }
+    router.replace("/(tabs)/budget");
+  }, [router]);
 
   const currency = useMemo(() => (board?.currency || "EUR").toUpperCase(), [board?.currency]);
   const isParent = board?.current_user.role === "parent";
@@ -158,7 +154,7 @@ export default function BudgetAdvancesScreen() {
   return (
     <ScrollView stickyHeaderIndices={[0]} style={[styles.container, { backgroundColor: theme.background }]} contentContainerStyle={styles.content}>
       <View style={[styles.headerRow, { borderBottomColor: theme.icon, paddingTop: Math.max(insets.top, 12), backgroundColor: theme.background }]}>
-        <TouchableOpacity onPress={() => router.replace("/(tabs)/budget")} style={[styles.backBtn, { borderColor: theme.icon }]}>
+        <TouchableOpacity onPress={onBackPress} style={[styles.backBtn, { borderColor: theme.icon }]}>
           <MaterialCommunityIcons name="arrow-left" size={20} color={theme.tint} />
         </TouchableOpacity>
         <View style={{ flex: 1 }}>

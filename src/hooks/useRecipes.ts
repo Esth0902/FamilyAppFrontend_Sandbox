@@ -16,6 +16,7 @@ import {
     upsertRecipe,
     type Recipe,
 } from "@/src/services/recipeService";
+import { queryKeys } from "@/src/query/query-keys";
 
 type UseRecipesArgs = {
     householdId: number | null;
@@ -28,8 +29,8 @@ type UpsertRecipeMutationInput = {
 
 export const useRecipes = ({ householdId }: UseRecipesArgs) => {
     const queryClient = useQueryClient();
-    const recipesKey = ["recipes", "all", householdId ?? 0] as const;
-    const dietaryTagsKey = ["recipes", "dietary-tags", householdId ?? 0] as const;
+    const recipesKey = queryKeys.recipes.all(householdId);
+    const dietaryTagsKey = queryKeys.recipes.dietaryTags(householdId);
 
     const recipesQuery = useQuery({
         queryKey: recipesKey,
@@ -161,4 +162,3 @@ export const useRecipes = ({ householdId }: UseRecipesArgs) => {
             || storeAiRecipeMutation.isPending,
     };
 };
-

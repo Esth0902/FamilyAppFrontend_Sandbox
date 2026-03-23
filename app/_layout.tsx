@@ -7,7 +7,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import Constants from "expo-constants";
 
 import { Colors } from "@/constants/theme";
-import { apiFetch } from "@/src/api/client";
+import { apiFetch, isApiClientError } from "@/src/api/client";
 import { AppErrorBoundary } from "@/src/components/app-error-boundary";
 import { AppAlertHost } from "@/src/components/app-alert-host";
 import { resolveNotificationNavigationTarget, toPositiveInt } from "@/src/notifications/navigation";
@@ -43,7 +43,27 @@ export default function RootLayout() {
     const [queryClient] = useState(() => new QueryClient({
         defaultOptions: {
             queries: {
-                retry: 1,
+                retry: (failureCount, error) => {
+                    if (isApiClientError(error)) {
+                        if (error.status === 401 || error.status === 403 || error.status === 404) {
+                            return false;
+                        }
+                        if (!error.retryable) {
+                            return false;
+                        }
+                    }
+                    return failureCount < 2;
+                },
+                retryDelay: (attempt) => Math.min(750 * 2 ** attempt, 4000),
+                refetchOnReconnect: true,
+            },
+            mutations: {
+                retry: (failureCount, error) => {
+                    if (isApiClientError(error) && !error.retryable) {
+                        return false;
+                    }
+                    return failureCount < 1;
+                },
             },
         },
     }));

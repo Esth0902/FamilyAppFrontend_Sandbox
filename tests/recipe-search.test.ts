@@ -1,31 +1,24 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+﻿/* eslint-env jest */
 
 import { filterRecipesByTitleQuery } from "../src/features/recipes/recipe-search";
 
 test("filterRecipesByTitleQuery matches case-insensitively", () => {
   const recipes = [
-    { id: 1, title: "Pâtes bolo" },
+    { id: 1, title: "Pates bolo" },
     { id: 2, title: "Soupe tomates" },
     { id: 3, title: "Riz cantonnais" },
   ];
 
-  assert.deepEqual(
-    filterRecipesByTitleQuery(recipes, "RIZ").map((item) => item.id),
-    [3]
-  );
+  expect(filterRecipesByTitleQuery(recipes, "RIZ").map((item) => item.id)).toEqual([3]);
 });
 
 test("filterRecipesByTitleQuery ignores accents and trims input", () => {
   const recipes = [
-    { id: 1, title: "Crème brûlée" },
-    { id: 2, title: "Crème citron" },
+    { id: 1, title: "Creme brulee" },
+    { id: 2, title: "Creme citron" },
   ];
 
-  assert.deepEqual(
-    filterRecipesByTitleQuery(recipes, "  creme ").map((item) => item.id),
-    [1, 2]
-  );
+  expect(filterRecipesByTitleQuery(recipes, "  creme ").map((item) => item.id)).toEqual([1, 2]);
 });
 
 test("filterRecipesByTitleQuery returns all when query is empty", () => {
@@ -34,5 +27,5 @@ test("filterRecipesByTitleQuery returns all when query is empty", () => {
     { id: 2, title: "B" },
   ];
 
-  assert.equal(filterRecipesByTitleQuery(recipes, "").length, 2);
+  expect(filterRecipesByTitleQuery(recipes, "").length).toBe(2);
 });

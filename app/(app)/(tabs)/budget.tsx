@@ -1,14 +1,19 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
-import { useFocusEffect, useRouter } from "expo-router";
+import React, { useEffect, useMemo } from "react";
+import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, View } from "react-native";
+import { useRouter } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 
 import { Colors } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
-import { apiFetch } from "@/src/api/client";
-import { subscribeToHouseholdRealtime } from "@/src/realtime/client";
+import { computePaymentBreakdown, formatMoney } from "@/src/budget/common";
+import { AppButton } from "@/src/components/ui/AppButton";
+import { AppCard } from "@/src/components/ui/AppCard";
+import { Chip } from "@/src/components/ui/Chip";
+import { EmptyState } from "@/src/components/ui/EmptyState";
+import { ScreenHeader } from "@/src/components/ui/ScreenHeader";
+import { useBudgetBoard } from "@/src/hooks/useBudgetBoard";
+import { useRealtimeRefetch } from "@/src/hooks/useRealtimeRefetch";
 import { useStoredUserState } from "@/src/session/user-cache";
-import { BudgetBoardPayload, computePaymentBreakdown, formatMoney } from "@/src/budget/common";
 
 type BudgetRoute =
   | "/budget/advances"
@@ -22,6 +27,8 @@ type MenuCard = {
   id: string;
   title: string;
   description: string;
+  chipLabel?: string;
+  chipTone?: "neutral" | "info" | "success" | "warning";
   icon: keyof typeof MaterialCommunityIcons.glyphMap;
   color: string;
   route: BudgetRoute;
@@ -32,54 +39,19 @@ export default function BudgetTabScreen() {
   const colorScheme = useColorScheme();
   const theme = Colors[colorScheme ?? "light"];
   const { householdId } = useStoredUserState();
+  const { board, isInitialLoading, error, refreshBoard } = useBudgetBoard({ householdId });
 
-  const [loading, setLoading] = useState(true);
-  const [board, setBoard] = useState<BudgetBoardPayload | null>(null);
-
-  const loadBoard = useCallback(async (options?: { silent?: boolean; bypassCache?: boolean }) => {
-    const silent = options?.silent ?? false;
-    const bypassCache = options?.bypassCache === true;
-    if (!silent) setLoading(true);
-
-    try {
-      const payload = await apiFetch("/budget/board", { cacheTtlMs: 20_000, bypassCache }) as BudgetBoardPayload;
-      setBoard(payload);
-    } catch (error: unknown) {
-      const message = (error as { message?: string })?.message || "Impossible de charger le budget.";
-      Alert.alert("Budget", message);
-      setBoard(null);
-    } finally {
-      if (!silent) setLoading(false);
-    }
-  }, []);
-
-  useFocusEffect(
-    useCallback(() => {
-      void loadBoard({ silent: false });
-    }, [loadBoard])
-  );
+  useRealtimeRefetch({
+    householdId,
+    module: "budget",
+    refresh: refreshBoard,
+    realtimeOptions: { bypassCache: true },
+  });
 
   useEffect(() => {
-    if (!householdId) return;
-
-    let unsubscribeRealtime: (() => void) | null = null;
-    let active = true;
-
-    const bindRealtime = async () => {
-      unsubscribeRealtime = await subscribeToHouseholdRealtime(householdId, (message) => {
-        if (!active) return;
-        if (message?.module !== "budget") return;
-        void loadBoard({ silent: true, bypassCache: true });
-      });
-    };
-
-    void bindRealtime();
-
-    return () => {
-      active = false;
-      if (unsubscribeRealtime) unsubscribeRealtime();
-    };
-  }, [householdId, loadBoard]);
+    if (!error) return;
+    Alert.alert("Budget", error.message || "Impossible de charger le budget.");
+  }, [error]);
 
   const currency = useMemo(() => (board?.currency || "EUR").toUpperCase(), [board?.currency]);
   const isParent = board?.current_user.role === "parent";
@@ -89,25 +61,29 @@ export default function BudgetTabScreen() {
     () => (board?.pending_advance_requests ?? []).length,
     [board?.pending_advance_requests]
   );
-
   const totalPendingPayments = useMemo(
     () => (board?.children ?? []).reduce((sum, child) => sum + computePaymentBreakdown(child).remainingToPay, 0),
     [board?.children]
   );
-
   const childAdvancePending = useMemo(
-    () => (myBudget?.transactions ?? []).filter((tx) => tx.type === "advance" && tx.status === "pending" && (tx.request_kind ?? "advance") === "advance").length,
+    () =>
+      (myBudget?.transactions ?? []).filter(
+        (tx) => tx.type === "advance" && tx.status === "pending" && (tx.request_kind ?? "advance") === "advance"
+      ).length,
     [myBudget?.transactions]
   );
-
   const childReimbursementPending = useMemo(
-    () => (myBudget?.transactions ?? []).filter((tx) => tx.type === "advance" && tx.status === "pending" && tx.request_kind === "reimbursement").length,
+    () =>
+      (myBudget?.transactions ?? []).filter(
+        (tx) => tx.type === "advance" && tx.status === "pending" && tx.request_kind === "reimbursement"
+      ).length,
     [myBudget?.transactions]
   );
+  const childExpectedAmount = useMemo(() => (myBudget ? computePaymentBreakdown(myBudget).remainingToPay : 0), [myBudget]);
 
-  const childExpectedAmount = useMemo(
-    () => (myBudget ? computePaymentBreakdown(myBudget).remainingToPay : 0),
-    [myBudget]
+  const cardThemeStyle = useMemo(
+    () => ({ backgroundColor: theme.card, borderColor: theme.icon }),
+    [theme.card, theme.icon]
   );
 
   const parentCards = useMemo<MenuCard[]>(
@@ -116,6 +92,8 @@ export default function BudgetTabScreen() {
         id: "advances",
         title: "Demandes d'avance",
         description: totalPendingRequests > 0 ? `${totalPendingRequests} demande(s) en attente` : "Pas de demandes en cours",
+        chipLabel: totalPendingRequests > 0 ? `${totalPendingRequests} en attente` : "À jour",
+        chipTone: totalPendingRequests > 0 ? "warning" : "success",
         icon: "cash-clock",
         color: colorScheme === "dark" ? "#4DABFF" : theme.tint,
         route: "/budget/advances",
@@ -125,19 +103,21 @@ export default function BudgetTabScreen() {
         title: "Bonus et pénalités",
         description: "Attribuer des ajustements et suivre le statut par enfant",
         icon: "star-circle-outline",
-        color: "#F5A623",
+        color: theme.accentWarm,
         route: "/budget/adjustments",
       },
       {
         id: "payments",
         title: "Paiements",
         description: `Total à payer actuellement : ${formatMoney(totalPendingPayments, currency)}`,
+        chipLabel: formatMoney(totalPendingPayments, currency),
+        chipTone: "info",
         icon: "cash-check",
-        color: "#7ED321",
+        color: theme.accentCool,
         route: "/budget/payments",
       },
     ],
-    [colorScheme, currency, theme.tint, totalPendingPayments, totalPendingRequests]
+    [colorScheme, currency, theme.accentCool, theme.accentWarm, theme.tint, totalPendingPayments, totalPendingRequests]
   );
 
   const childCards = useMemo<MenuCard[]>(
@@ -146,6 +126,8 @@ export default function BudgetTabScreen() {
         id: "child-overview",
         title: "Mon argent de poche",
         description: `À recevoir : ${formatMoney(childExpectedAmount, currency)}`,
+        chipLabel: formatMoney(childExpectedAmount, currency),
+        chipTone: "info",
         icon: "wallet-outline",
         color: colorScheme === "dark" ? "#4DABFF" : theme.tint,
         route: "/budget/my-pocket-money",
@@ -154,23 +136,36 @@ export default function BudgetTabScreen() {
         id: "child-advance",
         title: "Demande d'avance",
         description: childAdvancePending > 0 ? `${childAdvancePending} demande(s) en attente` : "Créer une nouvelle demande",
+        chipLabel: childAdvancePending > 0 ? `${childAdvancePending} en attente` : "Nouvelle",
+        chipTone: childAdvancePending > 0 ? "warning" : "success",
         icon: "cash-plus",
-        color: "#F5A623",
+        color: theme.accentWarm,
         route: "/budget/request-advance",
       },
       {
         id: "child-reimbursement",
         title: "Demande de remboursement",
         description: childReimbursementPending > 0 ? `${childReimbursementPending} demande(s) en attente` : "Montant + justification",
+        chipLabel: childReimbursementPending > 0 ? `${childReimbursementPending} en attente` : "Nouveau",
+        chipTone: childReimbursementPending > 0 ? "warning" : "success",
         icon: "receipt-text-check-outline",
-        color: "#7ED321",
+        color: theme.accentCool,
         route: "/budget/request-reimbursement",
       },
     ],
-    [childAdvancePending, childExpectedAmount, childReimbursementPending, colorScheme, currency, theme.tint]
+    [
+      childAdvancePending,
+      childExpectedAmount,
+      childReimbursementPending,
+      colorScheme,
+      currency,
+      theme.accentCool,
+      theme.accentWarm,
+      theme.tint,
+    ]
   );
 
-  if (loading) {
+  if (isInitialLoading && !board) {
     return (
       <View style={[styles.center, { backgroundColor: theme.background }]}>
         <ActivityIndicator size="large" color={theme.tint} />
@@ -180,61 +175,68 @@ export default function BudgetTabScreen() {
 
   return (
     <ScrollView style={[styles.container, { backgroundColor: theme.background }]} contentContainerStyle={styles.content}>
-      <View style={styles.header}>
-        <View style={styles.headerTopRow}>
-          <Text style={[styles.headerTitle, { color: theme.text }]}>Argent de poche</Text>
-          {isParent ? (
-            <TouchableOpacity
+      <ScreenHeader
+        title="Argent de poche"
+        subtitle={
+          isParent
+            ? "Accède aux demandes, ajustements et paiements."
+            : "Consulte ton solde et envoie tes demandes."
+        }
+        rightSlot={
+          isParent ? (
+            <AppButton
+              variant="secondary"
+              style={styles.settingsBtn}
               onPress={() => router.push("/householdSetup?mode=edit&scope=budget")}
-              style={[styles.settingsBtn, { borderColor: theme.icon }]}
             >
               <MaterialCommunityIcons name="cog-outline" size={20} color={theme.tint} />
-            </TouchableOpacity>
-          ) : null}
-        </View>
-        <Text style={[styles.headerSubtitle, { color: theme.textSecondary }]}>
-          {isParent
-            ? "Accède aux demandes, ajustements et paiements."
-            : "Consulte ton solde et envoie tes demandes."}
-        </Text>
-      </View>
+            </AppButton>
+          ) : null
+        }
+        containerStyle={styles.headerContainer}
+        contentStyle={styles.headerContent}
+      />
 
-      {!board?.budget_enabled ? (
-        <View style={[styles.emptyCard, { backgroundColor: theme.card }]}>
-          <Text style={[styles.emptyTitle, { color: theme.text }]}>Module désactivé</Text>
-          <Text style={[styles.emptyText, { color: theme.textSecondary }]}>
-            Active le module budget dans la configuration du foyer.
-          </Text>
-          {isParent ? (
-            <TouchableOpacity
-              onPress={() => router.push("/householdSetup?mode=edit&scope=budget")}
-              style={[styles.primaryBtn, { backgroundColor: theme.tint }]}
-            >
-              <Text style={styles.primaryBtnText}>Ouvrir les paramètres Budget</Text>
-            </TouchableOpacity>
-          ) : null}
-        </View>
+      {error && !board ? (
+        <EmptyState
+          icon="cloud-alert-outline"
+          title="Impossible de charger le budget"
+          message={error.message || "Vérifie ta connexion puis réessaie."}
+          actionLabel="Réessayer"
+          onActionPress={() => {
+            void refreshBoard({ bypassCache: true });
+          }}
+        />
+      ) : !board?.budget_enabled ? (
+        <EmptyState
+          icon="piggy-bank-outline"
+          title="Module désactivé"
+          message="Active le module budget dans la configuration du foyer."
+          actionLabel={isParent ? "Ouvrir les paramètres Budget" : undefined}
+          onActionPress={isParent ? () => router.push("/householdSetup?mode=edit&scope=budget") : undefined}
+        />
       ) : (
         <View style={styles.menuGrid}>
           {(isParent ? parentCards : childCards).map((card) => (
-            <TouchableOpacity
+            <AppCard
               key={card.id}
-              style={[styles.menuCard, { backgroundColor: theme.card, borderColor: theme.icon }]}
+              style={[styles.menuCard, cardThemeStyle]}
+              accentColor={card.color}
               onPress={() => router.push(card.route)}
               activeOpacity={0.85}
             >
-              <View style={[styles.menuCardAccent, { backgroundColor: card.color }]} />
-              <View style={styles.menuCardContent}>
-                <View style={[styles.iconContainer, { backgroundColor: `${card.color}15` }]}>
-                  <MaterialCommunityIcons name={card.icon} size={24} color={card.color} />
-                </View>
-                <View style={styles.textContainer}>
-                  <Text style={[styles.menuTitle, { color: theme.text }]}>{card.title}</Text>
-                  <Text style={[styles.menuDescription, { color: theme.textSecondary }]}>{card.description}</Text>
-                </View>
-                <MaterialCommunityIcons name="chevron-right" size={20} color={theme.textSecondary} />
+              <View style={[styles.iconContainer, { backgroundColor: `${card.color}15` }]}>
+                <MaterialCommunityIcons name={card.icon} size={24} color={card.color} />
               </View>
-            </TouchableOpacity>
+              <View style={styles.textContainer}>
+                <View style={styles.titleRow}>
+                  <Text style={[styles.menuTitle, { color: theme.text }]}>{card.title}</Text>
+                  {card.chipLabel ? <Chip label={card.chipLabel} tone={card.chipTone ?? "neutral"} /> : null}
+                </View>
+                <Text style={[styles.menuDescription, { color: theme.textSecondary }]}>{card.description}</Text>
+              </View>
+              <MaterialCommunityIcons name="chevron-right" size={20} color={theme.textSecondary} />
+            </AppCard>
           ))}
         </View>
       )}
@@ -246,46 +248,19 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   content: { paddingTop: 56, paddingHorizontal: 16, paddingBottom: 40, gap: 12 },
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
-  header: { marginBottom: 4 },
-  headerTopRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
-  headerTitle: { fontSize: 26, fontWeight: "700" },
-  headerSubtitle: { marginTop: 4, fontSize: 14, lineHeight: 20 },
+  headerContainer: { paddingHorizontal: 0, paddingBottom: 0 },
+  headerContent: { minHeight: 0 },
   settingsBtn: {
     width: 36,
     height: 36,
     borderRadius: 18,
     borderWidth: 1,
-    alignItems: "center",
-    justifyContent: "center",
   },
   menuGrid: { gap: 10 },
-  menuCard: {
-    borderRadius: 15,
-    overflow: "hidden",
-    flexDirection: "row",
-    borderWidth: 1,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 6,
-    elevation: 2,
-  },
-  menuCardAccent: { width: 6, height: "100%" },
-  menuCardContent: { flex: 1, flexDirection: "row", alignItems: "center", padding: 14, gap: 10 },
+  menuCard: { minHeight: 88 },
   iconContainer: { width: 44, height: 44, borderRadius: 10, alignItems: "center", justifyContent: "center" },
   textContainer: { flex: 1 },
-  menuTitle: { fontSize: 15, fontWeight: "700", marginBottom: 2 },
+  titleRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 2 },
+  menuTitle: { flex: 1, fontSize: 15, fontWeight: "700" },
   menuDescription: { fontSize: 12, lineHeight: 17 },
-  emptyCard: { borderRadius: 14, padding: 12, gap: 10 },
-  emptyTitle: { fontSize: 16, fontWeight: "700" },
-  emptyText: { fontSize: 13, lineHeight: 18 },
-  primaryBtn: {
-    borderRadius: 10,
-    minHeight: 42,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 10,
-    marginTop: 4,
-  },
-  primaryBtnText: { color: "#FFF", fontWeight: "700", fontSize: 13, textAlign: "center" },
 });
