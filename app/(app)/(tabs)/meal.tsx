@@ -235,7 +235,7 @@ export default function MealScreen() {
                             key={option.id}
                             style={[styles.card, { backgroundColor: themeColors.card, borderColor: themeColors.icon }]}
                             onPress={() => router.push(option.route)}
-                            activeOpacity={0.8}
+                            activeOpacity={0.7}
                         >
                             <View style={[styles.cardAccent, { backgroundColor: option.color }]} />
                             <View style={styles.cardContent}>

@@ -197,9 +197,9 @@ type ReasonAction =
   | { kind: "event"; eventId: number; status: "not_participate" };
 
 const WEEK_DAYS = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"];
-const TASK_STATUS_TODO = "Ã  faire";
-const TASK_STATUS_DONE = "rÃ©alisÃ©e";
-const TASK_STATUS_CANCELLED = "annulÃ©e";
+const TASK_STATUS_TODO = "à faire";
+const TASK_STATUS_DONE = "réalisée";
+const TASK_STATUS_CANCELLED = "annulée";
 
 const pad = (value: number) => String(value).padStart(2, "0");
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
@@ -214,7 +214,7 @@ const endOfWeekSunday = (date: Date) => addDays(startOfWeekMonday(date), 6);
 
 const mealPresenceLabel = (value: MealPresenceStatus) => {
   if (value === "present") return "Je participe";
-  if (value === "not_home") return "Pas Ã  la maison";
+  if (value === "not_home") return "Pas à la maison";
   return "Je mangerai plus tard";
 };
 
@@ -238,9 +238,9 @@ const formatMemberList = (members?: { name: string; reason?: string | null }[] |
 };
 
 const taskStatusLabel = (value: string) => {
-  if (isTaskStatus(value, TASK_STATUS_TODO)) return "Ã  faire";
-  if (isTaskStatus(value, TASK_STATUS_DONE)) return "RÃ©alisÃ©e";
-  if (isTaskStatus(value, TASK_STATUS_CANCELLED)) return "AnnulÃ©e";
+  if (isTaskStatus(value, TASK_STATUS_TODO)) return "à faire";
+  if (isTaskStatus(value, TASK_STATUS_DONE)) return "Réalisée";
+  if (isTaskStatus(value, TASK_STATUS_CANCELLED)) return "Annulée";
   return value;
 };
 
@@ -892,8 +892,8 @@ export default function CalendarScreen() {
           <>
             <Text style={[styles.itemMetaText, { color: theme.textSecondary }]}>
               {entry.my_presence
-                ? `Votre prÃ©sence: ${mealPresenceLabel(entry.my_presence.status)}`
-                : "Votre prÃ©sence n'est pas encore confirmÃ©e."}
+                ? `Votre présence: ${mealPresenceLabel(entry.my_presence.status)}`
+                : "Votre présence n'est pas encore confirmée."}
             </Text>
             {entry.my_presence?.reason ? (
               <Text style={[styles.bodyText, { color: theme.textSecondary }]}>
@@ -927,7 +927,7 @@ export default function CalendarScreen() {
                 onPress={() => openMealReasonModal(entry, "not_home")}
                 disabled={saving}
               >
-                <Text style={[styles.inlineActionText, { color: theme.text }]}>Pas Ã  la maison</Text>
+                <Text style={[styles.inlineActionText, { color: theme.text }]}>Pas à la maison</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[
@@ -947,16 +947,16 @@ export default function CalendarScreen() {
             {entry.presence_overview ? (
               <View style={styles.inlineSummaryBlock}>
                 <Text style={[styles.itemMetaText, { color: theme.textSecondary }]}>
-                  PrÃ©sents: {formatMemberList(entry.presence_overview.present)}
+                  Présents: {formatMemberList(entry.presence_overview.present)}
                 </Text>
                 <Text style={[styles.itemMetaText, { color: theme.textSecondary }]}>
-                  Pas Ã  la maison: {formatMemberList(entry.presence_overview.not_home)}
+                  Pas à la maison: {formatMemberList(entry.presence_overview.not_home)}
                 </Text>
                 <Text style={[styles.itemMetaText, { color: theme.textSecondary }]}>
                   Plus tard: {formatMemberList(entry.presence_overview.later)}
                 </Text>
                 <Text style={[styles.itemMetaText, { color: theme.textSecondary }]}>
-                  Sans rÃ©ponse: {formatMemberList(entry.presence_overview.unanswered)}
+                  Sans réponse: {formatMemberList(entry.presence_overview.unanswered)}
                 </Text>
               </View>
             ) : null}
@@ -1011,12 +1011,12 @@ export default function CalendarScreen() {
             </Text>
           </View>
         </View>
-        <Text style={[styles.itemMetaText, { color: theme.textSecondary }]}>AssignÃ© Ã : {taskAssigneeNames(task)}</Text>
+        <Text style={[styles.itemMetaText, { color: theme.textSecondary }]}>Assigné à: {taskAssigneeNames(task)}</Text>
         {task.description ? (
           <Text style={[styles.bodyText, { color: theme.textSecondary }]}>{task.description}</Text>
         ) : null}
         {task.validated_by_parent ? (
-          <Text style={[styles.itemMetaText, { color: "#2E8B78" }]}>ValidÃ©e</Text>
+          <Text style={[styles.itemMetaText, { color: "#2E8B78" }]}>Validée</Text>
         ) : null}
         {task.permissions.can_toggle || (task.permissions.can_validate && !task.validated_by_parent) ? (
           <View style={styles.itemActionsRow}>
@@ -1032,7 +1032,7 @@ export default function CalendarScreen() {
                   color={theme.tint}
                 />
                 <Text style={[styles.inlineActionText, { color: theme.text }]}>
-                  {isTaskStatus(task.status, TASK_STATUS_DONE) ? "Remettre Ã  faire" : "Marquer faite"}
+                  {isTaskStatus(task.status, TASK_STATUS_DONE) ? "Remettre à faire" : "Marquer faite"}
                 </Text>
               </TouchableOpacity>
             ) : null}
@@ -1072,7 +1072,7 @@ export default function CalendarScreen() {
                 { color: event.is_shared_with_other_household ? "#2E8B78" : theme.textSecondary },
               ]}
             >
-              {event.is_shared_with_other_household ? "PartagÃ©" : "PrivÃ©"}
+              {event.is_shared_with_other_household ? "Partagé" : "Privé"}
             </Text>
           </View>
         </View>
@@ -1084,15 +1084,15 @@ export default function CalendarScreen() {
         ) : null}
         {event.created_by?.name ? (
           <Text style={[styles.itemMetaText, { color: theme.textSecondary }]}>
-            CrÃ©Ã© par {event.created_by.name}
+            Créé par {event.created_by.name}
           </Text>
         ) : null}
         {event.permissions?.can_confirm_participation !== false ? (
           <>
             <Text style={[styles.itemMetaText, { color: theme.textSecondary }]}>
               {event.my_participation
-                ? `Votre rÃ©ponse: ${eventParticipationLabel(event.my_participation.status)}`
-                : "Votre participation n'est pas encore confirmÃ©e."}
+                ? `Votre réponse: ${eventParticipationLabel(event.my_participation.status)}`
+                : "Votre participation n'est pas encore confirmée."}
             </Text>
             {event.my_participation?.reason ? (
               <Text style={[styles.bodyText, { color: theme.textSecondary }]}>
@@ -1138,7 +1138,7 @@ export default function CalendarScreen() {
                   Ne participe pas: {formatMemberList(event.participation_overview.not_participate)}
                 </Text>
                 <Text style={[styles.itemMetaText, { color: theme.textSecondary }]}>
-                  Sans rÃ©ponse: {formatMemberList(event.participation_overview.unanswered)}
+                  Sans réponse: {formatMemberList(event.participation_overview.unanswered)}
                 </Text>
               </View>
             ) : null}
@@ -1213,7 +1213,7 @@ export default function CalendarScreen() {
           && (taskCurrentUserRole !== "parent" || taskAssigneeId !== null);
   const dateWheelTitle = useMemo(() => {
     if (dateWheelTarget === "event_start" || dateWheelTarget === "task_start") {
-      return "Choisir la date de dÃ©but";
+      return "Choisir la date de début";
     }
     if (dateWheelTarget === "event_end" || dateWheelTarget === "task_end") {
       return "Choisir la date de fin";
@@ -1233,7 +1233,7 @@ export default function CalendarScreen() {
   const renderTimeWheelPanel = () => (
     <WheelTimePicker
       visible={timeWheelVisible}
-      title={timeWheelTarget === "start" ? "Choisir l'heure de dÃ©but" : "Choisir l'heure de fin"}
+      title={timeWheelTarget === "start" ? "Choisir l'heure de début" : "Choisir l'heure de fin"}
       value={timeWheelValue}
       onChange={handleTimeWheelChange}
       theme={theme}
@@ -1322,23 +1322,23 @@ export default function CalendarScreen() {
   const handleSaveEvent = async () => {
     const cleanTitle = eventTitle.trim();
     if (cleanTitle.length < 2) {
-      Alert.alert("Calendrier", "Le titre de l'Ã©vÃ©nement est obligatoire.");
+      Alert.alert("Calendrier", "Le titre de l'événement est obligatoire.");
       return;
     }
 
     if (!isValidIsoDate(eventDate) || !isValidIsoDate(eventEndDate)) {
-      Alert.alert("Calendrier", "Les dates doivent Ãªtre au format YYYY-MM-DD.");
+      Alert.alert("Calendrier", "Les dates doivent être au format YYYY-MM-DD.");
       return;
     }
 
     if (!isValidTime(eventStartTime) || !isValidTime(eventEndTime)) {
-      Alert.alert("Calendrier", "Les heures doivent Ãªtre au format HH:MM.");
+      Alert.alert("Calendrier", "Les heures doivent être au format HH:MM.");
       return;
     }
 
     const eventRange = parseEventDateTimeRange(eventDate, eventStartTime, eventEndDate, eventEndTime);
     if (!eventRange) {
-      Alert.alert("Calendrier", "L'heure de fin doit Ãªtre aprÃ¨s l'heure de dÃ©but.");
+      Alert.alert("Calendrier", "L'heure de fin doit être après l'heure de début.");
       return;
     }
 
@@ -1363,7 +1363,7 @@ export default function CalendarScreen() {
       resetTaskForm();
       await loadBoard({ silent: true });
     } catch (error: any) {
-      Alert.alert("Calendrier", error?.message || "Impossible d'enregistrer l'Ã©vÃ©nement.");
+      Alert.alert("Calendrier", error?.message || "Impossible d'enregistrer l'événement.");
     } finally {
       setSaving(false);
     }
@@ -1376,7 +1376,7 @@ export default function CalendarScreen() {
     }
 
     if (!isValidIsoDate(mealPlanDate)) {
-      Alert.alert("Calendrier", "La date de planification du repas doit Ãªtre au format YYYY-MM-DD.");
+      Alert.alert("Calendrier", "La date de planification du repas doit être au format YYYY-MM-DD.");
       return;
     }
 
@@ -1388,7 +1388,7 @@ export default function CalendarScreen() {
 
     const servings = Number.parseInt(mealPlanServings, 10);
     if (!Number.isFinite(servings) || servings < 1 || servings > 30) {
-      Alert.alert("Calendrier", "Le nombre de portions doit Ãªtre compris entre 1 et 30.");
+      Alert.alert("Calendrier", "Le nombre de portions doit être compris entre 1 et 30.");
       return;
     }
 
@@ -1419,35 +1419,35 @@ export default function CalendarScreen() {
 
   const handleCreateTask = async () => {
     if (!tasksEnabled) {
-      Alert.alert("Calendrier", "Le module tÃ¢ches est dÃ©sactivÃ© pour ce foyer.");
+      Alert.alert("Calendrier", "Le module tâches est désactivé pour ce foyer.");
       return;
     }
 
     if (!canManageTaskInstances) {
-      Alert.alert("Calendrier", "Vous ne pouvez pas crÃ©er une tÃ¢che.");
+      Alert.alert("Calendrier", "Vous ne pouvez pas créer une tâche.");
       return;
     }
 
     const cleanTitle = taskTitle.trim();
     if (cleanTitle.length < 2) {
-      Alert.alert("Calendrier", "Le titre de la tÃ¢che est obligatoire.");
+      Alert.alert("Calendrier", "Le titre de la tâche est obligatoire.");
       return;
     }
 
     if (!isValidIsoDate(taskDueDate)) {
-      Alert.alert("Calendrier", "La date de la tÃ¢che doit Ãªtre au format YYYY-MM-DD.");
+      Alert.alert("Calendrier", "La date de la tâche doit être au format YYYY-MM-DD.");
       return;
     }
     if (!isValidIsoDate(taskEndDate)) {
-      Alert.alert("Calendrier", "La date de fin doit Ãªtre au format YYYY-MM-DD.");
+      Alert.alert("Calendrier", "La date de fin doit être au format YYYY-MM-DD.");
       return;
     }
     if (taskEndDate < taskDueDate) {
-      Alert.alert("Calendrier", "La date de fin doit Ãªtre postÃ©rieure ou Ã©gale Ã  la date de dÃ©but.");
+      Alert.alert("Calendrier", "La date de fin doit être postérieure ou égale à la date de début.");
       return;
     }
     if (taskCurrentUserRole === "parent" && taskAssigneeId === null) {
-      Alert.alert("Calendrier", "Choisis un membre pour cette tÃ¢che.");
+      Alert.alert("Calendrier", "Choisis un membre pour cette tâche.");
       return;
     }
 
@@ -1470,7 +1470,7 @@ export default function CalendarScreen() {
       resetTaskForm();
       await loadBoard({ silent: true });
     } catch (error: any) {
-      Alert.alert("Calendrier", error?.message || "Impossible de crÃ©er cette tÃ¢che.");
+      Alert.alert("Calendrier", error?.message || "Impossible de créer cette tâche.");
     } finally {
       setSaving(false);
     }
@@ -1490,7 +1490,7 @@ export default function CalendarScreen() {
   };
 
   const confirmDeleteEvent = (event: CalendarEvent) => {
-    Alert.alert("Supprimer l'Ã©vÃ©nement", `Supprimer "${event.title}" ?`, [
+    Alert.alert("Supprimer l'événement", `Supprimer "${event.title}" ?`, [
       { text: "Annuler", style: "cancel" },
       {
         text: "Supprimer",
@@ -1510,7 +1510,7 @@ export default function CalendarScreen() {
       }
       await loadBoard({ silent: true });
     } catch (error: any) {
-      Alert.alert("Calendrier", error?.message || "Impossible de supprimer l'Ã©vÃ©nement.");
+      Alert.alert("Calendrier", error?.message || "Impossible de supprimer l' événement.");
     } finally {
       setSaving(false);
     }
@@ -1522,7 +1522,7 @@ export default function CalendarScreen() {
     }
 
     if (!isValidIsoDate(mealPlanDate)) {
-      Alert.alert("Calendrier", "La date de planification du repas doit Ãªtre au format YYYY-MM-DD.");
+      Alert.alert("Calendrier", "La date de planification du repas doit être au format YYYY-MM-DD.");
       return;
     }
 
@@ -1535,7 +1535,7 @@ export default function CalendarScreen() {
 
     const servings = Number.parseInt(mealPlanServings, 10);
     if (!Number.isFinite(servings) || servings < 1 || servings > 30) {
-      Alert.alert("Calendrier", "Le nombre de portions doit Ãªtre compris entre 1 et 30.");
+      Alert.alert("Calendrier", "Le nombre de portions doit être compris entre 1 et 30.");
       return;
     }
 
@@ -1594,7 +1594,7 @@ export default function CalendarScreen() {
     reason?: string | null
   ): Promise<boolean> => {
     if (!settings.absence_tracking_enabled) {
-      Alert.alert("Calendrier", "Le suivi des absences est dÃ©sactivÃ© pour ce foyer.");
+      Alert.alert("Calendrier", "Le suivi des absences est désactivé pour ce foyer.");
       return false;
     }
 
@@ -1607,7 +1607,7 @@ export default function CalendarScreen() {
       await loadBoard({ silent: true });
       return true;
     } catch (error: any) {
-      Alert.alert("Calendrier", error?.message || "Impossible d'enregistrer la prÃ©sence au repas.");
+      Alert.alert("Calendrier", error?.message || "Impossible d'enregistrer la présence au repas.");
       return false;
     } finally {
       setSaving(false);
@@ -1628,7 +1628,7 @@ export default function CalendarScreen() {
       await loadBoard({ silent: true });
       return true;
     } catch (error: any) {
-      Alert.alert("Calendrier", error?.message || "Impossible d'enregistrer la participation Ã  l'Ã©vÃ©nement.");
+      Alert.alert("Calendrier", error?.message || "Impossible d'enregistrer la participation à l'événement.");
       return false;
     } finally {
       setSaving(false);
@@ -1718,11 +1718,11 @@ export default function CalendarScreen() {
 
   const openMealPlanShoppingListPicker = async (entry: MealPlanEntry) => {
     if (!permissions.can_manage_meal_plan) {
-      Alert.alert("Calendrier", "Seul un parent peut ajouter un repas Ã  la liste de courses.");
+      Alert.alert("Calendrier", "Seul un parent peut ajouter un repas à la liste de courses.");
       return;
     }
     if (saving) {
-      Alert.alert("Calendrier", "Une action est dÃ©jÃ  en cours. RÃ©essaie dans un instant.");
+      Alert.alert("Calendrier", "Une action est déjà en cours. Réessaie dans un instant.");
       return;
     }
 
@@ -1794,7 +1794,7 @@ export default function CalendarScreen() {
       if (useNewShoppingList) {
         const created = await createShoppingList(newShoppingListTitle);
         if (!created?.id) {
-          Alert.alert("Calendrier", "Impossible de crÃ©er la nouvelle liste.");
+          Alert.alert("Calendrier", "Impossible de créer la nouvelle liste.");
           return;
         }
         targetListId = created.id;
@@ -1802,13 +1802,13 @@ export default function CalendarScreen() {
       }
 
       if (!targetListId) {
-        Alert.alert("Calendrier", "Choisis une liste existante ou crÃ©e-en une nouvelle.");
+        Alert.alert("Calendrier", "Choisis une liste existante ou crée-en une nouvelle.");
         return;
       }
 
       const ingredients = await buildShoppingIngredientsFromRecipeSelections(plannedRecipes);
       if (ingredients.length === 0) {
-        Alert.alert("Calendrier", "Aucun ingrÃ©dient exploitable Ã  ajouter.");
+        Alert.alert("Calendrier", "Aucun ingrédient exploitable à ajouter.");
         return;
       }
 
@@ -1822,14 +1822,14 @@ export default function CalendarScreen() {
 
       Alert.alert(
         "Calendrier",
-        `${addedCount} ingrÃ©dient(s) ajoutÃ©(s) ? "${targetListTitle}".`,
+        `${addedCount} ingrédient(s) ajouté(s) à "${targetListTitle}".`,
         [
           { text: "Fermer", style: "cancel" },
           { text: "Voir la liste", onPress: () => router.push(`/meal/shopping-list/${targetListId}`) },
         ]
       );
     } catch (error: any) {
-      Alert.alert("Calendrier", error?.message || "Impossible d'ajouter les ingrÃ©dients Ã  la liste de courses.");
+      Alert.alert("Calendrier", error?.message || "Impossible d'ajouter les ingrédients à la liste de courses.");
     } finally {
       setSaving(false);
     }
@@ -1847,7 +1847,7 @@ export default function CalendarScreen() {
       await updateTaskInstance(task.id, { status: nextStatus });
       await loadBoard({ silent: true });
     } catch (error: any) {
-      Alert.alert("Calendrier", error?.message || "Impossible de mettre Ã  jour cette tÃ¢che.");
+      Alert.alert("Calendrier", error?.message || "Impossible de mettre à jour cette tâche.");
     } finally {
       setSaving(false);
     }
@@ -1863,7 +1863,7 @@ export default function CalendarScreen() {
       await validateTaskInstanceService(task.id);
       await loadBoard({ silent: true });
     } catch (error: any) {
-      Alert.alert("Calendrier", error?.message || "Impossible de valider cette tÃ¢che.");
+      Alert.alert("Calendrier", error?.message || "Impossible de valider cette tâche.");
     } finally {
       setSaving(false);
     }
@@ -1903,7 +1903,7 @@ export default function CalendarScreen() {
           <View style={{ flex: 1 }}>
             <Text style={[styles.headerTitle, { color: theme.text }]}>Calendrier familial</Text>
             <Text style={[styles.headerSubtitle, { color: theme.textSecondary }]}>
-              Ã‰vÃ©nements du foyer, tÃ¢ches Ã  effectuer, repas validÃ©s et partage inter-foyers.
+              Événements du foyer, tâches à effectuer, repas validés et partage inter-foyers.
             </Text>
           </View>
           {canManageHouseholdConfig ? (
@@ -1919,9 +1919,9 @@ export default function CalendarScreen() {
 
       {!calendarEnabled ? (
         <View style={[styles.card, { backgroundColor: theme.card }]}>
-          <Text style={[styles.cardTitle, { color: theme.text }]}>Module dÃ©sactivÃ©</Text>
+          <Text style={[styles.cardTitle, { color: theme.text }]}>Module désactivé</Text>
           <Text style={[styles.bodyText, { color: theme.textSecondary }]}>
-            Active le module calendrier dans la configuration du foyer pour afficher l&apos;agenda partagÃ©.
+            Active le module calendrier dans la configuration du foyer pour afficher l&apos;agenda partagé.
           </Text>
           {canManageHouseholdConfig ? (
             <TouchableOpacity
@@ -1937,7 +1937,7 @@ export default function CalendarScreen() {
           <View style={styles.statsRow}>
             <View style={[styles.statCard, { backgroundColor: theme.card }]}>
               <Text style={[styles.statValue, { color: theme.text }]}>{stats.events}</Text>
-              <Text style={[styles.statLabel, { color: theme.textSecondary }]}>Ã‰vÃ©nements</Text>
+              <Text style={[styles.statLabel, { color: theme.textSecondary }]}>Événements</Text>
             </View>
             <View style={[styles.statCard, { backgroundColor: theme.card }]}>
               <Text style={[styles.statValue, { color: theme.text }]}>{stats.shared}</Text>
@@ -1945,7 +1945,7 @@ export default function CalendarScreen() {
             </View>
             <View style={[styles.statCard, { backgroundColor: theme.card }]}>
               <Text style={[styles.statValue, { color: theme.text }]}>{stats.meals}</Text>
-              <Text style={[styles.statLabel, { color: theme.textSecondary }]}>Repas planifiÃ©s</Text>
+              <Text style={[styles.statLabel, { color: theme.textSecondary }]}>Repas planifiés</Text>
             </View>
           </View>
 
@@ -2075,7 +2075,7 @@ export default function CalendarScreen() {
                 />
               ) : (
                 <Text style={[styles.bodyText, { color: theme.textSecondary }]}>
-                  Aucun repas validÃ© pour cette journÃ©e.
+                  Aucun repas validé pour cette journée.
                 </Text>
               )}
             </View>
@@ -2083,11 +2083,11 @@ export default function CalendarScreen() {
             <View style={styles.sectionBlock}>
               <View style={styles.sectionTitleRow}>
                 <MaterialCommunityIcons name="checkbox-marked-circle-outline" size={18} color="#7C5CFA" />
-                <Text style={[styles.sectionTitle, { color: theme.text }]}>TÃ¢ches</Text>
+                <Text style={[styles.sectionTitle, { color: theme.text }]}>Tâches</Text>
               </View>
               {!tasksEnabled ? (
                 <Text style={[styles.bodyText, { color: theme.textSecondary }]}>
-                  Le module tÃ¢ches est dÃ©sactivÃ© pour ce foyer.
+                  Le module tâches est désactivé pour ce foyer.
                 </Text>
               ) : selectedDayTasks.length > 0 ? (
                 <FlatList
@@ -2100,7 +2100,7 @@ export default function CalendarScreen() {
                 />
               ) : (
                 <Text style={[styles.bodyText, { color: theme.textSecondary }]}>
-                  Aucune tÃ¢che prÃ©vue pour cette journÃ©e.
+                  Aucune tâche prévue pour cette journée.
                 </Text>
               )}
             </View>
@@ -2108,7 +2108,7 @@ export default function CalendarScreen() {
             <View style={styles.sectionBlock}>
               <View style={styles.sectionTitleRow}>
                 <MaterialCommunityIcons name="calendar-clock-outline" size={18} color={theme.tint} />
-                <Text style={[styles.sectionTitle, { color: theme.text }]}>Ã©vÃ©nements</Text>
+                <Text style={[styles.sectionTitle, { color: theme.text }]}>Événements</Text>
               </View>
               {selectedDayEvents.length > 0 ? (
                 <FlatList
@@ -2121,7 +2121,7 @@ export default function CalendarScreen() {
                 />
               ) : (
                 <Text style={[styles.bodyText, { color: theme.textSecondary }]}>
-                  Aucun Ã©vÃ©nement sur cette journÃ©e.
+                  Aucun événement sur cette journée.
                 </Text>
               )}
             </View>
@@ -2143,8 +2143,8 @@ export default function CalendarScreen() {
 
                 <Text style={[styles.bodyText, { color: theme.textSecondary, marginBottom: 8 }]}>
                   {pendingReasonAction?.kind === "meal"
-                    ? "Ajoutez un motif si vous ne participez pas au repas Ã  la maison."
-                    : "Ajoutez un motif si vous ne participez pas Ã  l'Ã©vÃ©nement."}
+                    ? "Ajoutez un motif si vous ne participez pas au repas à la maison."
+                    : "Ajoutez un motif si vous ne participez pas à l'événement."}
                 </Text>
 
                 <TextInput
@@ -2155,7 +2155,7 @@ export default function CalendarScreen() {
                   ]}
                   value={reasonInput}
                   onChangeText={setReasonInput}
-                  placeholder="Ex: activitÃ© extÃ©rieure, retour tardif..."
+                  placeholder="Ex: activité extérieure, retour tardif..."
                   placeholderTextColor={theme.textSecondary}
                   multiline
                 />
@@ -2250,7 +2250,7 @@ export default function CalendarScreen() {
                   ) : (
                     <Text style={[styles.helperText, { color: theme.textSecondary }]}>
                       {mealPlanSearch.trim().length > 0
-                        ? "Aucune recette ne correspond Ã  cette recherche."
+                        ? "Aucune recette ne correspond à cette recherche."
                         : "Aucune recette disponible pour modifier ce repas."}
                     </Text>
                   )}
@@ -2322,8 +2322,8 @@ export default function CalendarScreen() {
 
           <ShoppingListPickerModal
             visible={shoppingPickerVisible}
-            title={pendingMealPlanForShopping ? "Ajouter ce repas Ã  la liste de courses" : "Ajouter Ã  la liste de courses"}
-            confirmLabel="Ajouter les ingrÃ©dients"
+            title={pendingMealPlanForShopping ? "Ajouter ce repas à la liste de courses" : "Ajouter à la liste de courses"}
+            confirmLabel="Ajouter les ingrédients"
             theme={theme}
             saving={saving}
             lists={shoppingLists}
@@ -2342,7 +2342,7 @@ export default function CalendarScreen() {
               <View style={[styles.modalCard, { backgroundColor: theme.card }]}>
                 <View style={styles.cardTitleRow}>
                   <Text style={[styles.cardTitle, { color: theme.text, marginBottom: 0 }]}>
-                    {editingEventId ? "Modifier l'Ã©vÃ©nement" : createEntryType === "meal_plan" ? "Nouveau repas" : createEntryType === "task" ? "Nouvelle tÃ¢che" : "Nouvel Ã©vÃ©nement"}
+                    {editingEventId ? "Modifier l'événement" : createEntryType === "meal_plan" ? "Nouveau repas" : createEntryType === "task" ? "Nouvelle tâche" : "Nouvel événement"}
                   </Text>
                   <TouchableOpacity onPress={closeEventModal} disabled={saving}>
                     <MaterialCommunityIcons name="close" size={22} color={theme.tint} />
@@ -2361,7 +2361,7 @@ export default function CalendarScreen() {
                             createEntryType === "event" && { borderColor: theme.tint, backgroundColor: `${theme.tint}18` },
                           ]}
                         >
-                          <Text style={{ color: theme.text }}>Ã‰vÃ©nement</Text>
+                          <Text style={{ color: theme.text }}>Événement</Text>
                         </TouchableOpacity>
                         <TouchableOpacity
                           onPress={() => selectCreateEntryType("meal_plan")}
@@ -2385,21 +2385,21 @@ export default function CalendarScreen() {
                           ]}
                           disabled={!tasksEnabled || !canManageTaskInstances}
                         >
-                          <Text style={{ color: theme.text }}>TÃ¢che</Text>
+                          <Text style={{ color: theme.text }}>Tâche</Text>
                         </TouchableOpacity>
                       </View>
                       {!permissions.can_manage_meal_plan ? (
                         <Text style={[styles.helperText, { color: theme.textSecondary }]}>
-                          La planification de repas est rÃ©servÃ©e Ã  un parent.
+                          La planification de repas est réservée à un parent.
                         </Text>
                       ) : null}
                       {!tasksEnabled ? (
                         <Text style={[styles.helperText, { color: theme.textSecondary }]}>
-                          Le module tÃ¢ches est dÃ©sactivÃ© pour ce foyer.
+                          Le module tâches est désactivé pour ce foyer.
                         </Text>
                       ) : !canManageTaskInstances ? (
                         <Text style={[styles.helperText, { color: theme.textSecondary }]}>
-                          La crÃ©ation de tÃ¢ches est rÃ©servÃ©e Ã  un parent.
+                          La création de tâches est réservée à un parent.
                         </Text>
                       ) : null}
                     </>
@@ -2468,7 +2468,7 @@ export default function CalendarScreen() {
 
                   {timeWheelVisible ? renderTimeWheelPanel() : null}
 
-                  <Text style={[styles.label, { color: theme.text }]}>VisibilitÃ© inter-foyers</Text>
+                  <Text style={[styles.label, { color: theme.text }]}>Visibilité inter-foyers</Text>
                   <View style={styles.visibilityRow}>
                     <TouchableOpacity
                       onPress={() => setShareWithOtherHousehold(false)}
@@ -2478,7 +2478,7 @@ export default function CalendarScreen() {
                         !shareWithOtherHousehold && { borderColor: theme.tint, backgroundColor: `${theme.tint}18` },
                       ]}
                     >
-                      <Text style={{ color: theme.text }}>PrivÃ© au foyer</Text>
+                      <Text style={{ color: theme.text }}>Privé au foyer</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
                       onPress={() => {
@@ -2499,15 +2499,15 @@ export default function CalendarScreen() {
 
                   {!settings.shared_view_enabled ? (
                     <Text style={[styles.helperText, { color: theme.textSecondary }]}>
-                      Le partage inter-foyers est dÃ©sactivÃ© dans la configuration du foyer.
+                      Le partage inter-foyers est désactivé dans la configuration du foyer.
                     </Text>
                   ) : !permissions.can_share_with_other_household ? (
                     <Text style={[styles.helperText, { color: theme.textSecondary }]}>
-                      Le partage d&apos;un Ã©vÃ©nement vers un autre foyer est rÃ©servÃ© Ã  un parent.
+                      Le partage d&apos;un événement vers un autre foyer est réservé à un parent.
                     </Text>
                   ) : (
                     <Text style={[styles.helperText, { color: theme.textSecondary }]}>
-                      Choisis si cet Ã©vÃ©nement doit rester interne au foyer ou Ãªtre visible dans l&apos;autre foyer.
+                      Choisis si cet événement doit rester interne au foyer ou être visible dans l&apos;autre foyer.
                     </Text>
                   )}
                     </>
@@ -2572,7 +2572,7 @@ export default function CalendarScreen() {
                       ) : (
                         <Text style={[styles.helperText, { color: theme.textSecondary }]}>
                           {mealPlanSearch.trim().length > 0
-                            ? "Aucune recette ne correspond Ã  cette recherche."
+                            ? "Aucune recette ne correspond à cette recherche."
                             : "Aucune recette disponible."}
                         </Text>
                       )}
@@ -2623,7 +2623,7 @@ export default function CalendarScreen() {
                         style={[styles.input, { backgroundColor: theme.background, color: theme.text, borderColor: theme.icon }]}
                         value={taskTitle}
                         onChangeText={setTaskTitle}
-                        placeholder="Titre de la tÃ¢che"
+                        placeholder="Titre de la tâche"
                         placeholderTextColor={theme.textSecondary}
                       />
                       <TextInput
@@ -2638,7 +2638,7 @@ export default function CalendarScreen() {
                         placeholderTextColor={theme.textSecondary}
                         multiline
                       />
-                      <Text style={[styles.label, { color: theme.text }]}>Date de dÃ©but</Text>
+                      <Text style={[styles.label, { color: theme.text }]}>Date de début</Text>
                       <TouchableOpacity
                         onPress={() => openDateWheel("task_start")}
                         style={[styles.pickerFieldBtn, { borderColor: theme.icon, backgroundColor: theme.background }]}
@@ -2659,9 +2659,9 @@ export default function CalendarScreen() {
                       </TouchableOpacity>
                       {dateWheelVisible && dateWheelTarget === "task_end" ? renderDateWheelPanel() : null}
                       <Text style={[styles.helperText, { color: theme.textSecondary }]}>
-                        La date de fin est automatiquement ajustÃ©e si elle est avant la date de dÃ©but.
+                        La date de fin est automatiquement ajustée si elle est avant la date de début.
                       </Text>
-                      <Text style={[styles.label, { color: theme.text }]}>Attribuer Ã </Text>
+                      <Text style={[styles.label, { color: theme.text }]}>Attribuer à</Text>
                       {assignableTaskMembers.length > 0 ? (
                         <ScrollView keyboardShouldPersistTaps="handled" horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.recipePickerRow}>
                           {assignableTaskMembers.map((member) => (

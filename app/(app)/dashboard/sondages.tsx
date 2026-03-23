@@ -168,7 +168,7 @@ export default function DashboardPollsScreen() {
     }
 
     return (
-      <TouchableOpacity style={styles.sectionHeaderRow} onPress={onToggle} activeOpacity={0.8}>
+      <TouchableOpacity style={styles.sectionHeaderRow} activeOpacity={0.7} onPress={onToggle}>
         <Text style={[styles.sectionTitle, { color: theme.text }]}>{title}</Text>
         <MaterialCommunityIcons
           name={opened ? "chevron-up" : "chevron-down"}
@@ -241,7 +241,7 @@ export default function DashboardPollsScreen() {
       <Stack.Screen options={{ headerShown: false }} />
 
       <View style={[styles.header, { borderBottomColor: theme.icon, paddingTop: Math.max(insets.top, 12) }]}>
-        <TouchableOpacity onPress={() => router.replace("/dashboard")} style={[styles.backBtn, { borderColor: theme.icon }]}>
+        <TouchableOpacity activeOpacity={0.7} onPress={() => router.replace("/dashboard")} style={[styles.backBtn, { borderColor: theme.icon }]}>
           <MaterialCommunityIcons name="arrow-left" size={20} color={theme.tint} />
         </TouchableOpacity>
         <Text style={[styles.headerTitle, { color: theme.text }]}>Sondages</Text>

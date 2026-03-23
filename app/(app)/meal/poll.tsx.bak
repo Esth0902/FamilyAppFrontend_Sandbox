@@ -222,6 +222,7 @@ export default function MealPollScreen() {
   const { householdId, role } = useStoredUserState();
   const isParent = role === "parent";
 
+  const [aiLoading, setAiLoading] = useState(false);
 
   const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [activePoll, setActivePoll] = useState<Poll | null>(null);
@@ -331,23 +332,15 @@ export default function MealPollScreen() {
   const voteLimit = activePoll?.max_votes_per_user ?? maxVotesPerUser;
   const canSubmitVotes = !!activePoll && activePoll.status === "open" && draftVoteOptionIds.length === voteLimit;
 
-  const mealPollQueryKey = useMemo(() => ["mealPoll", "active", householdId ?? 0] as const, [householdId]);
-  const shoppingListsQueryKey = useMemo(() => ["shoppingLists", householdId ?? 0] as const, [householdId]);
+  const load = useCallback(async (options?: { silent?: boolean; showError?: boolean }) => {
+    const silent = options?.silent ?? false;
+    const showError = options?.showError ?? !silent;
 
-  const invalidateMealPoll = useCallback(async () => {
-    await queryClient.invalidateQueries({ queryKey: mealPollQueryKey });
-  }, [mealPollQueryKey, queryClient]);
+    if (!silent) {
+      setLoading(true);
+    }
 
-  const invalidateRecipes = useCallback(async () => {
-    await queryClient.invalidateQueries({ queryKey: queryKeys.recipes.root(householdId) });
-  }, [householdId, queryClient]);
-
-  const mealPollQuery = useQuery({
-    queryKey: mealPollQueryKey,
-    enabled: Boolean(householdId),
-    refetchInterval: 12000,
-    refetchIntervalInBackground: true,
-    queryFn: async () => {
+    try {
       await refreshStoredUserFromStorage();
       const sessionState = getStoredUserStateSnapshot();
       const currentRole = sessionState.role ?? role;
@@ -370,109 +363,86 @@ export default function MealPollScreen() {
           configuredDefaultServings = Number.isInteger(mealsSettings?.default_servings)
             ? clamp(Number(mealsSettings.default_servings), 1, 30)
             : 4;
+          setDefaultServings(configuredDefaultServings);
         } catch {
-          configuredDefaultServings = 4;
+          setDefaultServings(4);
         }
+      } else {
+        setDefaultServings(4);
       }
 
       const pollResponse = await apiFetch("/meal-polls/active");
       const poll: Poll | null = pollResponse?.poll ?? null;
+
       const pollRecipes = Array.isArray(poll?.options)
         ? poll.options
           .map((option) => option.recipe)
           .filter((recipe): recipe is Recipe => Boolean(recipe?.id && recipe?.title))
         : [];
+      setRecipes((previousRecipes) => mergeUniqueRecipes(previousRecipes, pollRecipes));
+      setActivePoll(poll);
 
-      return {
-        poll,
-        pollRecipes,
-        currentRole,
-        configuredDuration,
-        configuredMaxVotes,
-        configuredDefaultServings,
-      };
-    },
-  });
+      if (poll) {
+        createDefaultsAppliedRef.current = false;
+      } else if (currentRole === "parent" && !createDefaultsAppliedRef.current) {
+        setDurationHours(configuredDuration);
+        setMaxVotesPerUser(configuredMaxVotes);
+        setPlanningStartDate(todayIso());
+        setPlanningEndDate(addDaysIso(6));
+        createDefaultsAppliedRef.current = true;
+      }
 
-  useEffect(() => {
-    const payload = mealPollQuery.data;
-    if (!payload) {
-      return;
-    }
+      if (poll?.status === "open") {
+        const mineFromPayload = Array.isArray(poll.my_voted_option_ids)
+          ? poll.my_voted_option_ids
+          : poll.options.filter((option) => option.is_voted_by_me).map((option) => option.id);
+        setDraftVoteOptionIds(mineFromPayload);
+      }
 
-    const {
-      poll,
-      pollRecipes,
-      currentRole,
-      configuredDuration,
-      configuredMaxVotes,
-      configuredDefaultServings,
-    } = payload;
+      if (poll?.status === "closed" && currentRole === "parent") {
+        const defaultSelection = [...poll.options]
+          .filter((option) => option.votes_count > 0)
+          .sort((a, b) => b.votes_count - a.votes_count)
+          .map((option) => option.recipe_id);
 
-    setDefaultServings(configuredDefaultServings);
-    setRecipes((previousRecipes) => mergeUniqueRecipes(previousRecipes, pollRecipes));
-    setActivePoll(poll);
+        const fallback = defaultSelection.length > 0 ? defaultSelection : poll.options.slice(0, 3).map((option) => option.recipe_id);
+        setSelectedRecipeIdsForValidation(fallback);
 
-    if (poll) {
-      createDefaultsAppliedRef.current = false;
-    } else if (currentRole === "parent" && !createDefaultsAppliedRef.current) {
-      setDurationHours(configuredDuration);
-      setMaxVotesPerUser(configuredMaxVotes);
-      setPlanningStartDate(todayIso());
-      setPlanningEndDate(addDaysIso(6));
-      createDefaultsAppliedRef.current = true;
-    }
+        setMealPlanAssignments((prev) => {
+          if (Object.keys(prev).length > 0) return prev;
 
-    if (poll?.status === "open") {
-      const mineFromPayload = Array.isArray(poll.my_voted_option_ids)
-        ? poll.my_voted_option_ids
-        : poll.options.filter((option) => option.is_voted_by_me).map((option) => option.id);
-      setDraftVoteOptionIds(mineFromPayload);
-    }
+          const next: Record<string, MealPlanAssignment> = {};
+          const basePlanningDate = poll.planning_start_date ?? todayIso();
+          fallback.slice(0, 3).forEach((recipeId, index) => {
+            const date = addDaysFromIso(basePlanningDate, index);
+            const slotKey = `${date}_soir`;
+            next[slotKey] = {
+              slotKey,
+              date,
+              meal_type: "soir",
+              recipe_id: recipeId,
+              servings: configuredDefaultServings,
+            };
+          });
 
-    if (poll?.status === "closed" && currentRole === "parent") {
-      const defaultSelection = [...poll.options]
-        .filter((option) => option.votes_count > 0)
-        .sort((a, b) => b.votes_count - a.votes_count)
-        .map((option) => option.recipe_id);
-
-      const fallback = defaultSelection.length > 0 ? defaultSelection : poll.options.slice(0, 3).map((option) => option.recipe_id);
-      setSelectedRecipeIdsForValidation(fallback);
-
-      setMealPlanAssignments((prev) => {
-        if (Object.keys(prev).length > 0) return prev;
-
-        const next: Record<string, MealPlanAssignment> = {};
-        const basePlanningDate = poll.planning_start_date ?? todayIso();
-        fallback.slice(0, 3).forEach((recipeId, index) => {
-          const date = addDaysFromIso(basePlanningDate, index);
-          const slotKey = `${date}_soir`;
-          next[slotKey] = {
-            slotKey,
-            date,
-            meal_type: "soir",
-            recipe_id: recipeId,
-            servings: configuredDefaultServings,
-          };
+          return next;
         });
-
-        return next;
-      });
+      }
+    } catch (error: any) {
+      if (showError) {
+        Alert.alert("Sondage", error?.message || "Impossible de charger les données.");
+      }
+    } finally {
+      if (!silent) {
+        setLoading(false);
+      }
     }
-  }, [mealPollQuery.data]);
-
-  useEffect(() => {
-    if (!mealPollQuery.error) {
-      return;
-    }
-    const error = mealPollQuery.error as { message?: string } | null;
-    Alert.alert("Sondage", error?.message || "Impossible de charger les données.");
-  }, [mealPollQuery.error]);
+  }, [role]);
 
   useFocusEffect(
     useCallback(() => {
-      void invalidateMealPoll();
-    }, [invalidateMealPoll])
+      void load({ silent: false, showError: true });
+    }, [load])
   );
 
   useEffect(() => {
@@ -495,7 +465,7 @@ export default function MealPollScreen() {
 
         reloadTimer = setTimeout(() => {
           if (!isMounted) return;
-          void invalidateMealPoll();
+          void load({ silent: true, showError: false });
         }, 150);
       });
     };
@@ -511,7 +481,7 @@ export default function MealPollScreen() {
         unsubscribeRealtime();
       }
     };
-  }, [householdId, invalidateMealPoll]);
+  }, [householdId, load]);
 
   useEffect(() => {
     if (activePoll?.status !== "open") return;
@@ -604,182 +574,6 @@ export default function MealPollScreen() {
     setShowPollBuilder(true);
   }, []);
 
-  const upsertPollMutation = useMutation({
-    mutationFn: async ({
-      pollId,
-      payload,
-    }: {
-      pollId: number | null;
-      payload: {
-        title: string | null;
-        recipe_ids: number[];
-        planning_start_date: string;
-        planning_end_date: string;
-        duration_hours: number;
-        max_votes_per_user: number;
-      };
-    }) => {
-      return await apiFetch(pollId ? `/meal-polls/${pollId}` : "/meal-polls", {
-        method: pollId ? "PATCH" : "POST",
-        body: JSON.stringify(payload),
-      });
-    },
-    onSuccess: async () => {
-      await invalidateMealPoll();
-    },
-  });
-
-  const createRecipeMutation = useMutation({
-    mutationFn: async (payload: {
-      title: string;
-      type: string;
-      description: string;
-      instructions: string;
-      base_servings: number;
-      ingredients: { name: string; quantity: number; unit: string }[];
-    }) => {
-      return await apiFetch("/recipes", {
-        method: "POST",
-        body: JSON.stringify(payload),
-      });
-    },
-    onSuccess: async () => {
-      await invalidateRecipes();
-    },
-  });
-
-  const previewAiRecipeMutation = useMutation({
-    mutationFn: async (title: string) => {
-      return await apiFetch("/recipes/preview-ai", {
-        method: "POST",
-        body: JSON.stringify({ title }),
-      });
-    },
-  });
-
-  const saveAiRecipeMutation = useMutation({
-    mutationFn: async (payload: AiPreviewRecipe & { household_id: number }) => {
-      return await apiFetch("/recipes/ai-store", {
-        method: "POST",
-        body: JSON.stringify({
-          ...payload,
-          ingredients: payload.ingredients,
-        }),
-      });
-    },
-    onSuccess: async () => {
-      await invalidateRecipes();
-    },
-  });
-
-  const submitVotesMutation = useMutation({
-    mutationFn: async ({ pollId, optionIds }: { pollId: number; optionIds: number[] }) => {
-      return await apiFetch(`/meal-polls/${pollId}/votes/sync`, {
-        method: "POST",
-        body: JSON.stringify({ option_ids: optionIds }),
-      });
-    },
-    onSuccess: async () => {
-      await invalidateMealPoll();
-    },
-  });
-
-  const closePollMutation = useMutation({
-    mutationFn: async (pollId: number) => {
-      return await apiFetch(`/meal-polls/${pollId}/close`, {
-        method: "POST",
-      });
-    },
-    onSuccess: async () => {
-      await invalidateMealPoll();
-    },
-  });
-
-  const loadShoppingListsMutation = useMutation({
-    mutationFn: async () => {
-      return await loadShoppingLists();
-    },
-  });
-
-  const addPollShoppingIngredientsMutation = useMutation({
-    mutationFn: async ({
-      selectedAssignments,
-      selectedListId,
-      existingLists,
-      createNewList,
-      listTitle,
-    }: {
-      selectedAssignments: MealPlanAssignment[];
-      selectedListId: number | null;
-      existingLists: ShoppingListSummary[];
-      createNewList: boolean;
-      listTitle: string;
-    }) => {
-      let targetListId = selectedListId;
-      let targetListTitle = existingLists.find((list) => list.id === selectedListId)?.title ?? "";
-
-      if (createNewList) {
-        const created = await createShoppingList(listTitle);
-        if (!created?.id) {
-          throw new Error("Impossible de créer la nouvelle liste.");
-        }
-        targetListId = created.id;
-        targetListTitle = created.title;
-      }
-
-      if (!targetListId) {
-        throw new Error("Choisis une liste existante ou crée-en une nouvelle.");
-      }
-
-      const recipeSelections = selectedAssignments.map((assignment) => ({
-        recipeId: assignment.recipe_id,
-        servings: clamp(Number(assignment.servings) || 1, 1, 30),
-      }));
-      const ingredients = await buildShoppingIngredientsFromRecipeSelections(recipeSelections);
-      if (ingredients.length === 0) {
-        throw new Error("Aucun ingrédient exploitable à ajouter.");
-      }
-
-      const addedCount = await addIngredientsToShoppingList(targetListId, ingredients);
-      return { addedCount, targetListId, targetListTitle };
-    },
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: shoppingListsQueryKey });
-    },
-  });
-
-  const validatePollMutation = useMutation({
-    mutationFn: async ({
-      pollId,
-      selectedRecipeIds,
-      mealPlan,
-    }: {
-      pollId: number;
-      selectedRecipeIds: number[];
-      mealPlan: { recipe_id: number; date: string; meal_type: MealType; servings: number }[];
-    }) => {
-      return await apiFetch(`/meal-polls/${pollId}/validate`, {
-        method: "POST",
-        body: JSON.stringify({
-          selected_recipe_ids: selectedRecipeIds,
-          meal_plan: mealPlan,
-        }),
-      });
-    },
-    onSuccess: async () => {
-      await invalidateMealPoll();
-    },
-  });
-
-  const aiLoading = previewAiRecipeMutation.isPending;
-  const saving = upsertPollMutation.isPending
-    || createRecipeMutation.isPending
-    || saveAiRecipeMutation.isPending
-    || submitVotesMutation.isPending
-    || closePollMutation.isPending
-    || loadShoppingListsMutation.isPending
-    || addPollShoppingIngredientsMutation.isPending
-    || validatePollMutation.isPending;
   const savePoll = async () => {
     if (selectedRecipeIdsForCreation.length < 2) {
       Alert.alert("Sondage", "Sélectionne au moins 2 plats.");
@@ -808,6 +602,7 @@ export default function MealPollScreen() {
       return;
     }
 
+    setSaving(true);
     try {
       const isEditingOpenPoll = Boolean(showPollBuilder && activePoll && activePoll.status === "open");
       const payload = {
@@ -819,9 +614,9 @@ export default function MealPollScreen() {
         max_votes_per_user: clampedMaxVotesPerUser,
       };
 
-      const response = await upsertPollMutation.mutateAsync({
-        pollId: isEditingOpenPoll ? activePoll?.id ?? null : null,
-        payload,
+      const response = await apiFetch(isEditingOpenPoll ? `/meal-polls/${activePoll?.id}` : "/meal-polls", {
+        method: isEditingOpenPoll ? "PATCH" : "POST",
+        body: JSON.stringify(payload),
       });
 
       const poll: Poll | null = response?.poll ?? null;
@@ -841,8 +636,11 @@ export default function MealPollScreen() {
       Alert.alert("Sondage", isEditingOpenPoll ? "Sondage modifié." : "Sondage ouvert.");
     } catch (error: any) {
       Alert.alert("Sondage", error?.message || "Impossible d'enregistrer ce sondage.");
+    } finally {
+      setSaving(false);
     }
   };
+
   const saveManualRecipeForCreation = async () => {
     const title = manualTitle.trim();
     if (!title) {
@@ -850,14 +648,18 @@ export default function MealPollScreen() {
       return;
     }
 
+    setSaving(true);
     try {
-      const recipe = await createRecipeMutation.mutateAsync({
-        title,
-        type: "plat principal",
-        description: "Ajout manuel depuis création du sondage",
-        instructions: "A compléter",
-        base_servings: 1,
-        ingredients: [{ name: "ingredient", quantity: 1, unit: "unite" }],
+      const recipe = await apiFetch("/recipes", {
+        method: "POST",
+        body: JSON.stringify({
+          title,
+          type: "plat principal",
+          description: "Ajout manuel depuis création du sondage",
+          instructions: "A compléter",
+          base_servings: 1,
+          ingredients: [{ name: "ingredient", quantity: 1, unit: "unite" }],
+        }),
       });
 
       setRecipes((prev) => mergeUniqueRecipes(prev, [recipe]));
@@ -865,8 +667,11 @@ export default function MealPollScreen() {
       setManualTitle("");
     } catch (error: any) {
       Alert.alert("Recette", error?.message || "Impossible d'ajouter ce plat.");
+    } finally {
+      setSaving(false);
     }
   };
+
   const previewAiRecipe = async () => {
     const title = manualTitle.trim();
     if (!title) {
@@ -874,8 +679,12 @@ export default function MealPollScreen() {
       return;
     }
 
+    setAiLoading(true);
     try {
-      const preview = await previewAiRecipeMutation.mutateAsync(title);
+      const preview = await apiFetch("/recipes/preview-ai", {
+        method: "POST",
+        body: JSON.stringify({ title }),
+      });
       const normalizedPreview = normalizeAiPreviewRecipe(preview);
       if (!normalizedPreview) {
         Alert.alert("IA", "La réponse IA est invalide. Réessaie avec un autre intitulé.");
@@ -884,15 +693,23 @@ export default function MealPollScreen() {
       setAiPreview(normalizedPreview);
     } catch (error: any) {
       Alert.alert("IA", error?.message || "Impossible de générer la recette IA.");
+    } finally {
+      setAiLoading(false);
     }
   };
+
   const saveAiRecipe = async () => {
     if (!aiPreview || !householdId) return;
 
+    setSaving(true);
     try {
-      const recipe = await saveAiRecipeMutation.mutateAsync({
-        ...aiPreview,
-        household_id: householdId,
+      const recipe = await apiFetch("/recipes/ai-store", {
+        method: "POST",
+        body: JSON.stringify({
+          ...aiPreview,
+          household_id: householdId,
+          ingredients: aiPreview.ingredients,
+        }),
       });
 
       setRecipes((prev) => mergeUniqueRecipes(prev, [recipe]));
@@ -902,8 +719,11 @@ export default function MealPollScreen() {
       Alert.alert("IA", "Recette IA enregistrée.");
     } catch (error: any) {
       Alert.alert("IA", error?.message || "Impossible d'enregistrer la recette IA.");
+    } finally {
+      setSaving(false);
     }
   };
+
   const toggleDraftVote = (optionId: number) => {
     if (!activePoll || activePoll.status !== "open") return;
 
@@ -930,10 +750,11 @@ export default function MealPollScreen() {
       return;
     }
 
+    setSaving(true);
     try {
-      const response = await submitVotesMutation.mutateAsync({
-        pollId: activePoll.id,
-        optionIds: draftVoteOptionIds,
+      const response = await apiFetch(`/meal-polls/${activePoll.id}/votes/sync`, {
+        method: "POST",
+        body: JSON.stringify({ option_ids: draftVoteOptionIds }),
       });
 
       setActivePoll(response?.poll ?? null);
@@ -941,13 +762,19 @@ export default function MealPollScreen() {
       Alert.alert("Vote", "Ton vote est enregistré.");
     } catch (error: any) {
       Alert.alert("Vote", error?.message || "Impossible d'enregistrer le vote.");
+    } finally {
+      setSaving(false);
     }
   };
+
   const closePoll = async () => {
     if (!activePoll) return;
 
+    setSaving(true);
     try {
-      const response = await closePollMutation.mutateAsync(activePoll.id);
+      const response = await apiFetch(`/meal-polls/${activePoll.id}/close`, {
+        method: "POST",
+      });
 
       const poll: Poll | null = response?.poll ?? null;
       setActivePoll(poll);
@@ -964,8 +791,11 @@ export default function MealPollScreen() {
       Alert.alert("Sondage", "Sondage clôturé.");
     } catch (error: any) {
       Alert.alert("Sondage", error?.message || "Impossible de clôturer le sondage.");
+    } finally {
+      setSaving(false);
     }
   };
+
   const confirmClosePoll = () => {
     if (!activePoll) {
       return;
@@ -1053,8 +883,9 @@ export default function MealPollScreen() {
       return;
     }
 
+    setSaving(true);
     try {
-      const payload = await loadShoppingListsMutation.mutateAsync();
+      const payload = await loadShoppingLists();
       if (!payload.can_manage) {
         Alert.alert("Liste de courses", "Seul un parent peut modifier la liste de courses.");
         return;
@@ -1068,8 +899,11 @@ export default function MealPollScreen() {
       setShoppingPickerVisible(true);
     } catch (error: any) {
       Alert.alert("Liste de courses", error?.message || "Impossible de charger les listes de courses.");
+    } finally {
+      setSaving(false);
     }
   };
+
   const closePollShoppingListPicker = () => {
     if (saving) return;
     setShoppingPickerVisible(false);
@@ -1091,19 +925,38 @@ export default function MealPollScreen() {
       return;
     }
 
+    setSaving(true);
     try {
-      const {
-        addedCount,
-        targetListId,
-        targetListTitle,
-      } = await addPollShoppingIngredientsMutation.mutateAsync({
-        selectedAssignments,
-        selectedListId: selectedShoppingListId,
-        existingLists: shoppingLists,
-        createNewList: useNewShoppingList,
-        listTitle: newShoppingListTitle,
-      });
+      let targetListId = selectedShoppingListId;
+      let targetListTitle = shoppingLists.find((list) => list.id === selectedShoppingListId)?.title ?? "";
 
+      if (useNewShoppingList) {
+        const created = await createShoppingList(newShoppingListTitle);
+        if (!created?.id) {
+          Alert.alert("Liste de courses", "Impossible de créer la nouvelle liste.");
+          return;
+        }
+        targetListId = created.id;
+        targetListTitle = created.title;
+      }
+
+      if (!targetListId) {
+        Alert.alert("Liste de courses", "Choisis une liste existante ou crée-en une nouvelle.");
+        return;
+      }
+
+      const recipeSelections = selectedAssignments.map((assignment) => ({
+        recipeId: assignment.recipe_id,
+        servings: clamp(Number(assignment.servings) || 1, 1, 30),
+      }));
+      const ingredients = await buildShoppingIngredientsFromRecipeSelections(recipeSelections);
+
+      if (ingredients.length === 0) {
+        Alert.alert("Liste de courses", "Aucun ingrédient exploitable à ajouter.");
+        return;
+      }
+
+      const addedCount = await addIngredientsToShoppingList(targetListId, ingredients);
       setShoppingPickerVisible(false);
 
       Alert.alert(
@@ -1116,8 +969,11 @@ export default function MealPollScreen() {
       );
     } catch (error: any) {
       Alert.alert("Liste de courses", error?.message || "Impossible d'ajouter les ingrédients sélectionnés.");
+    } finally {
+      setSaving(false);
     }
   };
+
   const addExistingRecipeToValidation = (recipeId: number) => {
     setSelectedRecipeIdsForValidation((prev) => (prev.includes(recipeId) ? prev : [...prev, recipeId]));
     setValidationSearchRecipe("");
@@ -1131,14 +987,18 @@ export default function MealPollScreen() {
       return;
     }
 
+    setSaving(true);
     try {
-      const recipe = await createRecipeMutation.mutateAsync({
-        title,
-        type: "plat principal",
-        description: "Ajoutée lors de la validation du sondage",
-        instructions: "A compléter",
-        base_servings: 1,
-        ingredients: [{ name: "ingredient", quantity: 1, unit: "unite" }],
+      const recipe = await apiFetch("/recipes", {
+        method: "POST",
+        body: JSON.stringify({
+          title,
+          type: "plat principal",
+          description: "Ajoutée lors de la validation du sondage",
+          instructions: "A compléter",
+          base_servings: 1,
+          ingredients: [{ name: "ingredient", quantity: 1, unit: "unite" }],
+        }),
       });
 
       setRecipes((prev) => mergeUniqueRecipes(prev, [recipe]));
@@ -1147,8 +1007,11 @@ export default function MealPollScreen() {
       openPlanner(recipe.id);
     } catch (error: any) {
       Alert.alert("Validation", error?.message || "Impossible d'ajouter cette recette.");
+    } finally {
+      setSaving(false);
     }
   };
+
   const validatePoll = async () => {
     if (!activePoll) return;
 
@@ -1173,11 +1036,14 @@ export default function MealPollScreen() {
       return;
     }
 
+    setSaving(true);
     try {
-      const response = await validatePollMutation.mutateAsync({
-        pollId: activePoll.id,
-        selectedRecipeIds,
-        mealPlan,
+      const response = await apiFetch(`/meal-polls/${activePoll.id}/validate`, {
+        method: "POST",
+        body: JSON.stringify({
+          selected_recipe_ids: selectedRecipeIds,
+          meal_plan: mealPlan,
+        }),
       });
 
       const selectedFromApi = Array.isArray(response?.selected_recipe_ids)
@@ -1190,8 +1056,11 @@ export default function MealPollScreen() {
       Alert.alert("Validation", "Sondage validé et menu de la semaine enregistré.");
     } catch (error: any) {
       Alert.alert("Validation", error?.message || "Impossible de valider le sondage.");
+    } finally {
+      setSaving(false);
     }
   };
+
   const renderCreateView = () => {
     const isEditingOpenPoll = Boolean(isParent && activePoll?.status === "open" && showPollBuilder);
 
@@ -1739,7 +1608,7 @@ export default function MealPollScreen() {
     );
   };
 
-  if (mealPollQuery.isLoading) {
+  if (loading) {
     return (
       <View style={[styles.center, { backgroundColor: theme.background }]}> 
         <ActivityIndicator size="large" color={theme.tint} />

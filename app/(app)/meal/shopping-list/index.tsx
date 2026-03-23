@@ -1,14 +1,15 @@
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Alert, FlatList, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { Stack, useFocusEffect, useRouter } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { Colors } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import { apiFetch } from "@/src/api/client";
 import { subscribeToHouseholdRealtime } from "@/src/realtime/client";
-import { getStoredHouseholdId } from "@/src/session/user-cache";
+import { useAuthStore } from "@/src/store/useAuthStore";
 
 type ShoppingListSummary = {
   id: number;
@@ -35,12 +36,30 @@ export default function ShoppingListsHomeScreen() {
   const insets = useSafeAreaInsets();
   const colorScheme = useColorScheme();
   const theme = Colors[colorScheme ?? "light"];
+  const queryClient = useQueryClient();
+  const householdId = useAuthStore((state) => {
+    const candidate = Number(state.user?.household_id ?? 0);
+    return Number.isFinite(candidate) && candidate > 0 ? Math.trunc(candidate) : 0;
+  });
 
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [canManage, setCanManage] = useState(false);
-  const [lists, setLists] = useState<ShoppingListSummary[]>([]);
   const [newListTitle, setNewListTitle] = useState("");
+  const shoppingListsQueryKey = useMemo(() => ["shoppingLists", householdId] as const, [householdId]);
+
+  const shoppingListsQuery = useQuery({
+    queryKey: shoppingListsQueryKey,
+    queryFn: async () => {
+      const response = (await apiFetch("/shopping-lists")) as ShoppingListHomePayload;
+      return {
+        can_manage: Boolean(response?.can_manage),
+        lists: Array.isArray(response?.lists) ? response.lists : [],
+      } as ShoppingListHomePayload;
+    },
+    refetchInterval: 12000,
+    refetchIntervalInBackground: true,
+  });
+
+  const canManage = Boolean(shoppingListsQuery.data?.can_manage);
+  const lists = useMemo(() => shoppingListsQuery.data?.lists ?? [], [shoppingListsQuery.data?.lists]);
 
   const sortedLists = useMemo(() => {
     return [...lists].sort((a, b) => {
@@ -50,68 +69,84 @@ export default function ShoppingListsHomeScreen() {
     });
   }, [lists]);
 
-  const loadLists = useCallback(async (options?: { silent?: boolean; showError?: boolean }) => {
-    const silent = options?.silent ?? false;
-    const showError = options?.showError ?? !silent;
-
-    if (!silent) {
-      setLoading(true);
-    }
-
-    try {
-      const response = (await apiFetch("/shopping-lists")) as ShoppingListHomePayload;
-      setCanManage(Boolean(response?.can_manage));
-      setLists(Array.isArray(response?.lists) ? response.lists : []);
-    } catch (error: any) {
-      if (showError) {
-        Alert.alert("Listes de courses", error?.message || "Impossible de charger les listes.");
-      }
-    } finally {
-      if (!silent) {
-        setLoading(false);
-      }
-    }
-  }, []);
+  const invalidateShoppingLists = useCallback(async () => {
+    await queryClient.invalidateQueries({ queryKey: shoppingListsQueryKey });
+  }, [queryClient, shoppingListsQueryKey]);
 
   useFocusEffect(
     useCallback(() => {
+      void invalidateShoppingLists();
+
+      if (!householdId) {
+        return undefined;
+      }
+
       let active = true;
       let unsubscribeRealtime: (() => void) | null = null;
 
-      const bootstrapRealtime = async () => {
-        await loadLists({ silent: false, showError: true });
-
-        if (!active) return;
-
-        const householdId = await getStoredHouseholdId();
-        if (!householdId || !active) return;
-
+      const bindRealtime = async () => {
         unsubscribeRealtime = await subscribeToHouseholdRealtime(householdId, (message) => {
+          if (!active) return;
           if (message?.module !== "shopping_list") return;
-          void loadLists({ silent: true, showError: false });
+          void invalidateShoppingLists();
         }, (error) => {
           if (__DEV__) {
-            console.warn("[shopping-list home] realtime disabled, fallback polling active", error);
+            console.warn("[shopping-list home] realtime invalidation unavailable", error);
           }
         });
       };
 
-      void bootstrapRealtime();
-
-      const fallbackInterval = setInterval(() => {
-        if (!active) return;
-        void loadLists({ silent: true, showError: false });
-      }, 12000);
+      void bindRealtime();
 
       return () => {
         active = false;
         if (unsubscribeRealtime) {
           unsubscribeRealtime();
         }
-        clearInterval(fallbackInterval);
       };
-    }, [loadLists])
+    }, [householdId, invalidateShoppingLists])
   );
+
+  useEffect(() => {
+    if (!shoppingListsQuery.error) {
+      return;
+    }
+    const error = shoppingListsQuery.error as { message?: string } | null;
+    Alert.alert("Listes de courses", error?.message || "Impossible de charger les listes.");
+  }, [shoppingListsQuery.error]);
+
+  const createListMutation = useMutation({
+    mutationFn: async (title: string) => {
+      return await apiFetch("/shopping-lists", {
+        method: "POST",
+        body: JSON.stringify({ title }),
+      });
+    },
+    onSuccess: () => {
+      setNewListTitle("");
+      void invalidateShoppingLists();
+    },
+    onError: (error: unknown) => {
+      const err = error as { message?: string } | null;
+      Alert.alert("Listes de courses", err?.message || "Impossible de créer la liste.");
+    },
+  });
+
+  const deleteListMutation = useMutation({
+    mutationFn: async (listId: number) => {
+      await apiFetch(`/shopping-lists/${listId}`, { method: "DELETE" });
+      return listId;
+    },
+    onSuccess: () => {
+      void invalidateShoppingLists();
+    },
+    onError: (error: unknown) => {
+      const err = error as { message?: string } | null;
+      Alert.alert("Listes de courses", err?.message || "Impossible de supprimer la liste.");
+    },
+  });
+
+  const saving = createListMutation.isPending || deleteListMutation.isPending;
 
   const createList = async () => {
     if (!canManage) return;
@@ -122,28 +157,12 @@ export default function ShoppingListsHomeScreen() {
       return;
     }
 
-    setSaving(true);
     try {
-      const response = await apiFetch("/shopping-lists", {
-        method: "POST",
-        body: JSON.stringify({ title }),
-      });
-
-      const created = response?.list;
-      if (created?.id) {
-        setLists((prev) => [created, ...prev]);
-        setNewListTitle("");
-      } else {
-        await loadLists({ silent: true, showError: true });
-      }
-    } catch (error: any) {
-      Alert.alert("Listes de courses", error?.message || "Impossible de créer la liste.");
-    } finally {
-      setSaving(false);
-    }
+      await createListMutation.mutateAsync(title);
+    } catch {}
   };
 
-  const deleteList = async (list: ShoppingListSummary) => {
+  const deleteList = useCallback(async (list: ShoppingListSummary) => {
     if (!canManage) return;
 
     Alert.alert(
@@ -155,20 +174,14 @@ export default function ShoppingListsHomeScreen() {
           text: "Supprimer",
           style: "destructive",
           onPress: async () => {
-            setSaving(true);
             try {
-              await apiFetch(`/shopping-lists/${list.id}`, { method: "DELETE" });
-              setLists((prev) => prev.filter((item) => item.id !== list.id));
-            } catch (error: any) {
-              Alert.alert("Listes de courses", error?.message || "Impossible de supprimer la liste.");
-            } finally {
-              setSaving(false);
-            }
+              await deleteListMutation.mutateAsync(list.id);
+            } catch {}
           },
         },
       ]
     );
-  };
+  }, [canManage, deleteListMutation]);
 
   const renderShoppingListRow = useCallback(
     ({ item: list }: { item: ShoppingListSummary }) => (
@@ -194,7 +207,7 @@ export default function ShoppingListsHomeScreen() {
     [canManage, deleteList, router, saving, theme.background, theme.icon, theme.text, theme.textSecondary]
   );
 
-  if (loading) {
+  if (shoppingListsQuery.isLoading) {
     return (
       <View style={[styles.center, { backgroundColor: theme.background }]}>
         <ActivityIndicator size="large" color={theme.tint} />

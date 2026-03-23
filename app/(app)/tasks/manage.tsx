@@ -13,7 +13,7 @@ import {
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { Colors } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
@@ -280,13 +280,10 @@ export default function TasksScreen() {
   const initialWeekStart = useMemo(() => weekStartFromDate(new Date()), []);
   const initialTemplateDay = useMemo(() => isoWeekDayFromDate(new Date()), []);
 
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
   const [tasksEnabled, setTasksEnabled] = useState(false);
   const [weekStart, setWeekStart] = useState(initialWeekStart);
   const [plannedWeekStartDay, setPlannedWeekStartDay] = useState<IsoWeekDay>(1);
   const plannedWeekStartDayRef = useRef<IsoWeekDay>(1);
-  const loadBoardRef = useRef<(options?: { silent?: boolean }) => Promise<void>>(async () => {});
   const [canManageTemplates, setCanManageTemplates] = useState(false);
   const [canManageInstances, setCanManageInstances] = useState(false);
   const [members, setMembers] = useState<TaskMember[]>([]);
@@ -479,10 +476,10 @@ export default function TasksScreen() {
           setInstances(rollbackSnapshot);
           return;
         }
-        void loadBoardRef.current({ silent: true });
+        invalidateTaskCaches();
       };
     },
-    []
+    [invalidateTaskCaches]
   );
 
   const toggleManualAssignee = useCallback((memberId: number) => {
@@ -529,65 +526,71 @@ export default function TasksScreen() {
     });
   }, []);
 
-  const loadBoard = useCallback(async (options?: { silent?: boolean }) => {
-    const silent = options?.silent ?? false;
-    if (!silent) {
-      setLoading(true);
-    }
+  const boardRangeToIso = useMemo(
+    () => toIsoDate(addDays(boardWeekStart, 6)),
+    [boardWeekStart]
+  );
+  const tasksBoardQueryKey = useMemo(
+    () => ["tasks", "board", householdId ?? 0, boardWeekStartIso, boardRangeToIso] as const,
+    [boardRangeToIso, boardWeekStartIso, householdId]
+  );
+  const refreshBoard = useCallback(async () => {
+    await queryClient.invalidateQueries({ queryKey: tasksBoardQueryKey });
+  }, [queryClient, tasksBoardQueryKey]);
 
-    try {
-      const rangeFrom = boardWeekStartIso;
-      const rangeTo = toIsoDate(addDays(boardWeekStart, 6));
-      const payload = await apiFetch(`/tasks/board?from=${rangeFrom}&to=${rangeTo}`) as BoardPayload;
-      setTasksEnabled(Boolean(payload?.tasks_enabled));
-      const isAlternatingCustodyEnabled = Boolean(payload?.settings?.alternating_custody_enabled);
-      const homeWeekStartIso = typeof payload?.settings?.custody_home_week_start === "string"
-        ? payload.settings.custody_home_week_start
-        : "";
-      const homeWeekStartDay = isValidIsoDate(homeWeekStartIso)
-        ? normalizeIsoWeekDay(isoWeekDayFromDate(parseIsoDate(homeWeekStartIso)), 1)
-        : null;
-      const nextPlannedWeekStartDay = isAlternatingCustodyEnabled
-        ? (homeWeekStartDay ?? normalizeIsoWeekDay(payload?.settings?.custody_change_day, 1))
-        : 1;
-      if (plannedWeekStartDayRef.current !== nextPlannedWeekStartDay) {
-        plannedWeekStartDayRef.current = nextPlannedWeekStartDay;
-        setPlannedWeekStartDay(nextPlannedWeekStartDay);
-      }
-      setCanManageTemplates(Boolean(payload?.can_manage_templates));
-      setCanManageInstances(Boolean(payload?.can_manage_instances));
-      const payloadCurrentUserId = toPositiveInt(payload?.current_user?.id);
-      const payloadCurrentRole = payload?.current_user?.role === "parent" ? "parent" : "enfant";
-      setCurrentUserId(payloadCurrentUserId);
-      setCurrentUserRole(payloadCurrentRole);
-      setMembers(Array.isArray(payload?.members) ? payload.members : []);
-      setTemplates(Array.isArray(payload?.templates) ? payload.templates : []);
-      setInstances(Array.isArray(payload?.instances) ? payload.instances : []);
-    } catch (error: any) {
-      Alert.alert("Tâches", getApiErrorMessage(error, "Impossible de charger les tâches."));
-    } finally {
-      if (!silent) {
-        setLoading(false);
-      }
-    }
-  }, [boardWeekStart, boardWeekStartIso]);
+  const tasksBoardQuery = useQuery({
+    queryKey: tasksBoardQueryKey,
+    enabled: householdId !== null,
+    queryFn: async () => {
+      return (await apiFetch(`/tasks/board?from=${boardWeekStartIso}&to=${boardRangeToIso}`)) as BoardPayload;
+    },
+  });
+  const loading = tasksBoardQuery.isLoading;
 
   useEffect(() => {
-    loadBoardRef.current = loadBoard;
-  }, [loadBoard]);
+    const payload = tasksBoardQuery.data;
+    if (!payload) {
+      return;
+    }
+
+    setTasksEnabled(Boolean(payload?.tasks_enabled));
+    const isAlternatingCustodyEnabled = Boolean(payload?.settings?.alternating_custody_enabled);
+    const homeWeekStartIso = typeof payload?.settings?.custody_home_week_start === "string"
+      ? payload.settings.custody_home_week_start
+      : "";
+    const homeWeekStartDay = isValidIsoDate(homeWeekStartIso)
+      ? normalizeIsoWeekDay(isoWeekDayFromDate(parseIsoDate(homeWeekStartIso)), 1)
+      : null;
+    const nextPlannedWeekStartDay = isAlternatingCustodyEnabled
+      ? (homeWeekStartDay ?? normalizeIsoWeekDay(payload?.settings?.custody_change_day, 1))
+      : 1;
+    if (plannedWeekStartDayRef.current !== nextPlannedWeekStartDay) {
+      plannedWeekStartDayRef.current = nextPlannedWeekStartDay;
+      setPlannedWeekStartDay(nextPlannedWeekStartDay);
+    }
+    setCanManageTemplates(Boolean(payload?.can_manage_templates));
+    setCanManageInstances(Boolean(payload?.can_manage_instances));
+    const payloadCurrentUserId = toPositiveInt(payload?.current_user?.id);
+    const payloadCurrentRole = payload?.current_user?.role === "parent" ? "parent" : "enfant";
+    setCurrentUserId(payloadCurrentUserId);
+    setCurrentUserRole(payloadCurrentRole);
+    setMembers(Array.isArray(payload?.members) ? payload.members : []);
+    setTemplates(Array.isArray(payload?.templates) ? payload.templates : []);
+    setInstances(Array.isArray(payload?.instances) ? payload.instances : []);
+  }, [tasksBoardQuery.data]);
+
+  useEffect(() => {
+    if (!tasksBoardQuery.error) {
+      return;
+    }
+    Alert.alert("Tâches", getApiErrorMessage(tasksBoardQuery.error, "Impossible de charger les tâches."));
+  }, [tasksBoardQuery.error]);
 
   useFocusEffect(
     useCallback(() => {
-      void loadBoardRef.current();
-    }, [])
+      void refreshBoard();
+    }, [refreshBoard])
   );
-
-  useEffect(() => {
-    if (!isPlannedModule) {
-      return;
-    }
-    void loadBoardRef.current({ silent: true });
-  }, [boardWeekStartIso, isPlannedModule]);
 
   useEffect(() => {
     if (!householdId) {
@@ -601,7 +604,7 @@ export default function TasksScreen() {
       const unsubscribe = await subscribeToHouseholdRealtime(householdId, (message) => {
         if (!active) return;
         if (message?.module !== "tasks") return;
-        void loadBoardRef.current({ silent: true });
+        void refreshBoard();
       });
 
       if (!active) {
@@ -620,7 +623,7 @@ export default function TasksScreen() {
         unsubscribeRealtime();
       }
     };
-  }, [householdId]);
+  }, [householdId, refreshBoard]);
 
   useEffect(() => {
     const parsedUserId = Number(currentUserId ?? 0);
@@ -639,12 +642,12 @@ export default function TasksScreen() {
 
         const module = String(message?.module ?? "");
         const type = String(message?.type ?? "");
-      if (module !== "notifications" || type !== "task_reassignment_invite_responded") {
-        return;
-      }
+        if (module !== "notifications" || type !== "task_reassignment_invite_responded") {
+          return;
+        }
 
-      void loadBoardRef.current({ silent: true });
-    });
+        void refreshBoard();
+      });
 
       if (!active) {
         unsubscribe();
@@ -662,7 +665,7 @@ export default function TasksScreen() {
         unsubscribeRealtime();
       }
     };
-  }, [currentUserId]);
+  }, [currentUserId, refreshBoard]);
 
   useEffect(() => {
     if (!isScheduleModule) {
@@ -997,7 +1000,7 @@ export default function TasksScreen() {
         </View>
       </View>
     ),
-    [currentUserId, members, saving, theme.background, theme.icon, theme.text, theme.textSecondary, theme.tint]
+    [currentUserId, members, theme.background, theme.icon, theme.text, theme.textSecondary, theme.tint]
   );
 
   const renderGroupedInstanceHeader = useCallback(
@@ -1129,7 +1132,90 @@ export default function TasksScreen() {
     setTemplateEndDateWheelVisible(false);
   };
 
-    const saveTemplate = async () => {
+  const upsertTemplateMutation = useMutation({
+    mutationFn: async (input: { templateId: number | null; payload: Record<string, unknown> }) => {
+      if (input.templateId) {
+        await apiFetch(`/tasks/templates/${input.templateId}`, {
+          method: "PATCH",
+          body: JSON.stringify(input.payload),
+        });
+        return;
+      }
+      await apiFetch("/tasks/templates", {
+        method: "POST",
+        body: JSON.stringify(input.payload),
+      });
+    },
+    onSuccess: () => {
+      invalidateTaskCaches();
+    },
+  });
+
+  const deleteTemplateMutation = useMutation({
+    mutationFn: async (templateId: number) => {
+      await apiFetch(`/tasks/templates/${templateId}`, { method: "DELETE" });
+      return templateId;
+    },
+    onSuccess: () => {
+      invalidateTaskCaches();
+    },
+  });
+
+  const createManualTaskMutation = useMutation({
+    mutationFn: async (payload: { name: string; description: string | null; due_date: string; end_date: string; user_ids: number[] }) => {
+      await apiFetch("/tasks/instances", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+    },
+    onSuccess: () => {
+      invalidateTaskCaches();
+    },
+  });
+
+  const updateInstanceStatusMutation = useMutation({
+    mutationFn: async (payload: { instanceId: number; status: string }) => {
+      await apiFetch(`/tasks/instances/${payload.instanceId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ status: payload.status }),
+      });
+    },
+    onSuccess: () => {
+      invalidateTaskCaches();
+    },
+  });
+
+  const validateInstanceMutation = useMutation({
+    mutationFn: async (instanceId: number) => {
+      await apiFetch(`/tasks/instances/${instanceId}/validate`, {
+        method: "POST",
+      });
+    },
+    onSuccess: () => {
+      invalidateTaskCaches();
+    },
+  });
+
+  const reassignmentRequestMutation = useMutation({
+    mutationFn: async (payload: { instanceId: number; invitedUserId: number }) => {
+      await apiFetch(`/tasks/instances/${payload.instanceId}/reassignment-request`, {
+        method: "POST",
+        body: JSON.stringify({ invited_user_id: payload.invitedUserId }),
+      });
+    },
+    onSuccess: () => {
+      invalidateTaskCaches();
+    },
+  });
+
+  const saving = upsertTemplateMutation.isPending
+    || deleteTemplateMutation.isPending
+    || createManualTaskMutation.isPending
+    || updateInstanceStatusMutation.isPending
+    || validateInstanceMutation.isPending
+    || reassignmentRequestMutation.isPending;
+
+  const saveTemplate = async () => {
     const cleanName = templateName.trim();
     if (cleanName.length < 2) {
       Alert.alert("Tâches", "Le nom de la routine est obligatoire.");
@@ -1183,7 +1269,6 @@ export default function TasksScreen() {
       return;
     }
 
-    setSaving(true);
     try {
       const payload = {
         name: cleanName,
@@ -1201,25 +1286,15 @@ export default function TasksScreen() {
         fixed_user_id: null,
       };
 
-      if (editingTemplateId) {
-        await apiFetch(`/tasks/templates/${editingTemplateId}`, {
-          method: "PATCH",
-          body: JSON.stringify(payload),
-        });
-      } else {
-        await apiFetch("/tasks/templates", {
-          method: "POST",
-          body: JSON.stringify(payload),
-        });
-      }
+      await upsertTemplateMutation.mutateAsync({
+        templateId: editingTemplateId,
+        payload,
+      });
 
       resetTemplateForm();
-      await loadBoard({ silent: true });
-      invalidateTaskCaches();
+      await refreshBoard();
     } catch (error: any) {
       Alert.alert("Tâches", getApiErrorMessage(error, "Impossible de sauvegarder cette routine."));
-    } finally {
-      setSaving(false);
     }
   };
   const deleteTemplate = async (template: TaskTemplate) => {
@@ -1232,18 +1307,14 @@ export default function TasksScreen() {
           text: "Supprimer",
           style: "destructive",
           onPress: async () => {
-            setSaving(true);
             try {
-              await apiFetch(`/tasks/templates/${template.id}`, { method: "DELETE" });
+              await deleteTemplateMutation.mutateAsync(template.id);
               if (editingTemplateId === template.id) {
                 resetTemplateForm();
               }
-              await loadBoard({ silent: true });
-              invalidateTaskCaches();
+              await refreshBoard();
             } catch (error: any) {
               Alert.alert("Tâches", getApiErrorMessage(error, "Impossible de supprimer cette routine."));
-            } finally {
-              setSaving(false);
             }
           },
         },
@@ -1251,7 +1322,7 @@ export default function TasksScreen() {
     );
   };
 
-    const createManualTask = async () => {
+  const createManualTask = async () => {
     const cleanTitle = manualTitle.trim();
     if (cleanTitle.length < 2) {
       Alert.alert("Tâches", "Le nom de la tâche est obligatoire.");
@@ -1278,17 +1349,13 @@ export default function TasksScreen() {
       return;
     }
 
-    setSaving(true);
     try {
-      await apiFetch("/tasks/instances", {
-        method: "POST",
-        body: JSON.stringify({
-          name: cleanTitle,
-          description: manualDescription.trim() || null,
-          due_date: manualDate,
-          end_date: manualEndDate,
-          user_ids: assigneeIds,
-        }),
+      await createManualTaskMutation.mutateAsync({
+        name: cleanTitle,
+        description: manualDescription.trim() || null,
+        due_date: manualDate,
+        end_date: manualEndDate,
+        user_ids: assigneeIds,
       });
       setManualTitle("");
       setManualDescription("");
@@ -1300,12 +1367,9 @@ export default function TasksScreen() {
       } else if (currentUserId !== null) {
         setSelectedAssigneeIds([currentUserId]);
       }
-      await loadBoard({ silent: true });
-      invalidateTaskCaches();
+      await refreshBoard();
     } catch (error: any) {
       Alert.alert("Tâches", getApiErrorMessage(error, "Impossible de créer cette tâche."));
-    } finally {
-      setSaving(false);
     }
   };
   const toggleInstance = async (instance: TaskInstance) => {
@@ -1321,19 +1385,14 @@ export default function TasksScreen() {
       validated_by_parent: nextStatus === STATUS_TODO ? false : current.validated_by_parent,
     }));
 
-    setSaving(true);
     try {
-      await apiFetch(`/tasks/instances/${instance.id}`, {
-        method: "PATCH",
-        body: JSON.stringify({ status: nextStatus }),
+      await updateInstanceStatusMutation.mutateAsync({
+        instanceId: instance.id,
+        status: nextStatus,
       });
-      invalidateTaskCaches();
-      void loadBoard({ silent: true });
     } catch (error: any) {
       rollback();
       Alert.alert("Tâches", getApiErrorMessage(error, "Impossible de mettre à jour le statut."));
-    } finally {
-      setSaving(false);
     }
   };
 
@@ -1350,19 +1409,14 @@ export default function TasksScreen() {
       validated_by_parent: nextStatus === STATUS_CANCELLED ? false : current.validated_by_parent,
     }));
 
-    setSaving(true);
     try {
-      await apiFetch(`/tasks/instances/${instance.id}`, {
-        method: "PATCH",
-        body: JSON.stringify({ status: nextStatus }),
+      await updateInstanceStatusMutation.mutateAsync({
+        instanceId: instance.id,
+        status: nextStatus,
       });
-      invalidateTaskCaches();
-      void loadBoard({ silent: true });
     } catch (error: any) {
       rollback();
       Alert.alert("Tâches", getApiErrorMessage(error, "Impossible de modifier cette tâche."));
-    } finally {
-      setSaving(false);
     }
   };
 
@@ -1375,38 +1429,26 @@ export default function TasksScreen() {
       validated_by_parent: true,
     }));
 
-    setSaving(true);
     try {
-      await apiFetch(`/tasks/instances/${instance.id}/validate`, {
-        method: "POST",
-      });
-      invalidateTaskCaches();
-      void loadBoard({ silent: true });
+      await validateInstanceMutation.mutateAsync(instance.id);
     } catch (error: any) {
       rollback();
       Alert.alert("Tâches", getApiErrorMessage(error, "Impossible de valider cette tâche."));
-    } finally {
-      setSaving(false);
     }
   };
 
   const sendReassignmentRequest = async (instance: TaskInstance, invitedUserId: number) => {
-    setSaving(true);
     try {
-      await apiFetch(`/tasks/instances/${instance.id}/reassignment-request`, {
-        method: "POST",
-        body: JSON.stringify({ invited_user_id: invitedUserId }),
+      await reassignmentRequestMutation.mutateAsync({
+        instanceId: instance.id,
+        invitedUserId,
       });
       Alert.alert("Tâches", "Demande envoyée.");
-      await loadBoard({ silent: true });
-      invalidateTaskCaches();
+      await refreshBoard();
     } catch (error: any) {
       Alert.alert("Tâches", getApiErrorMessage(error, "Impossible d'envoyer la demande."));
-    } finally {
-      setSaving(false);
     }
   };
-
   const requestInstanceReassignment = (instance: TaskInstance) => {
     if (currentUserId === null) {
       return;

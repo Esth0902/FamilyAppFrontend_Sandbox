@@ -1,14 +1,15 @@
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Alert, FlatList, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { Colors } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import { apiFetch } from "@/src/api/client";
 import { subscribeToHouseholdRealtime } from "@/src/realtime/client";
-import { getStoredHouseholdId } from "@/src/session/user-cache";
+import { useAuthStore } from "@/src/store/useAuthStore";
 
 type ShoppingListItem = {
   id: number;
@@ -88,9 +89,12 @@ export default function ShoppingListDetailScreen() {
   const { id } = useLocalSearchParams<{ id?: string }>();
   const colorScheme = useColorScheme();
   const theme = Colors[colorScheme ?? "light"];
+  const queryClient = useQueryClient();
+  const householdId = useAuthStore((state) => {
+    const candidate = Number(state.user?.household_id ?? 0);
+    return Number.isFinite(candidate) && candidate > 0 ? Math.trunc(candidate) : 0;
+  });
 
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
   const [canManage, setCanManage] = useState(false);
   const [canAddManualItems, setCanAddManualItems] = useState(false);
   const [listTitle, setListTitle] = useState("Liste");
@@ -104,6 +108,8 @@ export default function ShoppingListDetailScreen() {
 
   const listId = Number(id);
   const hasValidId = Number.isInteger(listId) && listId > 0;
+  const shoppingListQueryKey = useMemo(() => ["shoppingList", listId] as const, [listId]);
+  const shoppingListsQueryKey = useMemo(() => ["shoppingLists", householdId] as const, [householdId]);
 
   const sortedItems = useMemo(() => {
     return [...items].sort((a, b) => {
@@ -116,7 +122,7 @@ export default function ShoppingListDetailScreen() {
 
   const recipeKey = (recipe: PlannedRecipeSuggestion) => `${recipe.meal_plan_id}-${recipe.recipe_id}`;
 
-  const upsertItemInState = (item: ShoppingListItem) => {
+  const upsertItemInState = useCallback((item: ShoppingListItem) => {
     setItems((prev) => {
       const existingIndex = prev.findIndex((current) => current.id === item.id);
       if (existingIndex >= 0) {
@@ -126,9 +132,9 @@ export default function ShoppingListDetailScreen() {
       }
       return [item, ...prev];
     });
-  };
+  }, []);
 
-  const markIngredientAddedLocally = (name: string, unit?: string | null) => {
+  const markIngredientAddedLocally = useCallback((name: string, unit?: string | null) => {
     const targetKey = normalizeIngredientKey(undefined, name, unit);
     setPlannedRecipes((prev) =>
       prev.map((recipe) => {
@@ -145,114 +151,184 @@ export default function ShoppingListDetailScreen() {
         };
       })
     );
-  };
+  }, []);
 
-  const loadList = useCallback(async (options?: { silent?: boolean; showError?: boolean }) => {
-    const silent = options?.silent ?? false;
-    const showError = options?.showError ?? !silent;
+  const shoppingListQuery = useQuery({
+    queryKey: shoppingListQueryKey,
+    enabled: hasValidId,
+    queryFn: async () => {
+      return (await apiFetch(`/shopping-lists/${listId}`)) as ShoppingListDetailPayload;
+    },
+    refetchInterval: 10000,
+    refetchIntervalInBackground: true,
+  });
 
-    if (!hasValidId) {
-      if (!silent) {
-        setLoading(false);
-      }
-      return;
-    }
+  const invalidateShoppingList = useCallback(async () => {
+    await queryClient.invalidateQueries({ queryKey: shoppingListQueryKey });
+  }, [queryClient, shoppingListQueryKey]);
 
-    if (!silent) {
-      setLoading(true);
-    }
+  const invalidateShoppingData = useCallback(async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: shoppingListQueryKey }),
+      queryClient.invalidateQueries({ queryKey: shoppingListsQueryKey }),
+    ]);
+  }, [queryClient, shoppingListQueryKey, shoppingListsQueryKey]);
 
-    try {
-      const response = (await apiFetch(`/shopping-lists/${listId}`)) as ShoppingListDetailPayload;
-      setCanManage(Boolean(response?.can_manage));
-      setCanAddManualItems(Boolean(response?.can_add_manual_items ?? response?.can_manage));
-      setListTitle(response?.list?.title ?? "Liste");
-      setItems(Array.isArray(response?.list?.items) ? response.list.items : []);
-      setPlannedRecipes(Array.isArray(response?.planned_recipe_suggestions) ? response.planned_recipe_suggestions : []);
+  useEffect(() => {
+    if (!shoppingListQuery.data) return;
+    const response = shoppingListQuery.data;
+    setCanManage(Boolean(response?.can_manage));
+    setCanAddManualItems(Boolean(response?.can_add_manual_items ?? response?.can_manage));
+    setListTitle(response?.list?.title ?? "Liste");
+    setItems(Array.isArray(response?.list?.items) ? response.list.items : []);
+    setPlannedRecipes(Array.isArray(response?.planned_recipe_suggestions) ? response.planned_recipe_suggestions : []);
+  }, [shoppingListQuery.data]);
 
-      if (!silent) {
-        setExpandedRecipeKeys([]);
-      }
-    } catch (error: any) {
-      if (showError) {
-        Alert.alert("Liste de courses", error?.message || "Impossible de charger la liste.");
-      }
-    } finally {
-      if (!silent) {
-        setLoading(false);
-      }
-    }
-  }, [hasValidId, listId]);
+  useEffect(() => {
+    setExpandedRecipeKeys([]);
+  }, [listId]);
+
+  useEffect(() => {
+    if (!shoppingListQuery.error) return;
+    const error = shoppingListQuery.error as { message?: string } | null;
+    Alert.alert("Liste de courses", error?.message || "Impossible de charger la liste.");
+  }, [shoppingListQuery.error]);
 
   useFocusEffect(
     useCallback(() => {
+      void invalidateShoppingList();
+
+      if (!householdId || !hasValidId) {
+        return undefined;
+      }
+
       let active = true;
       let unsubscribeRealtime: (() => void) | null = null;
 
-      const bootstrapRealtime = async () => {
-        await loadList({ silent: false, showError: true });
-
-        if (!active) return;
-
-        const householdId = await getStoredHouseholdId();
-        if (!householdId || !active) return;
-
+      const bindRealtime = async () => {
         unsubscribeRealtime = await subscribeToHouseholdRealtime(householdId, (message) => {
+          if (!active) return;
           if (message?.module !== "shopping_list") return;
 
           const payloadListId = Number((message?.payload as Record<string, unknown> | undefined)?.list_id ?? 0) || null;
           if (payloadListId && payloadListId !== listId) return;
 
-          void loadList({ silent: true, showError: false });
+          void invalidateShoppingList();
         }, (error) => {
           if (__DEV__) {
-            console.warn("[shopping-list detail] realtime disabled, fallback polling active", error);
+            console.warn("[shopping-list detail] realtime invalidation unavailable", error);
           }
         });
       };
 
-      void bootstrapRealtime();
-
-      const fallbackInterval = setInterval(() => {
-        if (!active) return;
-        void loadList({ silent: true, showError: false });
-      }, 10000);
+      void bindRealtime();
 
       return () => {
         active = false;
         if (unsubscribeRealtime) {
           unsubscribeRealtime();
         }
-        clearInterval(fallbackInterval);
       };
-    }, [listId, loadList])
+    }, [hasValidId, householdId, invalidateShoppingList, listId])
   );
 
-  const toggleChecked = async (item: ShoppingListItem) => {
-    try {
-      const updated = await apiFetch(`/shopping-lists/items/${item.id}`, {
+  const toggleCheckedMutation = useMutation({
+    mutationFn: async (item: ShoppingListItem) => {
+      return (await apiFetch(`/shopping-lists/items/${item.id}`, {
         method: "PATCH",
         body: JSON.stringify({ is_checked: !item.is_checked }),
-      });
+      })) as ShoppingListItem;
+    },
+    onSuccess: () => {
+      void invalidateShoppingData();
+    },
+  });
+
+  const deleteItemMutation = useMutation({
+    mutationFn: async (itemId: number) => {
+      await apiFetch(`/shopping-lists/items/${itemId}`, { method: "DELETE" });
+      return itemId;
+    },
+    onSuccess: () => {
+      void invalidateShoppingData();
+    },
+  });
+
+  const addItemMutation = useMutation({
+    mutationFn: async (payload: Record<string, unknown>) => {
+      return (await apiFetch(`/shopping-lists/${listId}/items`, {
+        method: "POST",
+        body: JSON.stringify(payload),
+      })) as ShoppingListItem;
+    },
+    onSuccess: () => {
+      void invalidateShoppingData();
+    },
+  });
+
+  const addAllPlannedIngredientsMutation = useMutation({
+    mutationFn: async (ingredients: RecipeIngredientSuggestion[]) => {
+      const createdItems: ShoppingListItem[] = [];
+
+      for (const ingredient of ingredients) {
+        const payload: Record<string, unknown> = {
+          ingredient_id: ingredient.ingredient_id ?? null,
+          name: ingredient.name,
+          unit: ingredient.unit ?? null,
+          is_manual_addition: false,
+        };
+
+        const parsedQty = Number(ingredient.quantity);
+        if (Number.isFinite(parsedQty)) {
+          payload.quantity = parsedQty;
+        }
+
+        const created = (await apiFetch(`/shopping-lists/${listId}/items`, {
+          method: "POST",
+          body: JSON.stringify(payload),
+        })) as ShoppingListItem;
+
+        createdItems.push(created);
+      }
+
+      return createdItems;
+    },
+    onSuccess: () => {
+      void invalidateShoppingData();
+    },
+  });
+
+  const saving = addItemMutation.isPending || addAllPlannedIngredientsMutation.isPending || deleteItemMutation.isPending;
+
+  const toggleChecked = useCallback(async (item: ShoppingListItem) => {
+    const previousItems = items;
+    setItems((prev) =>
+      prev.map((current) =>
+        current.id === item.id
+          ? { ...current, is_checked: !current.is_checked }
+          : current
+      )
+    );
+
+    try {
+      const updated = await toggleCheckedMutation.mutateAsync(item);
       setItems((prev) => prev.map((current) => (current.id === item.id ? updated : current)));
     } catch (error: any) {
+      setItems(previousItems);
       Alert.alert("Liste de courses", error?.message || "Impossible de mettre à jour l'élément.");
     }
-  };
+  }, [items, toggleCheckedMutation]);
 
-  const deleteItem = async (itemId: number) => {
+  const deleteItem = useCallback(async (itemId: number) => {
     if (!canManage) return;
 
-    setSaving(true);
     try {
-      await apiFetch(`/shopping-lists/items/${itemId}`, { method: "DELETE" });
+      await deleteItemMutation.mutateAsync(itemId);
       setItems((prev) => prev.filter((item) => item.id !== itemId));
     } catch (error: any) {
       Alert.alert("Liste de courses", error?.message || "Impossible de supprimer cet élément.");
-    } finally {
-      setSaving(false);
     }
-  };
+  }, [canManage, deleteItemMutation]);
 
   const addManualItem = async () => {
     if (!canAddManualItems || !hasValidId) return;
@@ -263,7 +339,6 @@ export default function ShoppingListDetailScreen() {
       return;
     }
 
-    setSaving(true);
     try {
       const payload: Record<string, unknown> = {
         name,
@@ -275,16 +350,12 @@ export default function ShoppingListDetailScreen() {
         const parsed = Number(rawQty.replace(",", "."));
         if (!Number.isFinite(parsed) || parsed < 0) {
           Alert.alert("Liste de courses", "La quantité doit être numérique.");
-          setSaving(false);
           return;
         }
         payload.quantity = parsed;
       }
 
-      const created = await apiFetch(`/shopping-lists/${listId}/items`, {
-        method: "POST",
-        body: JSON.stringify(payload),
-      });
+      const created = await addItemMutation.mutateAsync(payload);
 
       upsertItemInState(created);
       setManualName("");
@@ -292,21 +363,18 @@ export default function ShoppingListDetailScreen() {
       setManualUnit("");
     } catch (error: any) {
       Alert.alert("Liste de courses", error?.message || "Impossible d'ajouter cet ingrédient.");
-    } finally {
-      setSaving(false);
     }
   };
 
-  const toggleRecipeExpanded = (recipe: PlannedRecipeSuggestion) => {
+  const toggleRecipeExpanded = useCallback((recipe: PlannedRecipeSuggestion) => {
     const key = recipeKey(recipe);
     setExpandedRecipeKeys((prev) => (prev.includes(key) ? prev.filter((item) => item !== key) : [...prev, key]));
-  };
+  }, []);
 
-  const addPlannedIngredient = async (ingredient: RecipeIngredientSuggestion) => {
+  const addPlannedIngredient = useCallback(async (ingredient: RecipeIngredientSuggestion) => {
     if (!canManage || !hasValidId) return;
     if (ingredient.already_in_list) return;
 
-    setSaving(true);
     try {
       const payload: Record<string, unknown> = {
         ingredient_id: ingredient.ingredient_id ?? null,
@@ -320,21 +388,16 @@ export default function ShoppingListDetailScreen() {
         payload.quantity = parsedQty;
       }
 
-      const created = await apiFetch(`/shopping-lists/${listId}/items`, {
-        method: "POST",
-        body: JSON.stringify(payload),
-      });
+      const created = await addItemMutation.mutateAsync(payload);
 
       upsertItemInState(created);
       markIngredientAddedLocally(ingredient.name, ingredient.unit);
     } catch (error: any) {
       Alert.alert("Liste de courses", error?.message || "Impossible d'ajouter cet ingrédient.");
-    } finally {
-      setSaving(false);
     }
-  };
+  }, [addItemMutation, canManage, hasValidId, markIngredientAddedLocally, upsertItemInState]);
 
-  const addAllPlannedIngredients = async (recipe: PlannedRecipeSuggestion) => {
+  const addAllPlannedIngredients = useCallback(async (recipe: PlannedRecipeSuggestion) => {
     if (!canManage || !hasValidId) return;
 
     const alreadyAddedKeys = new Set<string>();
@@ -350,35 +413,18 @@ export default function ShoppingListDetailScreen() {
       return;
     }
 
-    setSaving(true);
     try {
-      for (const ingredient of missingIngredients) {
-        const payload: Record<string, unknown> = {
-          ingredient_id: ingredient.ingredient_id ?? null,
-          name: ingredient.name,
-          unit: ingredient.unit ?? null,
-          is_manual_addition: false,
-        };
-
-        const parsedQty = Number(ingredient.quantity);
-        if (Number.isFinite(parsedQty)) {
-          payload.quantity = parsedQty;
-        }
-
-        const created = await apiFetch(`/shopping-lists/${listId}/items`, {
-          method: "POST",
-          body: JSON.stringify(payload),
-        });
-
+      const createdItems = await addAllPlannedIngredientsMutation.mutateAsync(missingIngredients);
+      createdItems.forEach((created) => {
         upsertItemInState(created);
+      });
+      missingIngredients.forEach((ingredient) => {
         markIngredientAddedLocally(ingredient.name, ingredient.unit);
-      }
+      });
     } catch (error: any) {
       Alert.alert("Liste de courses", error?.message || "Impossible d'ajouter les ingrédients de la recette.");
-    } finally {
-      setSaving(false);
     }
-  };
+  }, [addAllPlannedIngredientsMutation, canManage, hasValidId, markIngredientAddedLocally, upsertItemInState]);
 
   const renderPlannedRecipeItem = useCallback(
     ({ item: recipe }: { item: PlannedRecipeSuggestion }) => {
@@ -458,7 +504,7 @@ export default function ShoppingListDetailScreen() {
         </View>
       );
     },
-    [addAllPlannedIngredients, addPlannedIngredient, canManage, expandedRecipeKeys, saving, theme.background, theme.card, theme.icon, theme.text, theme.textSecondary, theme.tint]
+    [addAllPlannedIngredients, addPlannedIngredient, canManage, expandedRecipeKeys, saving, theme.background, theme.card, theme.icon, theme.text, theme.textSecondary, theme.tint, toggleRecipeExpanded]
   );
 
   const renderShoppingItem = useCallback(
@@ -508,7 +554,7 @@ export default function ShoppingListDetailScreen() {
     [canManage, deleteItem, saving, theme.background, theme.icon, theme.text, theme.textSecondary, theme.tint, toggleChecked]
   );
 
-  if (loading) {
+  if (shoppingListQuery.isLoading) {
     return (
       <View style={[styles.center, { backgroundColor: theme.background }]}>
         <ActivityIndicator size="large" color={theme.tint} />
