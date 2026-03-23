@@ -62,12 +62,14 @@ export default function TabsLayout() {
     const modulesCacheRef = useRef<Record<number, HouseholdModulesState>>({});
     const [householdModules, setHouseholdModules] = useState<HouseholdModulesState>(DEFAULT_HOUSEHOLD_MODULES);
 
-    const activeTabRoute = useMemo<TabsRouteName | null>(() => {
-        if ((segments[0] as string) !== "(tabs)") {
+const activeTabRoute = useMemo<TabsRouteName | null>(() => {
+        const safeSegments = segments as string[];
+
+        if (safeSegments[0] !== "(tabs)") {
             return null;
         }
 
-        const candidate = segments[1] as string;
+        const candidate = safeSegments[1];
         if (
             candidate === "home"
             || candidate === "meal"
@@ -75,9 +77,8 @@ export default function TabsLayout() {
             || candidate === "budget"
             || candidate === "calendar"
         ) {
-            return candidate;
+            return candidate as TabsRouteName;
         }
-
         return null;
     }, [segments]);
 
