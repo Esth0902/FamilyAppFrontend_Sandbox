@@ -1,8 +1,15 @@
 import * as SecureStore from "expo-secure-store";
-import { useEffect, useSyncExternalStore } from "react";
+import { useEffect } from "react";
+import {
+  getAuthStateSnapshot,
+  hydrateAuthState,
+  setAuthState,
+  useAuthStore,
+  type AuthUser,
+} from "@/src/store/useAuthStore";
 
 export type StoredHousehold = {
-  id: number;
+  id?: number;
   name?: string;
   role?: string;
   nickname?: string;
@@ -12,15 +19,8 @@ export type StoredHousehold = {
   };
 };
 
-export type StoredUser = {
-  id?: number;
-  name?: string;
-  email?: string;
-  household_id?: number;
-  role?: string;
+export type StoredUser = AuthUser & {
   households?: StoredHousehold[];
-  must_change_password?: boolean;
-  [key: string]: unknown;
 };
 
 export type StoredUserState = {
@@ -28,29 +28,6 @@ export type StoredUserState = {
   user: StoredUser | null;
   householdId: number | null;
   role: string | null;
-};
-
-const defaultState: StoredUserState = {
-  hydrated: false,
-  user: null,
-  householdId: null,
-  role: null,
-};
-
-let currentState: StoredUserState = defaultState;
-let hydratePromise: Promise<StoredUserState> | null = null;
-const listeners = new Set<() => void>();
-
-const parseStoredUser = (rawUser: string | null): StoredUser | null => {
-  if (!rawUser) {
-    return null;
-  }
-
-  try {
-    return JSON.parse(rawUser) as StoredUser;
-  } catch {
-    return null;
-  }
 };
 
 const toPositiveInteger = (value: unknown): number | null => {
@@ -112,6 +89,24 @@ export const normalizeStoredUser = (
   };
 };
 
+const serializeUserSnapshot = (user: StoredUser | null): string => {
+  try {
+    return JSON.stringify(user ?? null);
+  } catch {
+    return "";
+  }
+};
+
+export const areUserSnapshotsEqual = (
+  left: StoredUser | null,
+  right: StoredUser | null
+): boolean => {
+  if (left === right) {
+    return true;
+  }
+  return serializeUserSnapshot(left) === serializeUserSnapshot(right);
+};
+
 const toHouseholdId = (user: StoredUser | null): number | null => {
   return toPositiveInteger(user?.household_id) ?? toPositiveInteger(user?.households?.[0]?.id);
 };
@@ -125,51 +120,59 @@ const toRole = (user: StoredUser | null): string | null => {
   return typeof role === "string" && role.length > 0 ? role : null;
 };
 
-const emit = () => {
-  listeners.forEach((listener) => listener());
-};
-
 export const setStoredUserCache = (user: StoredUser | null, hydrated = true): StoredUserState => {
   const normalizedUser = normalizeStoredUser(user);
 
-  currentState = {
+  setAuthState({
     hydrated,
+    user: normalizedUser,
+  });
+
+  const snapshot = getAuthStateSnapshot();
+  return {
+    hydrated: snapshot.hydrated,
+    user: normalizeStoredUser(snapshot.user as StoredUser | null),
+    householdId: toHouseholdId(snapshot.user as StoredUser | null),
+    role: toRole(snapshot.user as StoredUser | null),
+  };
+};
+
+export const getStoredUserStateSnapshot = (): StoredUserState => {
+  const snapshot = getAuthStateSnapshot();
+  const normalizedUser = normalizeStoredUser(snapshot.user as StoredUser | null);
+
+  return {
+    hydrated: snapshot.hydrated,
     user: normalizedUser,
     householdId: toHouseholdId(normalizedUser),
     role: toRole(normalizedUser),
   };
-
-  emit();
-  return currentState;
 };
 
-export const getStoredUserStateSnapshot = (): StoredUserState => currentState;
-
 export const subscribeStoredUserState = (listener: () => void): (() => void) => {
-  listeners.add(listener);
-  return () => {
-    listeners.delete(listener);
-  };
+  return useAuthStore.subscribe(() => {
+    listener();
+  });
 };
 
 export const refreshStoredUserFromStorage = async (): Promise<StoredUserState> => {
-  const rawUser = await SecureStore.getItemAsync("user");
-  const parsed = parseStoredUser(rawUser);
-  return setStoredUserCache(parsed, true);
+  const snapshot = await hydrateAuthState();
+  const normalizedUser = normalizeStoredUser(snapshot.user as StoredUser | null);
+
+  if (!areUserSnapshotsEqual(normalizedUser, snapshot.user as StoredUser | null)) {
+    setAuthState({ user: normalizedUser });
+  }
+
+  return {
+    hydrated: true,
+    user: normalizedUser,
+    householdId: toHouseholdId(normalizedUser),
+    role: toRole(normalizedUser),
+  };
 };
 
 export const hydrateStoredUserState = async (): Promise<StoredUserState> => {
-  if (currentState.hydrated) {
-    return currentState;
-  }
-
-  if (!hydratePromise) {
-    hydratePromise = refreshStoredUserFromStorage().finally(() => {
-      hydratePromise = null;
-    });
-  }
-
-  return hydratePromise;
+  return refreshStoredUserFromStorage();
 };
 
 export const persistStoredUser = async (user: StoredUser): Promise<StoredUserState> => {
@@ -183,9 +186,8 @@ export const persistStoredUser = async (user: StoredUser): Promise<StoredUserSta
 };
 
 export const switchStoredHousehold = async (householdId: number): Promise<StoredUserState> => {
-  const rawUser = await SecureStore.getItemAsync("user");
-  const parsedUser = parseStoredUser(rawUser);
-  const normalizedUser = normalizeStoredUser(parsedUser, householdId);
+  const snapshot = await hydrateAuthState();
+  const normalizedUser = normalizeStoredUser(snapshot.user as StoredUser | null, householdId);
 
   if (!normalizedUser) {
     return setStoredUserCache(null, true);
@@ -201,11 +203,15 @@ export const clearStoredUser = async (): Promise<StoredUserState> => {
 };
 
 export const useStoredUserState = (): StoredUserState => {
-  const state = useSyncExternalStore(
-    subscribeStoredUserState,
-    getStoredUserStateSnapshot,
-    getStoredUserStateSnapshot
-  );
+  const hydrated = useAuthStore((state) => state.hydrated);
+  const user = useAuthStore((state) => state.user as StoredUser | null);
+  const normalizedUser = normalizeStoredUser(user);
+  const state = {
+    hydrated,
+    user: normalizedUser,
+    householdId: toHouseholdId(normalizedUser),
+    role: toRole(normalizedUser),
+  };
 
   useEffect(() => {
     if (!state.hydrated) {
@@ -217,8 +223,13 @@ export const useStoredUserState = (): StoredUserState => {
 };
 
 export const getStoredUser = async (): Promise<StoredUser | null> => {
-  const state = await refreshStoredUserFromStorage();
-  return state.user;
+  const snapshot = getAuthStateSnapshot();
+  if (!snapshot.hydrated) {
+    const hydratedSnapshot = await hydrateAuthState();
+    return normalizeStoredUser(hydratedSnapshot.user as StoredUser | null);
+  }
+
+  return normalizeStoredUser(snapshot.user as StoredUser | null);
 };
 
 export const getStoredHouseholdId = async (): Promise<number | null> => {

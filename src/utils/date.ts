@@ -43,6 +43,20 @@ export const addDays = (baseDate: Date, days: number) => {
   return next;
 };
 
+export const startOfMonth = (date: Date) => new Date(date.getFullYear(), date.getMonth(), 1);
+
+export const endOfMonth = (date: Date) => new Date(date.getFullYear(), date.getMonth() + 1, 0);
+
+export const startOfWeekMonday = (date: Date) => {
+  const next = new Date(date);
+  const diff = (next.getDay() + 6) % 7;
+  next.setDate(next.getDate() - diff);
+  return next;
+};
+
+export const isSameMonth = (left: Date, right: Date) =>
+  left.getFullYear() === right.getFullYear() && left.getMonth() === right.getMonth();
+
 export const todayIso = () => toIsoDate(new Date());
 
 export const addDaysIso = (offset: number, anchor: Date = new Date()) => toIsoDate(addDays(anchor, offset));

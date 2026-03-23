@@ -1,6 +1,5 @@
-import * as SecureStore from "expo-secure-store";
-
 import { API_BASE_URL } from "@/src/api/client";
+import { getAuthStateSnapshot, hydrateAuthState } from "@/src/store/useAuthStore";
 import {
   resolvePublicPusherCluster,
   resolvePublicReverbHost,
@@ -171,7 +170,9 @@ const getOrCreatePusher = async (): Promise<PusherInstance | null> => {
     return null;
   }
 
-  const token = await SecureStore.getItemAsync("authToken");
+  const authSnapshot = getAuthStateSnapshot();
+  const hydratedAuth = authSnapshot.hydrated ? authSnapshot : await hydrateAuthState();
+  const token = hydratedAuth.token;
   if (!token) {
     return null;
   }
