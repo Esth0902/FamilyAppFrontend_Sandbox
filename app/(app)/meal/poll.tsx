@@ -22,6 +22,8 @@ import { useColorScheme } from "@/hooks/use-color-scheme";
 import { apiFetch } from "@/src/api/client";
 import { useDebounce } from "@/src/hooks/useDebounce";
 import { useRecipeSearch } from "@/src/hooks/useRecipeSearch";
+import { MEAL_TYPES, MEAL_TYPE_SORT, type MealType } from "@/src/features/calendar/calendar-types";
+import { mergeUniqueRecipes } from "@/src/features/recipes/recipe-utils";
 import {
   addIngredientsToShoppingList,
   buildShoppingIngredientsFromRecipeSelections,
@@ -71,8 +73,6 @@ type Poll = {
   options: PollOption[];
 };
 
-type MealType = "matin" | "midi" | "soir";
-
 type MealPlanAssignment = {
   slotKey: string;
   date: string;
@@ -94,18 +94,6 @@ type AiPreviewRecipe = {
   instructions: string;
   type: string;
   ingredients: AiPreviewIngredient[];
-};
-
-const MEAL_TYPES: { label: string; value: MealType }[] = [
-  { label: "Matin", value: "matin" },
-  { label: "Midi", value: "midi" },
-  { label: "Soir", value: "soir" },
-];
-
-const MEAL_TYPE_SORT: Record<MealType, number> = {
-  matin: 0,
-  midi: 1,
-  soir: 2,
 };
 
 const PLANNING_WEEKDAYS = ["Lu", "Ma", "Me", "Je", "Ve", "Sa", "Di"];
@@ -221,24 +209,6 @@ const normalizeAiPreviewRecipe = (payload: any): AiPreviewRecipe | null => {
     type: String(payload?.type ?? "plat principal"),
     ingredients,
   };
-};
-
-const mergeUniqueRecipes = (current: Recipe[], incoming: Recipe[]): Recipe[] => {
-  const merged = new Map<number, Recipe>();
-
-  current.forEach((recipe) => {
-    if (Number.isInteger(recipe.id) && recipe.id > 0) {
-      merged.set(recipe.id, recipe);
-    }
-  });
-
-  incoming.forEach((recipe) => {
-    if (Number.isInteger(recipe.id) && recipe.id > 0) {
-      merged.set(recipe.id, recipe);
-    }
-  });
-
-  return Array.from(merged.values());
 };
 
 export default function MealPollScreen() {

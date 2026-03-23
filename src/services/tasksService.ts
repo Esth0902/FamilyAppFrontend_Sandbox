@@ -40,6 +40,11 @@ type FetchTasksBoardOptions = {
   bypassCache?: boolean;
 };
 
+type FetchTasksBoardForRangeOptions = {
+  cacheTtlMs?: number;
+  bypassCache?: boolean;
+};
+
 const isoWeekDayFromDate = (date: Date) => {
   const day = date.getDay();
   return day === 0 ? 7 : day;
@@ -135,4 +140,46 @@ export const fetchTasksBoardForCurrentWeek = async (
     payload,
     resolvedWeekStartDay,
   };
+};
+
+export const fetchTasksBoardForRange = async <T = unknown>(
+  from: string,
+  to: string,
+  options?: FetchTasksBoardForRangeOptions
+): Promise<T> => {
+  return await apiFetch(`/tasks/board?from=${from}&to=${to}`, {
+    cacheTtlMs: options?.cacheTtlMs ?? 12_000,
+    bypassCache: options?.bypassCache === true,
+  }) as T;
+};
+
+export const createTaskInstance = async (payload: {
+  name: string;
+  description?: string | null;
+  due_date: string;
+  end_date: string;
+  user_id?: number;
+}): Promise<void> => {
+  await apiFetch("/tasks/instances", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+};
+
+export const updateTaskInstance = async (
+  instanceId: number,
+  payload: {
+    status: string;
+  }
+): Promise<void> => {
+  await apiFetch(`/tasks/instances/${instanceId}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+};
+
+export const validateTaskInstance = async (instanceId: number): Promise<void> => {
+  await apiFetch(`/tasks/instances/${instanceId}/validate`, {
+    method: "POST",
+  });
 };

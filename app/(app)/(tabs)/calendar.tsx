@@ -7,7 +7,6 @@ import {
   Modal,
   Platform,
   ScrollView,
-  StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
@@ -18,11 +17,40 @@ import { MaterialCommunityIcons } from "@expo/vector-icons";
 
 import { Colors } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
-import { apiFetch } from "@/src/api/client";
+import { WheelDatePicker, WheelTimePicker } from "@/src/components/ui/WheelDatePicker";
+import { MEAL_TYPES, mealTypeColor, mealTypeLabel, type MealType } from "@/src/features/calendar/calendar-types";
+import { calendarStyles as styles } from "@/src/features/calendar/calendar-screen.styles";
 import { useDebounce } from "@/src/hooks/useDebounce";
+import { mergeUniqueRecipes } from "@/src/features/recipes/recipe-utils";
 import { useRecipeSearch } from "@/src/hooks/useRecipeSearch";
 import { subscribeToHouseholdRealtime, subscribeToUserRealtime } from "@/src/realtime/client";
 import { useStoredUserState } from "@/src/session/user-cache";
+import {
+  createMealPlanEntry,
+  deleteCalendarEvent,
+  deleteMealPlanEntry,
+  fetchCalendarBoardForRange,
+  saveCalendarEvent,
+  submitCalendarEventParticipation,
+  submitMealPlanAttendance,
+  updateMealPlanEntry,
+} from "@/src/services/calendarService";
+import {
+  createTaskInstance,
+  fetchTasksBoardForRange,
+  updateTaskInstance,
+  validateTaskInstance as validateTaskInstanceService,
+} from "@/src/services/tasksService";
+import {
+  addDays,
+  endOfMonth,
+  isSameMonth,
+  parseOptionalIsoDate,
+  startOfMonth,
+  startOfWeekMonday,
+  toIsoDate,
+  todayIso,
+} from "@/src/utils/date";
 import {
   isTaskStatus,
   isValidIsoDate,
@@ -79,7 +107,7 @@ type MealPlanRecipe = {
 type MealPlanEntry = {
   id: number;
   date: string;
-  meal_type: "matin" | "midi" | "soir";
+  meal_type: MealType;
   custom_title?: string | null;
   note?: string | null;
   my_presence?: {
@@ -169,48 +197,12 @@ type ReasonAction =
   | { kind: "event"; eventId: number; status: "not_participate" };
 
 const WEEK_DAYS = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"];
-const WEEK_DAY_SHORT = ["di", "lu", "ma", "me", "je", "ve", "sa"] as const;
-const TASK_STATUS_TODO = "à faire";
-const TASK_STATUS_DONE = "réalisée";
-const TASK_STATUS_CANCELLED = "annulée";
-const WHEEL_ITEM_HEIGHT = 40;
-const WHEEL_VISIBLE_ROWS = 5;
-const WHEEL_CONTAINER_HEIGHT = WHEEL_ITEM_HEIGHT * WHEEL_VISIBLE_ROWS;
-const WHEEL_VERTICAL_PADDING = (WHEEL_CONTAINER_HEIGHT - WHEEL_ITEM_HEIGHT) / 2;
-const TIME_WHEEL_REPEAT = 8;
-const TIME_WHEEL_MIDDLE_CYCLE = Math.floor(TIME_WHEEL_REPEAT / 2);
-const MONTH_LABELS = ["jan", "fév", "mars", "avr", "mai", "juin", "juil", "août", "sept", "oct", "nov", "dec"];
+const TASK_STATUS_TODO = "Ã  faire";
+const TASK_STATUS_DONE = "rÃ©alisÃ©e";
+const TASK_STATUS_CANCELLED = "annulÃ©e";
 
 const pad = (value: number) => String(value).padStart(2, "0");
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
-const positiveModulo = (value: number, mod: number) => ((value % mod) + mod) % mod;
-const wheelIndexFromOffset = (offsetY: number, size: number) =>
-  clamp(Math.round(offsetY / WHEEL_ITEM_HEIGHT), 0, Math.max(0, size - 1));
-const parseTimeValue = (value: string) => {
-  const [hourRaw, minuteRaw] = value.split(":");
-  const hour = Number(hourRaw);
-  const minute = Number(minuteRaw);
-
-  return {
-    hour: Number.isInteger(hour) && hour >= 0 && hour <= 23 ? hour : 18,
-    minute: Number.isInteger(minute) && minute >= 0 && minute <= 59 ? minute : 0,
-  };
-};
-
-const toIsoDate = (date: Date) => `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
-
-const parseIsoDate = (value: string) => new Date(`${value}T00:00:00`);
-
-const addDays = (date: Date, days: number) => {
-  const next = new Date(date);
-  next.setDate(next.getDate() + days);
-  return next;
-};
-
-const weekDayShortLabel = (year: number, month: number, day: number) => {
-  const date = new Date(year, month - 1, day);
-  return WEEK_DAY_SHORT[date.getDay()] ?? "";
-};
 
 const addMonths = (date: Date, months: number) => {
   const next = new Date(date);
@@ -218,39 +210,11 @@ const addMonths = (date: Date, months: number) => {
   return next;
 };
 
-const startOfMonth = (date: Date) => new Date(date.getFullYear(), date.getMonth(), 1);
-
-const endOfMonth = (date: Date) => new Date(date.getFullYear(), date.getMonth() + 1, 0);
-
-const startOfWeekMonday = (date: Date) => {
-  const next = new Date(date);
-  const diff = (next.getDay() + 6) % 7;
-  next.setDate(next.getDate() - diff);
-  return next;
-};
-
 const endOfWeekSunday = (date: Date) => addDays(startOfWeekMonday(date), 6);
-
-const isSameMonth = (left: Date, right: Date) =>
-  left.getFullYear() === right.getFullYear() && left.getMonth() === right.getMonth();
-
-const mealTypeLabel = (value: string) => {
-  if (value === "matin") return "Matin";
-  if (value === "midi") return "Midi";
-  if (value === "soir") return "Soir";
-  return value;
-};
-
-const mealTypeColor = (value: string) => {
-  if (value === "matin") return "#F5A623";
-  if (value === "midi") return "#4A90E2";
-  if (value === "soir") return "#50BFA5";
-  return "#7B8794";
-};
 
 const mealPresenceLabel = (value: MealPresenceStatus) => {
   if (value === "present") return "Je participe";
-  if (value === "not_home") return "Pas à la maison";
+  if (value === "not_home") return "Pas Ã  la maison";
   return "Je mangerai plus tard";
 };
 
@@ -273,28 +237,10 @@ const formatMemberList = (members?: { name: string; reason?: string | null }[] |
     .join(", ");
 };
 
-const mergeRecipeOptions = (current: RecipeOption[], incoming: RecipeOption[]): RecipeOption[] => {
-  const merged = new Map<number, RecipeOption>();
-
-  current.forEach((recipe) => {
-    if (Number.isInteger(recipe.id) && recipe.id > 0) {
-      merged.set(recipe.id, recipe);
-    }
-  });
-
-  incoming.forEach((recipe) => {
-    if (Number.isInteger(recipe.id) && recipe.id > 0) {
-      merged.set(recipe.id, recipe);
-    }
-  });
-
-  return Array.from(merged.values());
-};
-
 const taskStatusLabel = (value: string) => {
-  if (isTaskStatus(value, TASK_STATUS_TODO)) return "à faire";
-  if (isTaskStatus(value, TASK_STATUS_DONE)) return "Réalisée";
-  if (isTaskStatus(value, TASK_STATUS_CANCELLED)) return "Annulée";
+  if (isTaskStatus(value, TASK_STATUS_TODO)) return "Ã  faire";
+  if (isTaskStatus(value, TASK_STATUS_DONE)) return "RÃ©alisÃ©e";
+  if (isTaskStatus(value, TASK_STATUS_CANCELLED)) return "AnnulÃ©e";
   return value;
 };
 
@@ -337,8 +283,8 @@ const formatMonthLabel = (date: Date) =>
   });
 
 const formatFullDateLabel = (isoDate: string) => {
-  const parsed = parseIsoDate(isoDate);
-  if (Number.isNaN(parsed.getTime())) {
+  const parsed = parseOptionalIsoDate(isoDate);
+  if (!parsed || Number.isNaN(parsed.getTime())) {
     return isoDate;
   }
 
@@ -393,9 +339,9 @@ export default function CalendarScreen() {
   const { householdId, role } = useStoredUserState();
   const canManageHouseholdConfig = role === "parent";
 
-  const todayIso = useMemo(() => toIsoDate(new Date()), []);
+  const todayIsoValue = useMemo(() => todayIso(), []);
   const [monthCursor, setMonthCursor] = useState(() => startOfMonth(new Date()));
-  const [selectedDate, setSelectedDate] = useState(todayIso);
+  const [selectedDate, setSelectedDate] = useState(todayIsoValue);
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -424,37 +370,20 @@ export default function CalendarScreen() {
   const [editingEventId, setEditingEventId] = useState<number | null>(null);
   const [eventTitle, setEventTitle] = useState("");
   const [eventDescription, setEventDescription] = useState("");
-  const [eventDate, setEventDate] = useState(todayIso);
-  const [eventEndDate, setEventEndDate] = useState(todayIso);
+  const [eventDate, setEventDate] = useState(todayIsoValue);
+  const [eventEndDate, setEventEndDate] = useState(todayIsoValue);
   const [eventStartTime, setEventStartTime] = useState("18:00");
   const [eventEndTime, setEventEndTime] = useState("19:00");
   const [shareWithOtherHousehold, setShareWithOtherHousehold] = useState(false);
   const [createEntryType, setCreateEntryType] = useState<CreateEntryType>("event");
   const [dateWheelVisible, setDateWheelVisible] = useState(false);
   const [dateWheelTarget, setDateWheelTarget] = useState<DateWheelTarget>("event_start");
-  const [dateWheelYear, setDateWheelYear] = useState(new Date().getFullYear());
-  const [dateWheelMonth, setDateWheelMonth] = useState(new Date().getMonth() + 1);
-  const [dateWheelDay, setDateWheelDay] = useState(new Date().getDate());
   const [timeWheelVisible, setTimeWheelVisible] = useState(false);
   const [timeWheelTarget, setTimeWheelTarget] = useState<"start" | "end">("start");
-  const [timeWheelHour, setTimeWheelHour] = useState(18);
-  const [timeWheelMinute, setTimeWheelMinute] = useState(0);
-  const [timeWheelHourIndex, setTimeWheelHourIndex] = useState(TIME_WHEEL_MIDDLE_CYCLE * 24 + 18);
-  const [timeWheelMinuteIndex, setTimeWheelMinuteIndex] = useState(TIME_WHEEL_MIDDLE_CYCLE * 60);
-  const yearWheelRef = useRef<ScrollView | null>(null);
-  const monthWheelRef = useRef<ScrollView | null>(null);
-  const dayWheelRef = useRef<ScrollView | null>(null);
-  const hourWheelRef = useRef<ScrollView | null>(null);
-  const minuteWheelRef = useRef<ScrollView | null>(null);
-  const dateWheelDayIndexRef = useRef(Math.max(0, dateWheelDay - 1));
-  const dateWheelMonthIndexRef = useRef(Math.max(0, dateWheelMonth - 1));
-  const dateWheelYearIndexRef = useRef(0);
-  const timeWheelHourIndexRef = useRef(timeWheelHourIndex);
-  const timeWheelMinuteIndexRef = useRef(timeWheelMinuteIndex);
 
   const [editingMealPlanId, setEditingMealPlanId] = useState<number | null>(null);
-  const [mealPlanDate, setMealPlanDate] = useState(todayIso);
-  const [mealPlanType, setMealPlanType] = useState<"matin" | "midi" | "soir">("soir");
+  const [mealPlanDate, setMealPlanDate] = useState(todayIsoValue);
+  const [mealPlanType, setMealPlanType] = useState<MealType>("soir");
   const [mealPlanRecipeId, setMealPlanRecipeId] = useState<number | null>(null);
   const [mealPlanSearch, setMealPlanSearch] = useState("");
   const debouncedMealPlanSearch = useDebounce(mealPlanSearch, 400);
@@ -477,8 +406,8 @@ export default function CalendarScreen() {
   const [restoreDayProgramAfterShoppingPicker, setRestoreDayProgramAfterShoppingPicker] = useState(false);
   const [taskTitle, setTaskTitle] = useState("");
   const [taskDescription, setTaskDescription] = useState("");
-  const [taskDueDate, setTaskDueDate] = useState(todayIso);
-  const [taskEndDate, setTaskEndDate] = useState(todayIso);
+  const [taskDueDate, setTaskDueDate] = useState(todayIsoValue);
+  const [taskEndDate, setTaskEndDate] = useState(todayIsoValue);
 
   const mealPlanRecipeSearch = useRecipeSearch({
     householdId,
@@ -486,27 +415,6 @@ export default function CalendarScreen() {
     scope: "all",
     limit: 10,
   });
-
-  const yearOptions = useMemo(() => {
-    const currentYear = new Date().getFullYear();
-    return Array.from({ length: 11 }, (_, index) => currentYear - 5 + index);
-  }, []);
-
-  const monthOptions = useMemo(() => Array.from({ length: 12 }, (_, index) => index + 1), []);
-
-  const dayOptions = useMemo(() => {
-    const maxDay = new Date(dateWheelYear, dateWheelMonth, 0).getDate();
-    return Array.from({ length: maxDay }, (_, index) => index + 1);
-  }, [dateWheelMonth, dateWheelYear]);
-
-  const hourOptions = useMemo(
-    () => Array.from({ length: 24 * TIME_WHEEL_REPEAT }, (_, index) => positiveModulo(index, 24)),
-    []
-  );
-  const minuteOptions = useMemo(
-    () => Array.from({ length: 60 * TIME_WHEEL_REPEAT }, (_, index) => positiveModulo(index, 60)),
-    []
-  );
 
   const calendarRange = useMemo(() => {
     const monthStart = startOfMonth(monthCursor);
@@ -572,48 +480,15 @@ export default function CalendarScreen() {
     setTaskAssigneeId(taskCurrentUserId);
   }, [selectedDate, taskCurrentUserId, taskCurrentUserRole, taskMembers]);
 
-  useEffect(() => {
-    const maxDay = dayOptions.length;
-    setDateWheelDay((prev) => clamp(prev, 1, maxDay));
-  }, [dayOptions.length]);
-
   const openDateWheel = (target: DateWheelTarget) => {
     if (dateWheelVisible && dateWheelTarget === target) {
       setDateWheelVisible(false);
       return;
     }
 
-    const sourceIsoDate = (() => {
-      if (target === "event_start") return eventDate;
-      if (target === "event_end") return eventEndDate;
-      if (target === "task_start") return taskDueDate;
-      if (target === "task_end") return taskEndDate;
-      return mealPlanDate;
-    })();
-    const sourceDate = parseIsoDate(sourceIsoDate);
-    const safeDate = Number.isNaN(sourceDate.getTime()) ? new Date() : sourceDate;
-    const year = safeDate.getFullYear();
-    const month = safeDate.getMonth() + 1;
-    const day = safeDate.getDate();
-    const yearIndex = Math.max(0, yearOptions.indexOf(year));
-    const monthIndex = Math.max(0, monthOptions.indexOf(month));
-    const dayIndex = Math.max(0, day - 1);
-
     setDateWheelTarget(target);
-    setDateWheelYear(year);
-    setDateWheelMonth(month);
-    setDateWheelDay(day);
-    dateWheelYearIndexRef.current = yearIndex;
-    dateWheelMonthIndexRef.current = monthIndex;
-    dateWheelDayIndexRef.current = dayIndex;
     setTimeWheelVisible(false);
     setDateWheelVisible(true);
-
-    requestAnimationFrame(() => {
-      yearWheelRef.current?.scrollTo({ y: yearIndex * WHEEL_ITEM_HEIGHT, animated: false });
-      monthWheelRef.current?.scrollTo({ y: monthIndex * WHEEL_ITEM_HEIGHT, animated: false });
-      dayWheelRef.current?.scrollTo({ y: dayIndex * WHEEL_ITEM_HEIGHT, animated: false });
-    });
   };
 
   const openTimeWheel = (target: "start" | "end") => {
@@ -622,79 +497,80 @@ export default function CalendarScreen() {
       return;
     }
 
-    const sourceTime = target === "start" ? eventStartTime : eventEndTime;
-    const parsed = parseTimeValue(sourceTime);
-    const hour = parsed.hour;
-    const minute = parsed.minute;
-
     setTimeWheelTarget(target);
-    setTimeWheelHour(hour);
-    setTimeWheelMinute(minute);
-    const hourIndex = TIME_WHEEL_MIDDLE_CYCLE * 24 + hour;
-    const minuteIndex = TIME_WHEEL_MIDDLE_CYCLE * 60 + minute;
-    timeWheelHourIndexRef.current = hourIndex;
-    timeWheelMinuteIndexRef.current = minuteIndex;
-    setTimeWheelHourIndex(hourIndex);
-    setTimeWheelMinuteIndex(minuteIndex);
     setDateWheelVisible(false);
     setTimeWheelVisible(true);
-
-    requestAnimationFrame(() => {
-      hourWheelRef.current?.scrollTo({ y: hourIndex * WHEEL_ITEM_HEIGHT, animated: false });
-      minuteWheelRef.current?.scrollTo({ y: minuteIndex * WHEEL_ITEM_HEIGHT, animated: false });
-    });
   };
 
-  useEffect(() => {
-    if (!dateWheelVisible) {
-      return;
-    }
-
-    const maxDay = new Date(dateWheelYear, dateWheelMonth, 0).getDate();
-    const normalizedDay = clamp(dateWheelDay, 1, maxDay);
-    if (normalizedDay !== dateWheelDay) {
-      setDateWheelDay(normalizedDay);
-      return;
-    }
-
-    const nextIsoDate = `${dateWheelYear}-${pad(dateWheelMonth)}-${pad(normalizedDay)}`;
+  const handleDateWheelChange = useCallback((nextIsoDate: string) => {
     if (dateWheelTarget === "event_start") {
-      setEventDate(nextIsoDate);
-      setEventEndDate((prev) => (prev < nextIsoDate ? nextIsoDate : prev));
+      const nextEventEndDate = eventEndDate < nextIsoDate ? nextIsoDate : eventEndDate;
+      if (eventDate !== nextIsoDate) {
+        setEventDate(nextIsoDate);
+      }
+      if (eventEndDate !== nextEventEndDate) {
+        setEventEndDate(nextEventEndDate);
+      }
       return;
     }
     if (dateWheelTarget === "event_end") {
-      setEventEndDate(nextIsoDate);
-      setEventDate((prev) => (prev > nextIsoDate ? nextIsoDate : prev));
+      const nextEventDate = eventDate > nextIsoDate ? nextIsoDate : eventDate;
+      if (eventEndDate !== nextIsoDate) {
+        setEventEndDate(nextIsoDate);
+      }
+      if (eventDate !== nextEventDate) {
+        setEventDate(nextEventDate);
+      }
       return;
     }
     if (dateWheelTarget === "task_start") {
-      setTaskDueDate(nextIsoDate);
-      setTaskEndDate((prev) => (prev < nextIsoDate ? nextIsoDate : prev));
+      const nextTaskEndDate = taskEndDate < nextIsoDate ? nextIsoDate : taskEndDate;
+      if (taskDueDate !== nextIsoDate) {
+        setTaskDueDate(nextIsoDate);
+      }
+      if (taskEndDate !== nextTaskEndDate) {
+        setTaskEndDate(nextTaskEndDate);
+      }
       return;
     }
     if (dateWheelTarget === "task_end") {
       const normalizedTaskEndDate = nextIsoDate < taskDueDate ? taskDueDate : nextIsoDate;
-      setTaskEndDate(normalizedTaskEndDate);
+      if (taskEndDate !== normalizedTaskEndDate) {
+        setTaskEndDate(normalizedTaskEndDate);
+      }
       return;
     }
 
-    setMealPlanDate(nextIsoDate);
-  }, [dateWheelDay, dateWheelMonth, dateWheelTarget, dateWheelVisible, dateWheelYear, taskDueDate]);
-
-  useEffect(() => {
-    if (!timeWheelVisible) {
-      return;
+    if (mealPlanDate !== nextIsoDate) {
+      setMealPlanDate(nextIsoDate);
     }
+  }, [dateWheelTarget, eventDate, eventEndDate, mealPlanDate, taskDueDate, taskEndDate]);
 
-    const nextTime = `${pad(timeWheelHour)}:${pad(timeWheelMinute)}`;
+  const handleTimeWheelChange = useCallback((nextTime: string) => {
     if (timeWheelTarget === "start") {
-      setEventStartTime(nextTime);
+      if (eventStartTime !== nextTime) {
+        setEventStartTime(nextTime);
+      }
       return;
     }
 
-    setEventEndTime(nextTime);
-  }, [timeWheelHour, timeWheelMinute, timeWheelTarget, timeWheelVisible]);
+    if (eventEndTime !== nextTime) {
+      setEventEndTime(nextTime);
+    }
+  }, [eventEndTime, eventStartTime, timeWheelTarget]);
+
+  const dateWheelValue = useMemo(() => {
+    if (dateWheelTarget === "event_start") return eventDate;
+    if (dateWheelTarget === "event_end") return eventEndDate;
+    if (dateWheelTarget === "task_start") return taskDueDate;
+    if (dateWheelTarget === "task_end") return taskEndDate;
+    return mealPlanDate;
+  }, [dateWheelTarget, eventDate, eventEndDate, mealPlanDate, taskDueDate, taskEndDate]);
+
+  const timeWheelValue = useMemo(
+    () => (timeWheelTarget === "start" ? eventStartTime : eventEndTime),
+    [eventEndTime, eventStartTime, timeWheelTarget]
+  );
 
 
   const loadBoard = useCallback(async (options?: { silent?: boolean; bypassCache?: boolean }) => {
@@ -706,14 +582,14 @@ export default function CalendarScreen() {
 
     try {
       const [calendarResult, tasksResult] = await Promise.allSettled([
-        apiFetch(`/calendar/board?from=${calendarRange.from}&to=${calendarRange.to}`, {
+        fetchCalendarBoardForRange<CalendarBoardPayload>(calendarRange.from, calendarRange.to, {
           cacheTtlMs: 12_000,
           bypassCache,
-        }) as Promise<CalendarBoardPayload>,
-        apiFetch(`/tasks/board?from=${calendarRange.from}&to=${calendarRange.to}`, {
+        }),
+        fetchTasksBoardForRange<TaskBoardPayload>(calendarRange.from, calendarRange.to, {
           cacheTtlMs: 12_000,
           bypassCache,
-        }) as Promise<TaskBoardPayload>,
+        }),
       ]);
 
       if (calendarResult.status !== "fulfilled") {
@@ -744,7 +620,7 @@ export default function CalendarScreen() {
         }))
         .filter((recipe) => Number.isInteger(recipe.id) && recipe.id > 0 && recipe.title.length > 0);
 
-      setRecipes((previousRecipes) => mergeRecipeOptions(previousRecipes, recipesFromMealPlan));
+      setRecipes((previousRecipes) => mergeUniqueRecipes(previousRecipes, recipesFromMealPlan));
 
       if (tasksResult.status === "fulfilled") {
         setTasksEnabled(Boolean(tasksResult.value?.tasks_enabled));
@@ -873,8 +749,8 @@ export default function CalendarScreen() {
   }, [permissions.can_share_with_other_household]);
 
   useEffect(() => {
-    const selected = parseIsoDate(selectedDate);
-    if (Number.isNaN(selected.getTime())) {
+    const selected = parseOptionalIsoDate(selectedDate);
+    if (!selected || Number.isNaN(selected.getTime())) {
       return;
     }
 
@@ -895,7 +771,7 @@ export default function CalendarScreen() {
       return;
     }
 
-    setRecipes((previousRecipes) => mergeRecipeOptions(previousRecipes, mealPlanRecipeSearch.results));
+    setRecipes((previousRecipes) => mergeUniqueRecipes(previousRecipes, mealPlanRecipeSearch.results));
   }, [mealPlanRecipeSearch.results]);
 
   const recipeOptions = useMemo(() => {
@@ -918,7 +794,10 @@ export default function CalendarScreen() {
         return;
       }
 
-      let cursor = parseIsoDate(toIsoDate(start));
+      let cursor = parseOptionalIsoDate(toIsoDate(start));
+      if (!cursor) {
+        return;
+      }
       const endDay = toIsoDate(end);
       while (toIsoDate(cursor) <= endDay) {
         const iso = toIsoDate(cursor);
@@ -1013,8 +892,8 @@ export default function CalendarScreen() {
           <>
             <Text style={[styles.itemMetaText, { color: theme.textSecondary }]}>
               {entry.my_presence
-                ? `Votre présence: ${mealPresenceLabel(entry.my_presence.status)}`
-                : "Votre présence n'est pas encore confirmée."}
+                ? `Votre prÃ©sence: ${mealPresenceLabel(entry.my_presence.status)}`
+                : "Votre prÃ©sence n'est pas encore confirmÃ©e."}
             </Text>
             {entry.my_presence?.reason ? (
               <Text style={[styles.bodyText, { color: theme.textSecondary }]}>
@@ -1048,7 +927,7 @@ export default function CalendarScreen() {
                 onPress={() => openMealReasonModal(entry, "not_home")}
                 disabled={saving}
               >
-                <Text style={[styles.inlineActionText, { color: theme.text }]}>Pas à la maison</Text>
+                <Text style={[styles.inlineActionText, { color: theme.text }]}>Pas Ã  la maison</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[
@@ -1068,16 +947,16 @@ export default function CalendarScreen() {
             {entry.presence_overview ? (
               <View style={styles.inlineSummaryBlock}>
                 <Text style={[styles.itemMetaText, { color: theme.textSecondary }]}>
-                  Présents: {formatMemberList(entry.presence_overview.present)}
+                  PrÃ©sents: {formatMemberList(entry.presence_overview.present)}
                 </Text>
                 <Text style={[styles.itemMetaText, { color: theme.textSecondary }]}>
-                  Pas à la maison: {formatMemberList(entry.presence_overview.not_home)}
+                  Pas Ã  la maison: {formatMemberList(entry.presence_overview.not_home)}
                 </Text>
                 <Text style={[styles.itemMetaText, { color: theme.textSecondary }]}>
                   Plus tard: {formatMemberList(entry.presence_overview.later)}
                 </Text>
                 <Text style={[styles.itemMetaText, { color: theme.textSecondary }]}>
-                  Sans réponse: {formatMemberList(entry.presence_overview.unanswered)}
+                  Sans rÃ©ponse: {formatMemberList(entry.presence_overview.unanswered)}
                 </Text>
               </View>
             ) : null}
@@ -1132,12 +1011,12 @@ export default function CalendarScreen() {
             </Text>
           </View>
         </View>
-        <Text style={[styles.itemMetaText, { color: theme.textSecondary }]}>Assigné à: {taskAssigneeNames(task)}</Text>
+        <Text style={[styles.itemMetaText, { color: theme.textSecondary }]}>AssignÃ© Ã : {taskAssigneeNames(task)}</Text>
         {task.description ? (
           <Text style={[styles.bodyText, { color: theme.textSecondary }]}>{task.description}</Text>
         ) : null}
         {task.validated_by_parent ? (
-          <Text style={[styles.itemMetaText, { color: "#2E8B78" }]}>Validée</Text>
+          <Text style={[styles.itemMetaText, { color: "#2E8B78" }]}>ValidÃ©e</Text>
         ) : null}
         {task.permissions.can_toggle || (task.permissions.can_validate && !task.validated_by_parent) ? (
           <View style={styles.itemActionsRow}>
@@ -1153,7 +1032,7 @@ export default function CalendarScreen() {
                   color={theme.tint}
                 />
                 <Text style={[styles.inlineActionText, { color: theme.text }]}>
-                  {isTaskStatus(task.status, TASK_STATUS_DONE) ? "Remettre à faire" : "Marquer faite"}
+                  {isTaskStatus(task.status, TASK_STATUS_DONE) ? "Remettre Ã  faire" : "Marquer faite"}
                 </Text>
               </TouchableOpacity>
             ) : null}
@@ -1193,7 +1072,7 @@ export default function CalendarScreen() {
                 { color: event.is_shared_with_other_household ? "#2E8B78" : theme.textSecondary },
               ]}
             >
-              {event.is_shared_with_other_household ? "Partagé" : "Privé"}
+              {event.is_shared_with_other_household ? "PartagÃ©" : "PrivÃ©"}
             </Text>
           </View>
         </View>
@@ -1205,15 +1084,15 @@ export default function CalendarScreen() {
         ) : null}
         {event.created_by?.name ? (
           <Text style={[styles.itemMetaText, { color: theme.textSecondary }]}>
-            Créé par {event.created_by.name}
+            CrÃ©Ã© par {event.created_by.name}
           </Text>
         ) : null}
         {event.permissions?.can_confirm_participation !== false ? (
           <>
             <Text style={[styles.itemMetaText, { color: theme.textSecondary }]}>
               {event.my_participation
-                ? `Votre réponse: ${eventParticipationLabel(event.my_participation.status)}`
-                : "Votre participation n'est pas encore confirmée."}
+                ? `Votre rÃ©ponse: ${eventParticipationLabel(event.my_participation.status)}`
+                : "Votre participation n'est pas encore confirmÃ©e."}
             </Text>
             {event.my_participation?.reason ? (
               <Text style={[styles.bodyText, { color: theme.textSecondary }]}>
@@ -1259,7 +1138,7 @@ export default function CalendarScreen() {
                   Ne participe pas: {formatMemberList(event.participation_overview.not_participate)}
                 </Text>
                 <Text style={[styles.itemMetaText, { color: theme.textSecondary }]}>
-                  Sans réponse: {formatMemberList(event.participation_overview.unanswered)}
+                  Sans rÃ©ponse: {formatMemberList(event.participation_overview.unanswered)}
                 </Text>
               </View>
             ) : null}
@@ -1334,7 +1213,7 @@ export default function CalendarScreen() {
           && (taskCurrentUserRole !== "parent" || taskAssigneeId !== null);
   const dateWheelTitle = useMemo(() => {
     if (dateWheelTarget === "event_start" || dateWheelTarget === "task_start") {
-      return "Choisir la date de début";
+      return "Choisir la date de dÃ©but";
     }
     if (dateWheelTarget === "event_end" || dateWheelTarget === "task_end") {
       return "Choisir la date de fin";
@@ -1342,125 +1221,23 @@ export default function CalendarScreen() {
     return "Choisir la date";
   }, [dateWheelTarget]);
   const renderDateWheelPanel = () => (
-    <View style={[styles.inlineWheelPanel, { borderColor: theme.icon, backgroundColor: theme.background }]}>
-      <Text style={[styles.label, { color: theme.text }]}>{dateWheelTitle}</Text>
+    <WheelDatePicker
+      visible={dateWheelVisible}
+      title={dateWheelTitle}
+      value={dateWheelValue}
+      onChange={handleDateWheelChange}
+      theme={theme}
+    />
+  );
 
-      <View style={styles.wheelRow}>
-        <View style={styles.wheelColumn}>
-          <ScrollView keyboardShouldPersistTaps="handled"
-            ref={dayWheelRef}
-            nestedScrollEnabled
-            showsVerticalScrollIndicator={false}
-            snapToInterval={WHEEL_ITEM_HEIGHT}
-            decelerationRate="fast"
-            scrollEventThrottle={32}
-            contentContainerStyle={styles.wheelContentContainer}
-            onScroll={(event) => {
-              const index = wheelIndexFromOffset(event.nativeEvent.contentOffset.y, dayOptions.length);
-              if (index === dateWheelDayIndexRef.current) {
-                return;
-              }
-              dateWheelDayIndexRef.current = index;
-              setDateWheelDay(dayOptions[index]);
-            }}
-          >
-            {dayOptions.map((value) => (
-              <View key={`wheel-day-${value}`} style={styles.wheelItem}>
-                <Text
-                  style={[
-                    styles.wheelItemText,
-                    { color: dateWheelDay === value ? theme.text : theme.textSecondary },
-                    dateWheelDay === value && styles.wheelItemTextSelected,
-                  ]}
-                >
-                  {`${weekDayShortLabel(dateWheelYear, dateWheelMonth, value)} ${pad(value)}`}
-                </Text>
-              </View>
-            ))}
-          </ScrollView>
-          <View
-            pointerEvents="none"
-            style={[styles.wheelSelectionOverlay, { borderColor: theme.icon, backgroundColor: `${theme.tint}14` }]}
-          />
-        </View>
-
-        <View style={styles.wheelColumn}>
-          <ScrollView keyboardShouldPersistTaps="handled"
-            ref={monthWheelRef}
-            nestedScrollEnabled
-            showsVerticalScrollIndicator={false}
-            snapToInterval={WHEEL_ITEM_HEIGHT}
-            decelerationRate="fast"
-            scrollEventThrottle={32}
-            contentContainerStyle={styles.wheelContentContainer}
-            onScroll={(event) => {
-              const index = wheelIndexFromOffset(event.nativeEvent.contentOffset.y, monthOptions.length);
-              if (index === dateWheelMonthIndexRef.current) {
-                return;
-              }
-              dateWheelMonthIndexRef.current = index;
-              setDateWheelMonth(monthOptions[index]);
-            }}
-          >
-            {monthOptions.map((value) => (
-              <View key={`wheel-month-${value}`} style={styles.wheelItem}>
-                <Text
-                  style={[
-                    styles.wheelItemText,
-                    { color: dateWheelMonth === value ? theme.text : theme.textSecondary },
-                    dateWheelMonth === value && styles.wheelItemTextSelected,
-                  ]}
-                >
-                  {MONTH_LABELS[value - 1]}
-                </Text>
-              </View>
-            ))}
-          </ScrollView>
-          <View
-            pointerEvents="none"
-            style={[styles.wheelSelectionOverlay, { borderColor: theme.icon, backgroundColor: `${theme.tint}14` }]}
-          />
-        </View>
-
-        <View style={styles.wheelColumn}>
-          <ScrollView keyboardShouldPersistTaps="handled"
-            ref={yearWheelRef}
-            nestedScrollEnabled
-            showsVerticalScrollIndicator={false}
-            snapToInterval={WHEEL_ITEM_HEIGHT}
-            decelerationRate="fast"
-            scrollEventThrottle={32}
-            contentContainerStyle={styles.wheelContentContainer}
-            onScroll={(event) => {
-              const index = wheelIndexFromOffset(event.nativeEvent.contentOffset.y, yearOptions.length);
-              if (index === dateWheelYearIndexRef.current) {
-                return;
-              }
-              dateWheelYearIndexRef.current = index;
-              setDateWheelYear(yearOptions[index]);
-            }}
-          >
-            {yearOptions.map((value) => (
-              <View key={`wheel-year-${value}`} style={styles.wheelItem}>
-                <Text
-                  style={[
-                    styles.wheelItemText,
-                    { color: dateWheelYear === value ? theme.text : theme.textSecondary },
-                    dateWheelYear === value && styles.wheelItemTextSelected,
-                  ]}
-                >
-                  {value}
-                </Text>
-              </View>
-            ))}
-          </ScrollView>
-          <View
-            pointerEvents="none"
-            style={[styles.wheelSelectionOverlay, { borderColor: theme.icon, backgroundColor: `${theme.tint}14` }]}
-          />
-        </View>
-      </View>
-    </View>
+  const renderTimeWheelPanel = () => (
+    <WheelTimePicker
+      visible={timeWheelVisible}
+      title={timeWheelTarget === "start" ? "Choisir l'heure de dÃ©but" : "Choisir l'heure de fin"}
+      value={timeWheelValue}
+      onChange={handleTimeWheelChange}
+      theme={theme}
+    />
   );
 
   const openNewEventModal = (targetDate?: string) => {
@@ -1545,38 +1322,38 @@ export default function CalendarScreen() {
   const handleSaveEvent = async () => {
     const cleanTitle = eventTitle.trim();
     if (cleanTitle.length < 2) {
-      Alert.alert("Calendrier", "Le titre de l'événement est obligatoire.");
+      Alert.alert("Calendrier", "Le titre de l'Ã©vÃ©nement est obligatoire.");
       return;
     }
 
     if (!isValidIsoDate(eventDate) || !isValidIsoDate(eventEndDate)) {
-      Alert.alert("Calendrier", "Les dates doivent être au format YYYY-MM-DD.");
+      Alert.alert("Calendrier", "Les dates doivent Ãªtre au format YYYY-MM-DD.");
       return;
     }
 
     if (!isValidTime(eventStartTime) || !isValidTime(eventEndTime)) {
-      Alert.alert("Calendrier", "Les heures doivent être au format HH:MM.");
+      Alert.alert("Calendrier", "Les heures doivent Ãªtre au format HH:MM.");
       return;
     }
 
     const eventRange = parseEventDateTimeRange(eventDate, eventStartTime, eventEndDate, eventEndTime);
     if (!eventRange) {
-      Alert.alert("Calendrier", "L'heure de fin doit être après l'heure de début.");
+      Alert.alert("Calendrier", "L'heure de fin doit Ãªtre aprÃ¨s l'heure de dÃ©but.");
       return;
     }
 
     setSaving(true);
     try {
-      await apiFetch(editingEventId ? `/calendar/events/${editingEventId}` : "/calendar/events", {
-        method: editingEventId ? "PATCH" : "POST",
-        body: JSON.stringify({
+      await saveCalendarEvent(
+        {
           title: cleanTitle,
           description: eventDescription.trim() || null,
           start_at: eventRange.startAt.toISOString(),
           end_at: eventRange.endAt.toISOString(),
           is_shared_with_other_household: shareWithOtherHousehold,
-        }),
-      });
+        },
+        editingEventId
+      );
 
       setSelectedDate(eventDate);
       setEventModalVisible(false);
@@ -1586,7 +1363,7 @@ export default function CalendarScreen() {
       resetTaskForm();
       await loadBoard({ silent: true });
     } catch (error: any) {
-      Alert.alert("Calendrier", error?.message || "Impossible d'enregistrer l'événement.");
+      Alert.alert("Calendrier", error?.message || "Impossible d'enregistrer l'Ã©vÃ©nement.");
     } finally {
       setSaving(false);
     }
@@ -1599,7 +1376,7 @@ export default function CalendarScreen() {
     }
 
     if (!isValidIsoDate(mealPlanDate)) {
-      Alert.alert("Calendrier", "La date de planification du repas doit être au format YYYY-MM-DD.");
+      Alert.alert("Calendrier", "La date de planification du repas doit Ãªtre au format YYYY-MM-DD.");
       return;
     }
 
@@ -1611,22 +1388,19 @@ export default function CalendarScreen() {
 
     const servings = Number.parseInt(mealPlanServings, 10);
     if (!Number.isFinite(servings) || servings < 1 || servings > 30) {
-      Alert.alert("Calendrier", "Le nombre de portions doit être compris entre 1 et 30.");
+      Alert.alert("Calendrier", "Le nombre de portions doit Ãªtre compris entre 1 et 30.");
       return;
     }
 
     setSaving(true);
     try {
-      await apiFetch("/calendar/meal-plan", {
-        method: "POST",
-        body: JSON.stringify({
-          date: mealPlanDate,
-          meal_type: mealPlanType,
-          recipe_id: customTitle.length === 0 ? mealPlanRecipeId : null,
-          custom_title: customTitle.length > 0 ? customTitle : null,
-          servings,
-          note: mealPlanNote.trim() || null,
-        }),
+      await createMealPlanEntry({
+        date: mealPlanDate,
+        meal_type: mealPlanType,
+        recipe_id: customTitle.length === 0 ? mealPlanRecipeId : null,
+        custom_title: customTitle.length > 0 ? customTitle : null,
+        servings,
+        note: mealPlanNote.trim() || null,
       });
 
       setSelectedDate(mealPlanDate);
@@ -1645,50 +1419,47 @@ export default function CalendarScreen() {
 
   const handleCreateTask = async () => {
     if (!tasksEnabled) {
-      Alert.alert("Calendrier", "Le module tâches est désactivé pour ce foyer.");
+      Alert.alert("Calendrier", "Le module tÃ¢ches est dÃ©sactivÃ© pour ce foyer.");
       return;
     }
 
     if (!canManageTaskInstances) {
-      Alert.alert("Calendrier", "Vous ne pouvez pas créer une tâche.");
+      Alert.alert("Calendrier", "Vous ne pouvez pas crÃ©er une tÃ¢che.");
       return;
     }
 
     const cleanTitle = taskTitle.trim();
     if (cleanTitle.length < 2) {
-      Alert.alert("Calendrier", "Le titre de la tâche est obligatoire.");
+      Alert.alert("Calendrier", "Le titre de la tÃ¢che est obligatoire.");
       return;
     }
 
     if (!isValidIsoDate(taskDueDate)) {
-      Alert.alert("Calendrier", "La date de la tâche doit être au format YYYY-MM-DD.");
+      Alert.alert("Calendrier", "La date de la tÃ¢che doit Ãªtre au format YYYY-MM-DD.");
       return;
     }
     if (!isValidIsoDate(taskEndDate)) {
-      Alert.alert("Calendrier", "La date de fin doit être au format YYYY-MM-DD.");
+      Alert.alert("Calendrier", "La date de fin doit Ãªtre au format YYYY-MM-DD.");
       return;
     }
     if (taskEndDate < taskDueDate) {
-      Alert.alert("Calendrier", "La date de fin doit être postérieure ou égale à la date de début.");
+      Alert.alert("Calendrier", "La date de fin doit Ãªtre postÃ©rieure ou Ã©gale Ã  la date de dÃ©but.");
       return;
     }
     if (taskCurrentUserRole === "parent" && taskAssigneeId === null) {
-      Alert.alert("Calendrier", "Choisis un membre pour cette tâche.");
+      Alert.alert("Calendrier", "Choisis un membre pour cette tÃ¢che.");
       return;
     }
 
     setSaving(true);
     try {
       const assigneeId = taskCurrentUserRole === "parent" ? taskAssigneeId : taskCurrentUserId;
-      await apiFetch("/tasks/instances", {
-        method: "POST",
-        body: JSON.stringify({
-          name: cleanTitle,
-          description: taskDescription.trim() || null,
-          due_date: taskDueDate,
-          end_date: taskEndDate,
-          user_id: assigneeId ?? undefined,
-        }),
+      await createTaskInstance({
+        name: cleanTitle,
+        description: taskDescription.trim() || null,
+        due_date: taskDueDate,
+        end_date: taskEndDate,
+        user_id: assigneeId ?? undefined,
       });
 
       setSelectedDate(taskDueDate);
@@ -1699,7 +1470,7 @@ export default function CalendarScreen() {
       resetTaskForm();
       await loadBoard({ silent: true });
     } catch (error: any) {
-      Alert.alert("Calendrier", error?.message || "Impossible de créer cette tâche.");
+      Alert.alert("Calendrier", error?.message || "Impossible de crÃ©er cette tÃ¢che.");
     } finally {
       setSaving(false);
     }
@@ -1719,7 +1490,7 @@ export default function CalendarScreen() {
   };
 
   const confirmDeleteEvent = (event: CalendarEvent) => {
-    Alert.alert("Supprimer l'événement", `Supprimer "${event.title}" ?`, [
+    Alert.alert("Supprimer l'Ã©vÃ©nement", `Supprimer "${event.title}" ?`, [
       { text: "Annuler", style: "cancel" },
       {
         text: "Supprimer",
@@ -1732,14 +1503,14 @@ export default function CalendarScreen() {
   const handleDeleteEvent = async (eventId: number) => {
     setSaving(true);
     try {
-      await apiFetch(`/calendar/events/${eventId}`, { method: "DELETE" });
+      await deleteCalendarEvent(eventId);
       if (editingEventId === eventId) {
         setEventModalVisible(false);
         resetEventForm();
       }
       await loadBoard({ silent: true });
     } catch (error: any) {
-      Alert.alert("Calendrier", error?.message || "Impossible de supprimer l'événement.");
+      Alert.alert("Calendrier", error?.message || "Impossible de supprimer l'Ã©vÃ©nement.");
     } finally {
       setSaving(false);
     }
@@ -1751,7 +1522,7 @@ export default function CalendarScreen() {
     }
 
     if (!isValidIsoDate(mealPlanDate)) {
-      Alert.alert("Calendrier", "La date de planification du repas doit être au format YYYY-MM-DD.");
+      Alert.alert("Calendrier", "La date de planification du repas doit Ãªtre au format YYYY-MM-DD.");
       return;
     }
 
@@ -1764,22 +1535,19 @@ export default function CalendarScreen() {
 
     const servings = Number.parseInt(mealPlanServings, 10);
     if (!Number.isFinite(servings) || servings < 1 || servings > 30) {
-      Alert.alert("Calendrier", "Le nombre de portions doit être compris entre 1 et 30.");
+      Alert.alert("Calendrier", "Le nombre de portions doit Ãªtre compris entre 1 et 30.");
       return;
     }
 
     setSaving(true);
     try {
-      await apiFetch(`/calendar/meal-plan/${editingMealPlanId}`, {
-        method: "PATCH",
-        body: JSON.stringify({
-          date: mealPlanDate,
-          meal_type: mealPlanType,
-          recipe_id: customTitle.length === 0 ? mealPlanRecipeId : null,
-          custom_title: customTitle.length > 0 ? customTitle : null,
-          servings,
-          note: mealPlanNote.trim() || null,
-        }),
+      await updateMealPlanEntry(editingMealPlanId, {
+        date: mealPlanDate,
+        meal_type: mealPlanType,
+        recipe_id: customTitle.length === 0 ? mealPlanRecipeId : null,
+        custom_title: customTitle.length > 0 ? customTitle : null,
+        servings,
+        note: mealPlanNote.trim() || null,
       });
 
       setSelectedDate(mealPlanDate);
@@ -1807,7 +1575,7 @@ export default function CalendarScreen() {
   const handleDeleteMealPlan = async (mealPlanId: number) => {
     setSaving(true);
     try {
-      await apiFetch(`/calendar/meal-plan/${mealPlanId}`, { method: "DELETE" });
+      await deleteMealPlanEntry(mealPlanId);
       if (editingMealPlanId === mealPlanId) {
         setMealPlanModalVisible(false);
         resetMealPlanForm();
@@ -1826,23 +1594,20 @@ export default function CalendarScreen() {
     reason?: string | null
   ): Promise<boolean> => {
     if (!settings.absence_tracking_enabled) {
-      Alert.alert("Calendrier", "Le suivi des absences est désactivé pour ce foyer.");
+      Alert.alert("Calendrier", "Le suivi des absences est dÃ©sactivÃ© pour ce foyer.");
       return false;
     }
 
     setSaving(true);
     try {
-      await apiFetch(`/calendar/meal-plan/${mealPlanId}/attendance`, {
-        method: "POST",
-        body: JSON.stringify({
-          status,
-          reason: reason?.trim() ? reason.trim() : null,
-        }),
+      await submitMealPlanAttendance(mealPlanId, {
+        status,
+        reason: reason?.trim() ? reason.trim() : null,
       });
       await loadBoard({ silent: true });
       return true;
     } catch (error: any) {
-      Alert.alert("Calendrier", error?.message || "Impossible d'enregistrer la présence au repas.");
+      Alert.alert("Calendrier", error?.message || "Impossible d'enregistrer la prÃ©sence au repas.");
       return false;
     } finally {
       setSaving(false);
@@ -1856,17 +1621,14 @@ export default function CalendarScreen() {
   ): Promise<boolean> => {
     setSaving(true);
     try {
-      await apiFetch(`/calendar/events/${eventId}/participation`, {
-        method: "POST",
-        body: JSON.stringify({
-          status,
-          reason: reason?.trim() ? reason.trim() : null,
-        }),
+      await submitCalendarEventParticipation(eventId, {
+        status,
+        reason: reason?.trim() ? reason.trim() : null,
       });
       await loadBoard({ silent: true });
       return true;
     } catch (error: any) {
-      Alert.alert("Calendrier", error?.message || "Impossible d'enregistrer la participation à l'événement.");
+      Alert.alert("Calendrier", error?.message || "Impossible d'enregistrer la participation Ã  l'Ã©vÃ©nement.");
       return false;
     } finally {
       setSaving(false);
@@ -1956,11 +1718,11 @@ export default function CalendarScreen() {
 
   const openMealPlanShoppingListPicker = async (entry: MealPlanEntry) => {
     if (!permissions.can_manage_meal_plan) {
-      Alert.alert("Calendrier", "Seul un parent peut ajouter un repas à la liste de courses.");
+      Alert.alert("Calendrier", "Seul un parent peut ajouter un repas Ã  la liste de courses.");
       return;
     }
     if (saving) {
-      Alert.alert("Calendrier", "Une action est déjà en cours. Réessaie dans un instant.");
+      Alert.alert("Calendrier", "Une action est dÃ©jÃ  en cours. RÃ©essaie dans un instant.");
       return;
     }
 
@@ -2032,7 +1794,7 @@ export default function CalendarScreen() {
       if (useNewShoppingList) {
         const created = await createShoppingList(newShoppingListTitle);
         if (!created?.id) {
-          Alert.alert("Calendrier", "Impossible de créer la nouvelle liste.");
+          Alert.alert("Calendrier", "Impossible de crÃ©er la nouvelle liste.");
           return;
         }
         targetListId = created.id;
@@ -2040,13 +1802,13 @@ export default function CalendarScreen() {
       }
 
       if (!targetListId) {
-        Alert.alert("Calendrier", "Choisis une liste existante ou crée-en une nouvelle.");
+        Alert.alert("Calendrier", "Choisis une liste existante ou crÃ©e-en une nouvelle.");
         return;
       }
 
       const ingredients = await buildShoppingIngredientsFromRecipeSelections(plannedRecipes);
       if (ingredients.length === 0) {
-        Alert.alert("Calendrier", "Aucun ingrédient exploitable à ajouter.");
+        Alert.alert("Calendrier", "Aucun ingrÃ©dient exploitable Ã  ajouter.");
         return;
       }
 
@@ -2060,14 +1822,14 @@ export default function CalendarScreen() {
 
       Alert.alert(
         "Calendrier",
-        `${addedCount} ingrédient(s) ajouté(s) ? "${targetListTitle}".`,
+        `${addedCount} ingrÃ©dient(s) ajoutÃ©(s) ? "${targetListTitle}".`,
         [
           { text: "Fermer", style: "cancel" },
           { text: "Voir la liste", onPress: () => router.push(`/meal/shopping-list/${targetListId}`) },
         ]
       );
     } catch (error: any) {
-      Alert.alert("Calendrier", error?.message || "Impossible d'ajouter les ingrédients à la liste de courses.");
+      Alert.alert("Calendrier", error?.message || "Impossible d'ajouter les ingrÃ©dients Ã  la liste de courses.");
     } finally {
       setSaving(false);
     }
@@ -2082,13 +1844,10 @@ export default function CalendarScreen() {
 
     setSaving(true);
     try {
-      await apiFetch(`/tasks/instances/${task.id}`, {
-        method: "PATCH",
-        body: JSON.stringify({ status: nextStatus }),
-      });
+      await updateTaskInstance(task.id, { status: nextStatus });
       await loadBoard({ silent: true });
     } catch (error: any) {
-      Alert.alert("Calendrier", error?.message || "Impossible de mettre à jour cette tâche.");
+      Alert.alert("Calendrier", error?.message || "Impossible de mettre Ã  jour cette tÃ¢che.");
     } finally {
       setSaving(false);
     }
@@ -2101,12 +1860,10 @@ export default function CalendarScreen() {
 
     setSaving(true);
     try {
-      await apiFetch(`/tasks/instances/${task.id}/validate`, {
-        method: "POST",
-      });
+      await validateTaskInstanceService(task.id);
       await loadBoard({ silent: true });
     } catch (error: any) {
-      Alert.alert("Calendrier", error?.message || "Impossible de valider cette tâche.");
+      Alert.alert("Calendrier", error?.message || "Impossible de valider cette tÃ¢che.");
     } finally {
       setSaving(false);
     }
@@ -2146,7 +1903,7 @@ export default function CalendarScreen() {
           <View style={{ flex: 1 }}>
             <Text style={[styles.headerTitle, { color: theme.text }]}>Calendrier familial</Text>
             <Text style={[styles.headerSubtitle, { color: theme.textSecondary }]}>
-              Événements du foyer, tâches à effectuer, repas validés et partage inter-foyers.
+              Ã‰vÃ©nements du foyer, tÃ¢ches Ã  effectuer, repas validÃ©s et partage inter-foyers.
             </Text>
           </View>
           {canManageHouseholdConfig ? (
@@ -2162,9 +1919,9 @@ export default function CalendarScreen() {
 
       {!calendarEnabled ? (
         <View style={[styles.card, { backgroundColor: theme.card }]}>
-          <Text style={[styles.cardTitle, { color: theme.text }]}>Module désactivé</Text>
+          <Text style={[styles.cardTitle, { color: theme.text }]}>Module dÃ©sactivÃ©</Text>
           <Text style={[styles.bodyText, { color: theme.textSecondary }]}>
-            Active le module calendrier dans la configuration du foyer pour afficher l&apos;agenda partagé.
+            Active le module calendrier dans la configuration du foyer pour afficher l&apos;agenda partagÃ©.
           </Text>
           {canManageHouseholdConfig ? (
             <TouchableOpacity
@@ -2180,7 +1937,7 @@ export default function CalendarScreen() {
           <View style={styles.statsRow}>
             <View style={[styles.statCard, { backgroundColor: theme.card }]}>
               <Text style={[styles.statValue, { color: theme.text }]}>{stats.events}</Text>
-              <Text style={[styles.statLabel, { color: theme.textSecondary }]}>Événements</Text>
+              <Text style={[styles.statLabel, { color: theme.textSecondary }]}>Ã‰vÃ©nements</Text>
             </View>
             <View style={[styles.statCard, { backgroundColor: theme.card }]}>
               <Text style={[styles.statValue, { color: theme.text }]}>{stats.shared}</Text>
@@ -2188,7 +1945,7 @@ export default function CalendarScreen() {
             </View>
             <View style={[styles.statCard, { backgroundColor: theme.card }]}>
               <Text style={[styles.statValue, { color: theme.text }]}>{stats.meals}</Text>
-              <Text style={[styles.statLabel, { color: theme.textSecondary }]}>Repas planifiés</Text>
+              <Text style={[styles.statLabel, { color: theme.textSecondary }]}>Repas planifiÃ©s</Text>
             </View>
           </View>
 
@@ -2225,7 +1982,7 @@ export default function CalendarScreen() {
                 const eventCount = eventCountByDay[iso] ?? 0;
                 const mealCount = mealCountByDay[iso] ?? 0;
                 const taskCount = taskCountByDay[iso] ?? 0;
-                const isToday = iso === todayIso;
+                const isToday = iso === todayIsoValue;
 
                 return (
                   <View key={iso} style={styles.calendarCell}>
@@ -2318,7 +2075,7 @@ export default function CalendarScreen() {
                 />
               ) : (
                 <Text style={[styles.bodyText, { color: theme.textSecondary }]}>
-                  Aucun repas validé pour cette journée.
+                  Aucun repas validÃ© pour cette journÃ©e.
                 </Text>
               )}
             </View>
@@ -2326,11 +2083,11 @@ export default function CalendarScreen() {
             <View style={styles.sectionBlock}>
               <View style={styles.sectionTitleRow}>
                 <MaterialCommunityIcons name="checkbox-marked-circle-outline" size={18} color="#7C5CFA" />
-                <Text style={[styles.sectionTitle, { color: theme.text }]}>Tâches</Text>
+                <Text style={[styles.sectionTitle, { color: theme.text }]}>TÃ¢ches</Text>
               </View>
               {!tasksEnabled ? (
                 <Text style={[styles.bodyText, { color: theme.textSecondary }]}>
-                  Le module tâches est désactivé pour ce foyer.
+                  Le module tÃ¢ches est dÃ©sactivÃ© pour ce foyer.
                 </Text>
               ) : selectedDayTasks.length > 0 ? (
                 <FlatList
@@ -2343,7 +2100,7 @@ export default function CalendarScreen() {
                 />
               ) : (
                 <Text style={[styles.bodyText, { color: theme.textSecondary }]}>
-                  Aucune tâche prévue pour cette journée.
+                  Aucune tÃ¢che prÃ©vue pour cette journÃ©e.
                 </Text>
               )}
             </View>
@@ -2351,7 +2108,7 @@ export default function CalendarScreen() {
             <View style={styles.sectionBlock}>
               <View style={styles.sectionTitleRow}>
                 <MaterialCommunityIcons name="calendar-clock-outline" size={18} color={theme.tint} />
-                <Text style={[styles.sectionTitle, { color: theme.text }]}>événements</Text>
+                <Text style={[styles.sectionTitle, { color: theme.text }]}>Ã©vÃ©nements</Text>
               </View>
               {selectedDayEvents.length > 0 ? (
                 <FlatList
@@ -2364,7 +2121,7 @@ export default function CalendarScreen() {
                 />
               ) : (
                 <Text style={[styles.bodyText, { color: theme.textSecondary }]}>
-                  Aucun événement sur cette journée.
+                  Aucun Ã©vÃ©nement sur cette journÃ©e.
                 </Text>
               )}
             </View>
@@ -2386,8 +2143,8 @@ export default function CalendarScreen() {
 
                 <Text style={[styles.bodyText, { color: theme.textSecondary, marginBottom: 8 }]}>
                   {pendingReasonAction?.kind === "meal"
-                    ? "Ajoutez un motif si vous ne participez pas au repas à la maison."
-                    : "Ajoutez un motif si vous ne participez pas à l'événement."}
+                    ? "Ajoutez un motif si vous ne participez pas au repas Ã  la maison."
+                    : "Ajoutez un motif si vous ne participez pas Ã  l'Ã©vÃ©nement."}
                 </Text>
 
                 <TextInput
@@ -2398,7 +2155,7 @@ export default function CalendarScreen() {
                   ]}
                   value={reasonInput}
                   onChangeText={setReasonInput}
-                  placeholder="Ex: activité extérieure, retour tardif..."
+                  placeholder="Ex: activitÃ© extÃ©rieure, retour tardif..."
                   placeholderTextColor={theme.textSecondary}
                   multiline
                 />
@@ -2447,17 +2204,17 @@ export default function CalendarScreen() {
 
                   <Text style={[styles.label, { color: theme.text }]}>Moment du repas</Text>
                   <View style={styles.visibilityRow}>
-                    {(["matin", "midi", "soir"] as const).map((value) => (
+                    {MEAL_TYPES.map((mealType) => (
                       <TouchableOpacity
-                        key={value}
-                        onPress={() => setMealPlanType(value)}
+                        key={mealType.value}
+                        onPress={() => setMealPlanType(mealType.value)}
                         style={[
                           styles.visibilityChip,
                           { borderColor: theme.icon, backgroundColor: theme.background },
-                          mealPlanType === value && { borderColor: theme.tint, backgroundColor: `${theme.tint}18` },
+                          mealPlanType === mealType.value && { borderColor: theme.tint, backgroundColor: `${theme.tint}18` },
                         ]}
                       >
-                        <Text style={{ color: theme.text }}>{mealTypeLabel(value)}</Text>
+                        <Text style={{ color: theme.text }}>{mealType.label}</Text>
                       </TouchableOpacity>
                     ))}
                   </View>
@@ -2493,7 +2250,7 @@ export default function CalendarScreen() {
                   ) : (
                     <Text style={[styles.helperText, { color: theme.textSecondary }]}>
                       {mealPlanSearch.trim().length > 0
-                        ? "Aucune recette ne correspond à cette recherche."
+                        ? "Aucune recette ne correspond Ã  cette recherche."
                         : "Aucune recette disponible pour modifier ce repas."}
                     </Text>
                   )}
@@ -2565,8 +2322,8 @@ export default function CalendarScreen() {
 
           <ShoppingListPickerModal
             visible={shoppingPickerVisible}
-            title={pendingMealPlanForShopping ? "Ajouter ce repas à la liste de courses" : "Ajouter à la liste de courses"}
-            confirmLabel="Ajouter les ingrédients"
+            title={pendingMealPlanForShopping ? "Ajouter ce repas Ã  la liste de courses" : "Ajouter Ã  la liste de courses"}
+            confirmLabel="Ajouter les ingrÃ©dients"
             theme={theme}
             saving={saving}
             lists={shoppingLists}
@@ -2585,7 +2342,7 @@ export default function CalendarScreen() {
               <View style={[styles.modalCard, { backgroundColor: theme.card }]}>
                 <View style={styles.cardTitleRow}>
                   <Text style={[styles.cardTitle, { color: theme.text, marginBottom: 0 }]}>
-                    {editingEventId ? "Modifier l'événement" : createEntryType === "meal_plan" ? "Nouveau repas" : createEntryType === "task" ? "Nouvelle tâche" : "Nouvel événement"}
+                    {editingEventId ? "Modifier l'Ã©vÃ©nement" : createEntryType === "meal_plan" ? "Nouveau repas" : createEntryType === "task" ? "Nouvelle tÃ¢che" : "Nouvel Ã©vÃ©nement"}
                   </Text>
                   <TouchableOpacity onPress={closeEventModal} disabled={saving}>
                     <MaterialCommunityIcons name="close" size={22} color={theme.tint} />
@@ -2604,7 +2361,7 @@ export default function CalendarScreen() {
                             createEntryType === "event" && { borderColor: theme.tint, backgroundColor: `${theme.tint}18` },
                           ]}
                         >
-                          <Text style={{ color: theme.text }}>Événement</Text>
+                          <Text style={{ color: theme.text }}>Ã‰vÃ©nement</Text>
                         </TouchableOpacity>
                         <TouchableOpacity
                           onPress={() => selectCreateEntryType("meal_plan")}
@@ -2628,21 +2385,21 @@ export default function CalendarScreen() {
                           ]}
                           disabled={!tasksEnabled || !canManageTaskInstances}
                         >
-                          <Text style={{ color: theme.text }}>Tâche</Text>
+                          <Text style={{ color: theme.text }}>TÃ¢che</Text>
                         </TouchableOpacity>
                       </View>
                       {!permissions.can_manage_meal_plan ? (
                         <Text style={[styles.helperText, { color: theme.textSecondary }]}>
-                          La planification de repas est réservée à un parent.
+                          La planification de repas est rÃ©servÃ©e Ã  un parent.
                         </Text>
                       ) : null}
                       {!tasksEnabled ? (
                         <Text style={[styles.helperText, { color: theme.textSecondary }]}>
-                          Le module tâches est désactivé pour ce foyer.
+                          Le module tÃ¢ches est dÃ©sactivÃ© pour ce foyer.
                         </Text>
                       ) : !canManageTaskInstances ? (
                         <Text style={[styles.helperText, { color: theme.textSecondary }]}>
-                          La création de tâches est réservée à un parent.
+                          La crÃ©ation de tÃ¢ches est rÃ©servÃ©e Ã  un parent.
                         </Text>
                       ) : null}
                     </>
@@ -2709,116 +2466,9 @@ export default function CalendarScreen() {
 
                   {dateWheelVisible ? renderDateWheelPanel() : null}
 
-                  {timeWheelVisible ? (
-                    <View style={[styles.inlineWheelPanel, { borderColor: theme.icon, backgroundColor: theme.background }]}>
-                      <Text style={[styles.label, { color: theme.text }]}>
-                        {timeWheelTarget === "start" ? "Choisir l'heure de début" : "Choisir l'heure de fin"}
-                      </Text>
+                  {timeWheelVisible ? renderTimeWheelPanel() : null}
 
-                      <View style={styles.wheelRow}>
-                        <View style={styles.wheelColumn}>
-                          <ScrollView keyboardShouldPersistTaps="handled"
-                            ref={hourWheelRef}
-                            nestedScrollEnabled
-                            showsVerticalScrollIndicator={false}
-                            snapToInterval={WHEEL_ITEM_HEIGHT}
-                            decelerationRate="fast"
-                            scrollEventThrottle={32}
-                            contentContainerStyle={styles.wheelContentContainer}
-                            onScroll={(event) => {
-                              const index = wheelIndexFromOffset(event.nativeEvent.contentOffset.y, hourOptions.length);
-                              if (index === timeWheelHourIndexRef.current) {
-                                return;
-                              }
-                              timeWheelHourIndexRef.current = index;
-                              setTimeWheelHourIndex(index);
-                              setTimeWheelHour(hourOptions[index]);
-                            }}
-                            onMomentumScrollEnd={(event) => {
-                              const index = wheelIndexFromOffset(event.nativeEvent.contentOffset.y, hourOptions.length);
-                              const value = hourOptions[index];
-                              const middleIndex = TIME_WHEEL_MIDDLE_CYCLE * 24 + value;
-                              if (Math.abs(index - middleIndex) > 48) {
-                                hourWheelRef.current?.scrollTo({ y: middleIndex * WHEEL_ITEM_HEIGHT, animated: false });
-                                timeWheelHourIndexRef.current = middleIndex;
-                                setTimeWheelHourIndex(middleIndex);
-                              }
-                            }}
-                          >
-                            {hourOptions.map((value, index) => (
-                              <View key={`wheel-hour-${index}`} style={styles.wheelItem}>
-                                <Text
-                                  style={[
-                                    styles.wheelItemText,
-                                    { color: timeWheelHourIndex === index ? theme.text : theme.textSecondary },
-                                    timeWheelHourIndex === index && styles.wheelItemTextSelected,
-                                  ]}
-                                >
-                                  {pad(value)}
-                                </Text>
-                              </View>
-                            ))}
-                          </ScrollView>
-                          <View
-                            pointerEvents="none"
-                            style={[styles.wheelSelectionOverlay, { borderColor: theme.icon, backgroundColor: `${theme.tint}14` }]}
-                          />
-                        </View>
-
-                        <View style={styles.wheelColumn}>
-                          <ScrollView keyboardShouldPersistTaps="handled"
-                            ref={minuteWheelRef}
-                            nestedScrollEnabled
-                            showsVerticalScrollIndicator={false}
-                            snapToInterval={WHEEL_ITEM_HEIGHT}
-                            decelerationRate="fast"
-                            scrollEventThrottle={32}
-                            contentContainerStyle={styles.wheelContentContainer}
-                            onScroll={(event) => {
-                              const index = wheelIndexFromOffset(event.nativeEvent.contentOffset.y, minuteOptions.length);
-                              if (index === timeWheelMinuteIndexRef.current) {
-                                return;
-                              }
-                              timeWheelMinuteIndexRef.current = index;
-                              setTimeWheelMinuteIndex(index);
-                              setTimeWheelMinute(minuteOptions[index]);
-                            }}
-                            onMomentumScrollEnd={(event) => {
-                              const index = wheelIndexFromOffset(event.nativeEvent.contentOffset.y, minuteOptions.length);
-                              const value = minuteOptions[index];
-                              const middleIndex = TIME_WHEEL_MIDDLE_CYCLE * 60 + value;
-                              if (Math.abs(index - middleIndex) > 120) {
-                                minuteWheelRef.current?.scrollTo({ y: middleIndex * WHEEL_ITEM_HEIGHT, animated: false });
-                                timeWheelMinuteIndexRef.current = middleIndex;
-                                setTimeWheelMinuteIndex(middleIndex);
-                              }
-                            }}
-                          >
-                            {minuteOptions.map((value, index) => (
-                              <View key={`wheel-minute-${index}`} style={styles.wheelItem}>
-                                <Text
-                                  style={[
-                                    styles.wheelItemText,
-                                    { color: timeWheelMinuteIndex === index ? theme.text : theme.textSecondary },
-                                    timeWheelMinuteIndex === index && styles.wheelItemTextSelected,
-                                  ]}
-                                >
-                                  {pad(value)}
-                                </Text>
-                              </View>
-                            ))}
-                          </ScrollView>
-                          <View
-                            pointerEvents="none"
-                            style={[styles.wheelSelectionOverlay, { borderColor: theme.icon, backgroundColor: `${theme.tint}14` }]}
-                          />
-                        </View>
-                      </View>
-
-                    </View>
-                  ) : null}
-
-                  <Text style={[styles.label, { color: theme.text }]}>Visibilité inter-foyers</Text>
+                  <Text style={[styles.label, { color: theme.text }]}>VisibilitÃ© inter-foyers</Text>
                   <View style={styles.visibilityRow}>
                     <TouchableOpacity
                       onPress={() => setShareWithOtherHousehold(false)}
@@ -2828,7 +2478,7 @@ export default function CalendarScreen() {
                         !shareWithOtherHousehold && { borderColor: theme.tint, backgroundColor: `${theme.tint}18` },
                       ]}
                     >
-                      <Text style={{ color: theme.text }}>Privé au foyer</Text>
+                      <Text style={{ color: theme.text }}>PrivÃ© au foyer</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
                       onPress={() => {
@@ -2849,15 +2499,15 @@ export default function CalendarScreen() {
 
                   {!settings.shared_view_enabled ? (
                     <Text style={[styles.helperText, { color: theme.textSecondary }]}>
-                      Le partage inter-foyers est désactivé dans la configuration du foyer.
+                      Le partage inter-foyers est dÃ©sactivÃ© dans la configuration du foyer.
                     </Text>
                   ) : !permissions.can_share_with_other_household ? (
                     <Text style={[styles.helperText, { color: theme.textSecondary }]}>
-                      Le partage d&apos;un événement vers un autre foyer est réservé à un parent.
+                      Le partage d&apos;un Ã©vÃ©nement vers un autre foyer est rÃ©servÃ© Ã  un parent.
                     </Text>
                   ) : (
                     <Text style={[styles.helperText, { color: theme.textSecondary }]}>
-                      Choisis si cet événement doit rester interne au foyer ou être visible dans l&apos;autre foyer.
+                      Choisis si cet Ã©vÃ©nement doit rester interne au foyer ou Ãªtre visible dans l&apos;autre foyer.
                     </Text>
                   )}
                     </>
@@ -2876,17 +2526,17 @@ export default function CalendarScreen() {
 
                       <Text style={[styles.label, { color: theme.text }]}>Moment du repas</Text>
                       <View style={styles.visibilityRow}>
-                        {(["matin", "midi", "soir"] as const).map((value) => (
+                        {MEAL_TYPES.map((mealType) => (
                           <TouchableOpacity
-                            key={`new-meal-type-${value}`}
-                            onPress={() => setMealPlanType(value)}
+                            key={`new-meal-type-${mealType.value}`}
+                            onPress={() => setMealPlanType(mealType.value)}
                             style={[
                               styles.visibilityChip,
                               { borderColor: theme.icon, backgroundColor: theme.background },
-                              mealPlanType === value && { borderColor: theme.tint, backgroundColor: `${theme.tint}18` },
+                              mealPlanType === mealType.value && { borderColor: theme.tint, backgroundColor: `${theme.tint}18` },
                             ]}
                           >
-                            <Text style={{ color: theme.text }}>{mealTypeLabel(value)}</Text>
+                            <Text style={{ color: theme.text }}>{mealType.label}</Text>
                           </TouchableOpacity>
                         ))}
                       </View>
@@ -2922,7 +2572,7 @@ export default function CalendarScreen() {
                       ) : (
                         <Text style={[styles.helperText, { color: theme.textSecondary }]}>
                           {mealPlanSearch.trim().length > 0
-                            ? "Aucune recette ne correspond à cette recherche."
+                            ? "Aucune recette ne correspond Ã  cette recherche."
                             : "Aucune recette disponible."}
                         </Text>
                       )}
@@ -2973,7 +2623,7 @@ export default function CalendarScreen() {
                         style={[styles.input, { backgroundColor: theme.background, color: theme.text, borderColor: theme.icon }]}
                         value={taskTitle}
                         onChangeText={setTaskTitle}
-                        placeholder="Titre de la tâche"
+                        placeholder="Titre de la tÃ¢che"
                         placeholderTextColor={theme.textSecondary}
                       />
                       <TextInput
@@ -2988,7 +2638,7 @@ export default function CalendarScreen() {
                         placeholderTextColor={theme.textSecondary}
                         multiline
                       />
-                      <Text style={[styles.label, { color: theme.text }]}>Date de début</Text>
+                      <Text style={[styles.label, { color: theme.text }]}>Date de dÃ©but</Text>
                       <TouchableOpacity
                         onPress={() => openDateWheel("task_start")}
                         style={[styles.pickerFieldBtn, { borderColor: theme.icon, backgroundColor: theme.background }]}
@@ -3009,9 +2659,9 @@ export default function CalendarScreen() {
                       </TouchableOpacity>
                       {dateWheelVisible && dateWheelTarget === "task_end" ? renderDateWheelPanel() : null}
                       <Text style={[styles.helperText, { color: theme.textSecondary }]}>
-                        La date de fin est automatiquement ajustée si elle est avant la date de début.
+                        La date de fin est automatiquement ajustÃ©e si elle est avant la date de dÃ©but.
                       </Text>
-                      <Text style={[styles.label, { color: theme.text }]}>Attribuer à</Text>
+                      <Text style={[styles.label, { color: theme.text }]}>Attribuer Ã </Text>
                       {assignableTaskMembers.length > 0 ? (
                         <ScrollView keyboardShouldPersistTaps="handled" horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.recipePickerRow}>
                           {assignableTaskMembers.map((member) => (
@@ -3067,433 +2717,4 @@ export default function CalendarScreen() {
     </ScrollView>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  content: {
-    paddingBottom: 36,
-    paddingHorizontal: 16,
-    paddingTop: 56,
-    gap: 12,
-  },
-  center: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  header: {
-    marginBottom: 4,
-  },
-  headerRow: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    gap: 12,
-  },
-  headerTitle: {
-    fontSize: 26,
-    fontWeight: "700",
-  },
-  headerSubtitle: {
-    marginTop: 4,
-    fontSize: 14,
-    lineHeight: 20,
-  },
-  settingsBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    borderWidth: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    marginTop: 2,
-  },
-  card: {
-    borderRadius: 14,
-    padding: 12,
-  },
-  cardTitle: {
-    fontSize: 16,
-    fontWeight: "700",
-    marginBottom: 8,
-  },
-  cardTitleRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 8,
-    marginBottom: 10,
-  },
-  modalHeaderActions: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-  dayProgramHeaderRow: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    justifyContent: "space-between",
-    gap: 8,
-    marginBottom: 10,
-  },
-  dayProgramHeaderTitle: {
-    flex: 1,
-    flexShrink: 1,
-    lineHeight: 22,
-  },
-  dayProgramHeaderActions: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "flex-end",
-    gap: 8,
-    flexShrink: 0,
-    alignSelf: "flex-start",
-  },
-  modalIconBtn: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    borderWidth: 1,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  linkText: {
-    fontSize: 13,
-    fontWeight: "700",
-  },
-  bodyText: {
-    fontSize: 13,
-    lineHeight: 19,
-  },
-  statsRow: {
-    flexDirection: "row",
-    gap: 8,
-  },
-  statCard: {
-    flex: 1,
-    borderRadius: 12,
-    paddingVertical: 12,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  statValue: {
-    fontSize: 22,
-    fontWeight: "700",
-  },
-  statLabel: {
-    fontSize: 12,
-    marginTop: 4,
-    textAlign: "center",
-  },
-  calendarHeaderRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: 14,
-  },
-  calendarNavBtn: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    borderWidth: 1,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  calendarMonthText: {
-    fontSize: 17,
-    fontWeight: "700",
-    textTransform: "capitalize",
-  },
-  calendarWeekRow: {
-    flexDirection: "row",
-    marginBottom: 8,
-  },
-  calendarWeekdayText: {
-    flex: 1,
-    textAlign: "center",
-    fontSize: 12,
-    fontWeight: "700",
-  },
-  calendarGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    marginHorizontal: -3,
-  },
-  calendarCell: {
-    width: "14.2857%",
-    padding: 3,
-  },
-  calendarDayBtn: {
-    width: "100%",
-    minHeight: 50,
-    borderRadius: 12,
-    borderWidth: 1,
-    paddingVertical: 5,
-  },
-  calendarDayInner: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 4,
-  },
-  calendarDayNumberBadge: {
-    minWidth: 24,
-    height: 24,
-    borderRadius: 12,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 4,
-  },
-  calendarDayText: {
-    fontSize: 14,
-    fontWeight: "700",
-  },
-  dayBadgesRow: {
-    flexDirection: "row",
-    gap: 3,
-    minHeight: 6,
-  },
-  dayDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-  },
-  sectionBlock: {
-    marginTop: 8,
-  },
-  sectionTitleRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    marginBottom: 8,
-  },
-  sectionTitle: {
-    fontSize: 14,
-    fontWeight: "700",
-  },
-  itemCard: {
-    borderWidth: 1,
-    borderRadius: 10,
-    padding: 10,
-    marginBottom: 8,
-    gap: 4,
-  },
-  itemHeaderRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-  itemTitle: {
-    fontSize: 14,
-    fontWeight: "700",
-  },
-  itemMetaText: {
-    fontSize: 12,
-    lineHeight: 18,
-  },
-  itemActionsRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-    marginTop: 6,
-  },
-  inlineSummaryBlock: {
-    marginTop: 8,
-    gap: 2,
-  },
-  inlineActionBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    borderWidth: 1,
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-  },
-  inlineActionText: {
-    fontSize: 12,
-    fontWeight: "700",
-  },
-  badge: {
-    borderRadius: 999,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-  },
-  badgeText: {
-    fontSize: 11,
-    fontWeight: "700",
-  },
-  label: {
-    fontSize: 13,
-    fontWeight: "600",
-    marginBottom: 6,
-  },
-  input: {
-    borderWidth: 1,
-    borderRadius: 10,
-    minHeight: 44,
-    paddingHorizontal: 12,
-    marginBottom: 10,
-  },
-  inputMultiline: {
-    minHeight: 84,
-    paddingTop: 12,
-    textAlignVertical: "top",
-  },
-  timeRow: {
-    flexDirection: "row",
-    gap: 8,
-  },
-  dateInput: {
-    flex: 1,
-  },
-  pickerFieldBtn: {
-    borderWidth: 1,
-    borderRadius: 10,
-    minHeight: 44,
-    paddingHorizontal: 12,
-    marginBottom: 10,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-  pickerFieldText: {
-    fontSize: 14,
-    fontWeight: "600",
-  },
-  inlineWheelPanel: {
-    borderWidth: 1,
-    borderRadius: 12,
-    padding: 10,
-    marginBottom: 10,
-  },
-  timeInput: {
-    width: 110,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  visibilityRow: {
-    flexDirection: "row",
-    gap: 8,
-    marginBottom: 8,
-  },
-  visibilityChip: {
-    flex: 1,
-    borderWidth: 1,
-    borderRadius: 10,
-    paddingHorizontal: 10,
-    paddingVertical: 10,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  helperText: {
-    fontSize: 12,
-    lineHeight: 18,
-    marginBottom: 4,
-  },
-  recipePickerRow: {
-    gap: 8,
-    paddingBottom: 10,
-  },
-  recipeChip: {
-    borderWidth: 1,
-    borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-  },
-  recipeChipText: {
-    fontSize: 12,
-    fontWeight: "600",
-  },
-  modalBackdrop: {
-    flex: 1,
-    backgroundColor: "rgba(15, 23, 42, 0.45)",
-    justifyContent: "center",
-    padding: 16,
-  },
-  modalCard: {
-    borderRadius: 16,
-    maxHeight: "85%",
-    padding: 14,
-  },
-  wheelModalCard: {
-    borderRadius: 16,
-    padding: 14,
-  },
-  wheelRow: {
-    flexDirection: "row",
-    gap: 8,
-  },
-  wheelColumn: {
-    flex: 1,
-    height: WHEEL_CONTAINER_HEIGHT,
-    position: "relative",
-  },
-  wheelContentContainer: {
-    paddingVertical: WHEEL_VERTICAL_PADDING,
-  },
-  wheelItem: {
-    height: WHEEL_ITEM_HEIGHT,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  wheelItemText: {
-    fontSize: 16,
-    fontWeight: "500",
-  },
-  wheelItemTextSelected: {
-    fontWeight: "700",
-  },
-  wheelSelectionOverlay: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    top: WHEEL_VERTICAL_PADDING,
-    height: WHEEL_ITEM_HEIGHT,
-    borderWidth: 1,
-    borderRadius: 10,
-  },
-  modalScroll: {
-    maxHeight: 480,
-  },
-  modalContent: {
-    paddingBottom: 4,
-  },
-  modalActions: {
-    flexDirection: "row",
-    gap: 8,
-    marginTop: 10,
-  },
-  secondaryBtn: {
-    flex: 1,
-    height: 44,
-    borderRadius: 10,
-    borderWidth: 1,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  secondaryBtnText: {
-    fontSize: 14,
-    fontWeight: "700",
-  },
-  modalPrimaryBtn: {
-    flex: 1,
-    marginTop: 0,
-  },
-  primaryBtn: {
-    marginTop: 6,
-    borderRadius: 10,
-    height: 44,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  primaryBtnText: {
-    color: "white",
-    fontWeight: "700",
-    fontSize: 14,
-  },
-});
-
-
 
