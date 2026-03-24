@@ -1,2 +1,2 @@
-export { default } from "@/src/features/household-setup/HouseholdSetupScreen";
+export { default } from "@/src/features/household-setup/screens/HouseholdSetupScreen";
 

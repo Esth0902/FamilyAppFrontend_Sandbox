@@ -57,7 +57,7 @@ export function ScreenHeader({
       router.back();
       return;
     }
-    router.replace("/(tabs)/home");
+    router.replace("/(app)/(tabs)/home");
   };
 
   return (
@@ -67,7 +67,7 @@ export function ScreenHeader({
         {
           borderBottomColor: theme.icon,
           borderBottomWidth: showBorder ? 1 : 0,
-          paddingTop: safeTop ? Math.max(insets.top, 12) : 0,
+          paddingTop: safeTop ? Math.max(insets.top + 10, 24) : 0, 
         },
         containerStyle,
       ]}
@@ -99,6 +99,7 @@ const styles = StyleSheet.create({
   container: {
     paddingHorizontal: 20,
     paddingBottom: 8,
+    marginBottom: 8,
   },
   row: {
     minHeight: 52,
@@ -123,6 +124,7 @@ const styles = StyleSheet.create({
   },
   subtitle: {
     marginTop: 2,
+    marginBottom: 10,
     fontSize: 13,
     lineHeight: 18,
   },

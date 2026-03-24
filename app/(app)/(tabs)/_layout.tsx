@@ -189,14 +189,21 @@ const activeTabRoute = useMemo<TabsRouteName | null>(() => {
                     shadowColor: "#000",
                     shadowOpacity: 0.05,
                     shadowRadius: 5,
-                    height: 60 + insets.bottom,
-                    paddingBottom: insets.bottom > 0 ? insets.bottom : 10,
-                    paddingTop: 10,
+                    height: 50 + insets.bottom, 
+                    paddingBottom: insets.bottom > 0 ? insets.bottom - 5 : 0,
+                    paddingTop: 0,
                 },
+
+                tabBarItemStyle: {
+                    justifyContent: "center",
+                    alignItems: "center",
+                },
+
                 tabBarLabelStyle: {
                     fontWeight: "600",
                     fontSize: 10,
-                    marginBottom: 5,
+                    marginBottom: 0,
+                    marginTop: 2,
                 },
             }}
         >

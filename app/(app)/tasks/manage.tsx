@@ -1497,7 +1497,7 @@ export default function TasksScreen() {
       <View style={[styles.header, { borderBottomColor: theme.icon, paddingTop: Math.max(insets.top, 12), backgroundColor: theme.background }]}>
         <View style={styles.headerRow}>
           <TouchableOpacity
-            onPress={() => router.replace("/(tabs)/tasks")}
+            onPress={() => router.replace("/(app)/(tabs)/tasks")}
             style={[styles.settingsBtn, { borderColor: theme.icon }]}
           >
             <MaterialCommunityIcons name="arrow-left" size={20} color={theme.tint} />

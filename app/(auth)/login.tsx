@@ -3,7 +3,7 @@ import { Alert, StyleSheet, useColorScheme, View } from "react-native";
 import { useRouter } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import * as SecureStore from "expo-secure-store";
-
+import { TouchableOpacity } from "react-native";
 import { Colors } from "@/constants/theme";
 import { API_BASE_URL, apiFetch } from "@/src/api/client";
 import { AppButton } from "@/src/components/ui/AppButton";
@@ -104,7 +104,7 @@ export default function Login() {
       if (resolvedUser?.must_change_password) {
         router.replace("/change-credentials");
       } else {
-        router.replace("/(tabs)/home");
+        router.replace("/(app)/(tabs)/home");
       }
     } catch (error) {
       console.error(error);
@@ -120,6 +120,7 @@ export default function Login() {
         <ScreenHeader
           title="Bon retour !"
           subtitle="Connecte-toi pour accéder à ton foyer."
+          showBorder
           withBackButton
           containerStyle={styles.headerContainer}
           contentStyle={styles.headerContent}
@@ -128,7 +129,6 @@ export default function Login() {
         <View style={styles.form}>
           <AppTextInput
             label="E-mail"
-            style={styles.input}
             containerStyle={styles.inputContainer}
             placeholder="Ex: parent@famille.com"
             autoCapitalize="none"
@@ -137,29 +137,27 @@ export default function Login() {
             onChangeText={setEmail}
           />
 
-          <View style={styles.passwordFieldContainer}>
-            <AppTextInput
-              label="Mot de passe"
-              style={[styles.input, styles.passwordInput]}
-              containerStyle={styles.inputContainer}
-              placeholder="••••••••"
-              secureTextEntry={!showPassword}
-              value={password}
-              onChangeText={setPassword}
-            />
-
-            <AppButton
-              onPress={() => setShowPassword((prev) => !prev)}
-              style={styles.eyeButton}
-              accessibilityLabel={showPassword ? "Masquer le mot de passe" : "Afficher le mot de passe"}
-            >
+          <AppTextInput
+            label="Mot de passe"
+            containerStyle={styles.inputContainer}
+            placeholder="••••••••"
+            secureTextEntry={!showPassword}
+            value={password}
+            onChangeText={setPassword}
+            rightSlot={
+              <TouchableOpacity 
+                onPress={() => setShowPassword((prev) => !prev)}
+                accessibilityLabel={showPassword ? "Masquer le mot de passe" : "Afficher le mot de passe"}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }} // Rend le bouton plus facile à toucher
+          >
               <MaterialCommunityIcons
                 name={showPassword ? "eye-off-outline" : "eye-outline"}
                 size={20}
                 color={theme.textSecondary}
               />
-            </AppButton>
-          </View>
+        </TouchableOpacity>
+      }
+      />
 
           <AppButton
             title="Mot de passe oublié ?"
@@ -188,7 +186,7 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
-    padding: 24,
+    padding: 12,
     paddingTop: 56,
     justifyContent: "flex-start",
   },
@@ -196,20 +194,10 @@ const styles = StyleSheet.create({
   headerContent: { minHeight: 0 },
   form: {
     width: "100%",
+    marginTop: 32,
   },
   inputContainer: {
     marginBottom: 16,
-  },
-  input: {
-    height: 50,
-    marginBottom: 0,
-  },
-  passwordFieldContainer: {
-    position: "relative",
-    marginBottom: 16,
-  },
-  passwordInput: {
-    paddingRight: 48,
   },
   eyeButton: {
     position: "absolute",

@@ -15,6 +15,7 @@ import { Colors } from "@/constants/theme";
 type AppTextInputProps = TextInputProps & {
     label?: string;
     error?: string;
+    rightSlot?: React.ReactNode;
     containerStyle?: StyleProp<ViewStyle>;
     labelStyle?: StyleProp<TextStyle>;
     errorStyle?: StyleProp<TextStyle>;
@@ -24,6 +25,7 @@ type AppTextInputProps = TextInputProps & {
 export function AppTextInput({
     label,
     error,
+    rightSlot,
     containerStyle,
     labelStyle,
     errorStyle,
@@ -43,20 +45,31 @@ export function AppTextInput({
                 </Text>
             ) : null}
 
+        <View style={[
+            styles.inputWrapper,
+                {
+                    backgroundColor: theme.card,
+                    borderColor: error ? theme.accentWarm : theme.icon,
+                },
+            ]}
+            >
             <TextInput
                 {...props}
                 style={[
                     styles.input,
-                    {
-                        backgroundColor: theme.card,
-                        color: theme.text,
-                        borderColor: error ? theme.accentWarm : theme.icon,
-                    },
+                    { color: theme.text },
                     style,
                     inputStyle,
                 ]}
                 placeholderTextColor={placeholderTextColor ?? theme.textSecondary}
-            />
+                />
+
+                {rightSlot ? (
+                    <View style={styles.rightSlotContainer}>
+                        {rightSlot}
+                    </View>
+                ) : null}
+            </View>
 
             {error ? (
                 <Text style={[styles.error, { color: theme.accentWarm }, errorStyle]}>
@@ -74,13 +87,26 @@ const styles = StyleSheet.create({
         marginBottom: 8,
         marginLeft: 4,
     },
-    input: {
+    inputWrapper: {
+        flexDirection: "row",
+        alignItems: "center",
         width: "100%",
         minHeight: 50,
         borderWidth: 1,
         borderRadius: 12,
+        overflow: "hidden",
+    },
+
+    input: {
+        flex: 1,
+        height: "100%",
         paddingHorizontal: 16,
         fontSize: 16,
+    },
+    rightSlotContainer: {
+        paddingRight: 16,
+        justifyContent: "center",
+        alignItems: "center",
     },
     error: {
         fontSize: 12,
@@ -88,5 +114,6 @@ const styles = StyleSheet.create({
         marginLeft: 4,
     },
 });
+
 
 export type { AppTextInputProps };

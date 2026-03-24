@@ -19,7 +19,7 @@ export const recipesScreenStyles = StyleSheet.create({
         alignItems: "center",
         justifyContent: "center",
         marginRight: 12,
-        marginTop: 2,
+        marginTop: 5,
     },
     headerTitle: {
         fontSize: 18,

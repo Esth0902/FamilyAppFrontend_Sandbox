@@ -989,7 +989,7 @@ export default function MealPollScreen() {
 
   const handleBackArrow = () => {
     if (!isParent) {
-      router.replace("/(tabs)/meal");
+      router.replace("/(app)/(tabs)/meal");
       return;
     }
 
@@ -998,7 +998,7 @@ export default function MealPollScreen() {
       return;
     }
 
-    router.replace("/(tabs)/meal");
+    router.replace("/(app)/(tabs)/meal");
   };
 
   const openPlanner = (recipeId: number) => {

@@ -1,12 +1,8 @@
 import React, { useState } from "react";
 import {
     View,
-    Text,
-    TextInput,
-    TouchableOpacity,
     StyleSheet,
     Alert,
-    ActivityIndicator,
     KeyboardAvoidingView,
     Platform,
     useColorScheme,
@@ -14,7 +10,11 @@ import {
 import { useRouter } from "expo-router";
 import { API_BASE_URL } from "@/src/api/client";
 import { Colors } from "@/constants/theme";
-import { MaterialCommunityIcons } from "@expo/vector-icons";
+
+// Import de tes composants UI partagés
+import { AppTextInput } from "@/src/components/ui/AppTextInput";
+import { AppButton } from "@/src/components/ui/AppButton";
+import { ScreenHeader } from "@/src/components/ui/ScreenHeader";
 
 const parseJsonSafe = async (response: Response) => {
     const text = await response.text();
@@ -82,40 +82,36 @@ export default function ForgotPasswordScreen() {
             style={[styles.container, { backgroundColor: theme.background }]}
         >
             <View style={styles.content}>
-                <TouchableOpacity onPress={() => router.back()} style={[styles.backButton, { borderColor: theme.icon }]}>
-                    <MaterialCommunityIcons name="arrow-left" size={20} color={theme.tint} />
-                </TouchableOpacity>
-
-                <View style={styles.header}>
-                    <Text style={[styles.title, { color: theme.text }]}>Mot de passe oublié</Text>
-                    <Text style={[styles.subtitle, { color: theme.textSecondary }]}>
-                        Saisis ton e-mail pour recevoir un lien de réinitialisation.
-                    </Text>
-                </View>
+                {/* Utilisation de ton ScreenHeader au lieu de vues brutes */}
+                <ScreenHeader
+                    title="Mot de passe oublié"
+                    subtitle="Saisis ton e-mail pour recevoir un lien de réinitialisation."
+                    showBorder
+                    withBackButton
+                    containerStyle={styles.headerContainer}
+                    contentStyle={styles.headerContent}
+                />
 
                 <View style={styles.form}>
-                    <Text style={[styles.label, { color: theme.text }]}>E-mail</Text>
-                    <TextInput
-                        style={[styles.input, { backgroundColor: theme.card, color: theme.text, borderColor: theme.icon }]}
+                    {/* Utilisation de ton AppTextInput */}
+                    <AppTextInput
+                        label="E-mail"
+                        containerStyle={styles.inputContainer}
                         placeholder="Ex: parent@famille.com"
-                        placeholderTextColor={theme.textSecondary}
                         autoCapitalize="none"
                         keyboardType="email-address"
                         value={email}
                         onChangeText={setEmail}
                     />
 
-                    {loading ? (
-                        <ActivityIndicator size="large" color={theme.tint} />
-                    ) : (
-                        <TouchableOpacity
-                            style={[styles.primaryButton, { backgroundColor: theme.tint }]}
-                            onPress={onSubmit}
-                            activeOpacity={0.8}
-                        >
-                            <Text style={styles.primaryButtonText}>Envoyer le lien</Text>
-                        </TouchableOpacity>
-                    )}
+                    {/* Utilisation de ton AppButton qui gère le loading nativement */}
+                    <AppButton
+                        title="Envoyer le lien"
+                        variant="primary"
+                        loading={loading}
+                        style={styles.submitButton}
+                        onPress={onSubmit}
+                    />
                 </View>
             </View>
         </KeyboardAvoidingView>
@@ -128,61 +124,31 @@ const styles = StyleSheet.create({
     },
     content: {
         flex: 1,
-        padding: 24,
-        justifyContent: "center",
+        padding: 12, // Alignement avec ton Login
+        paddingTop: 56, // Pour matcher la hauteur du Login
+        justifyContent: "flex-start", // On remonte le formulaire vers le haut
     },
-    backButton: {
-        position: "absolute",
-        top: 60,
-        left: 24,
-        zIndex: 10,
-        width: 36,
-        height: 36,
-        borderRadius: 18,
-        borderWidth: 1,
-        alignItems: "center",
-        justifyContent: "center",
+    headerContainer: {
+        paddingHorizontal: 0, 
+        paddingBottom: 0,
     },
-    header: {
-        marginBottom: 32,
-        alignItems: "flex-start",
-    },
-    title: {
-        fontSize: 18,
-        fontWeight: "bold",
-        marginBottom: 8,
-    },
-    subtitle: {
-        fontSize: 16,
+    headerContent: {
+        minHeight: 0,
     },
     form: {
         width: "100%",
+        marginTop: 32,
     },
-    label: {
-        fontSize: 14,
-        fontWeight: "600",
-        marginBottom: 8,
-        marginLeft: 4,
+    inputContainer: {
+        marginBottom: 24,
     },
-    input: {
+    submitButton: {
         width: "100%",
-        height: 50,
-        borderWidth: 1,
+        minHeight: 54,
         borderRadius: 12,
-        paddingHorizontal: 16,
-        marginBottom: 20,
-        fontSize: 16,
-    },
-    primaryButton: {
-        width: "100%",
-        height: 54,
-        borderRadius: 12,
-        alignItems: "center",
-        justifyContent: "center",
-    },
-    primaryButtonText: {
-        color: "white",
-        fontSize: 18,
-        fontWeight: "bold",
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.2,
+        shadowRadius: 5,
+        elevation: 4,
     },
 });

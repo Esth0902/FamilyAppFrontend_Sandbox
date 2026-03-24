@@ -135,7 +135,7 @@ export default function RecipesScreen() {
 
       <View style={[styles.headerBar, { borderBottomColor: theme.icon }]}>
         <TouchableOpacity
-          onPress={() => router.replace("/(tabs)/meal")}
+          onPress={() => router.replace("/(app)/(tabs)/meal")}
           style={[styles.backBtn, { borderColor: theme.icon }]}
         >
           <MaterialCommunityIcons name="arrow-left" size={20} color={theme.tint} />

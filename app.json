@@ -15,22 +15,16 @@
     },
     "android": {
       "usesCleartextTraffic": false,
-      "icon": "./assets/images/icon.png",
-      "adaptiveIcon": {
-        "backgroundImage": "./assets/images/android-icon-background.png",
-        "foregroundImage": "./assets/images/android-icon-foreground.png",
-        "monochromeImage": "./assets/images/android-icon-monochrome.png"
-      },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
       "package": "com.esther0902.frontend"
     },
     "splash": {
-      "image": "./assets/images/icon.png",
+      "image": "./assets/images/logo.png",
       "resizeMode": "contain",
       "backgroundColor": "#ffffff",
       "dark": {
-        "image": "./assets/images/icon.png",
+        "image": "./assets/images/logo.png",
         "backgroundColor": "#000000"
       }
     },
@@ -43,12 +37,12 @@
       [
         "expo-splash-screen",
         {
-          "image": "./assets/images/icon.png",
+          "image": "./assets/images/logo.png",
           "imageWidth": 200,
           "resizeMode": "contain",
           "backgroundColor": "#ffffff",
           "dark": {
-            "image": "./assets/images/icon.png",
+            "image": "./assets/images/logo.png",
             "backgroundColor": "#000000"
           }
         }

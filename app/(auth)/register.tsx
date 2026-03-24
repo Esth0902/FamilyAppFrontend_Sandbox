@@ -3,7 +3,7 @@ import { Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, us
 import { useRouter } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import * as SecureStore from "expo-secure-store";
-
+import { TouchableOpacity } from "react-native";
 import { Colors } from "@/constants/theme";
 import { API_BASE_URL, apiFetch } from "@/src/api/client";
 import { AppButton } from "@/src/components/ui/AppButton";
@@ -121,7 +121,7 @@ export default function Register() {
       }
 
       Alert.alert("Bienvenue !", "Compte créé avec succès.");
-      router.replace("/(tabs)/home");
+      router.replace("/(app)/(tabs)/home");
     } catch (error: unknown) {
       console.error(error);
       Alert.alert("Erreur", "Impossible de contacter le serveur.");
@@ -139,6 +139,7 @@ export default function Register() {
         <ScreenHeader
           title="Créer un compte"
           subtitle="Rejoins FamilyFlow pour organiser ta vie de famille."
+          showBorder
           withBackButton
           containerStyle={styles.headerContainer}
           contentStyle={styles.headerContent}
@@ -166,52 +167,50 @@ export default function Register() {
             error={fieldErrors.email}
           />
 
-          <View style={styles.passwordFieldContainer}>
-            <AppTextInput
-              label="Mot de passe"
-              style={[styles.input, styles.passwordInput]}
-              containerStyle={styles.inputContainer}
-              placeholder="Min 8 caractères"
-              secureTextEntry={!showPassword}
-              value={password}
-              onChangeText={setPassword}
-              error={fieldErrors.password}
-            />
-            <AppButton
-              style={styles.eyeButton}
-              onPress={() => setShowPassword((prev) => !prev)}
-              accessibilityLabel={showPassword ? "Masquer le mot de passe" : "Afficher le mot de passe"}
-            >
-              <MaterialCommunityIcons
-                name={showPassword ? "eye-off-outline" : "eye-outline"}
-                size={20}
-                color={theme.textSecondary}
-              />
-            </AppButton>
-          </View>
+          <AppTextInput
+            label="Mot de passe"
+            containerStyle={styles.inputContainer}
+            placeholder="Min 8 caractères"
+            secureTextEntry={!showPassword}
+            value={password}
+            onChangeText={setPassword}
+            error={fieldErrors.password}
+            rightSlot={
+              <TouchableOpacity
+                onPress={() => setShowPassword((prev) => !prev)}
+                accessibilityLabel={showPassword ? "Masquer le mot de passe" : "Afficher le mot de passe"}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              >
+                <MaterialCommunityIcons
+                  name={showPassword ? "eye-off-outline" : "eye-outline"}
+                  size={20}
+                  color={theme.textSecondary}
+                />
+              </TouchableOpacity>
+            }
+          />
 
-          <View style={styles.passwordFieldContainer}>
-            <AppTextInput
-              label="Confirmation"
-              style={[styles.input, styles.passwordInput]}
-              containerStyle={styles.inputContainer}
-              placeholder="Répétez le mot de passe"
-              secureTextEntry={!showPasswordConfirm}
-              value={passwordConfirm}
-              onChangeText={setPasswordConfirm}
-            />
-            <AppButton
-              style={styles.eyeButton}
-              onPress={() => setShowPasswordConfirm((prev) => !prev)}
-              accessibilityLabel={showPasswordConfirm ? "Masquer la confirmation" : "Afficher la confirmation"}
-            >
-              <MaterialCommunityIcons
-                name={showPasswordConfirm ? "eye-off-outline" : "eye-outline"}
-                size={20}
-                color={theme.textSecondary}
-              />
-            </AppButton>
-          </View>
+          <AppTextInput
+            label="Confirmation"
+            containerStyle={styles.inputContainer}
+            placeholder="Répétez le mot de passe"
+            secureTextEntry={!showPasswordConfirm}
+            value={passwordConfirm}
+            onChangeText={setPasswordConfirm}
+            rightSlot={
+              <TouchableOpacity
+                onPress={() => setShowPasswordConfirm((prev) => !prev)}
+                accessibilityLabel={showPasswordConfirm ? "Masquer la confirmation" : "Afficher la confirmation"}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              >
+                <MaterialCommunityIcons
+                  name={showPasswordConfirm ? "eye-off-outline" : "eye-outline"}
+                  size={20}
+                  color={theme.textSecondary}
+                />
+              </TouchableOpacity>
+            }
+          />
 
           <View style={styles.spacer} />
 
@@ -245,34 +244,22 @@ const styles = StyleSheet.create({
   },
   scrollContainer: {
     flexGrow: 1,
-    padding: 24,
+    padding: 12,
     paddingTop: 56,
   },
   headerContainer: { paddingHorizontal: 0, paddingBottom: 0 },
   headerContent: { minHeight: 0 },
   form: {
     width: "100%",
+    marginTop: 24,
+    marginBottom: 24,
   },
   inputContainer: {
     marginBottom: 16,
   },
   input: {
-    height: 50,
+    height: 45,
     marginBottom: 0,
-  },
-  passwordFieldContainer: {
-    position: "relative",
-    marginBottom: 16,
-  },
-  passwordInput: {
-    paddingRight: 48,
-  },
-  eyeButton: {
-    position: "absolute",
-    right: 12,
-    top: 36,
-    width: 24,
-    height: 24,
   },
   spacer: {
     height: 20,
