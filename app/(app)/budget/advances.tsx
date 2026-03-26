@@ -90,7 +90,7 @@ export default function BudgetAdvancesScreen() {
       router.back();
       return;
     }
-    router.replace("/(tabs)/budget");
+    router.replace("/(app)/(tabs)/budget");
   }, [router]);
 
   const currency = useMemo(() => (board?.currency || "EUR").toUpperCase(), [board?.currency]);

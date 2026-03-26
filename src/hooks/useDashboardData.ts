@@ -15,6 +15,10 @@ type UseDashboardDataArgs = {
   householdId: number | null;
 };
 
+type DashboardRefreshOptions = {
+  bypassCache?: boolean;
+};
+
 export const useDashboardData = ({ householdId }: UseDashboardDataArgs) => {
   const queryClient = useQueryClient();
   const range = useMemo(() => currentMonthRange(), []);
@@ -28,7 +32,7 @@ export const useDashboardData = ({ householdId }: UseDashboardDataArgs) => {
         gcTime: 10 * 60_000,
         refetchOnMount: false,
         refetchOnWindowFocus: false,
-        queryFn: fetchDashboardSummary,
+        queryFn: () => fetchDashboardSummary(),
       },
       {
         queryKey: queryKeys.dashboard.budgetBoard(householdId),
@@ -37,7 +41,7 @@ export const useDashboardData = ({ householdId }: UseDashboardDataArgs) => {
         gcTime: 10 * 60_000,
         refetchOnMount: false,
         refetchOnWindowFocus: false,
-        queryFn: fetchDashboardBudgetBoard,
+        queryFn: () => fetchDashboardBudgetBoard(),
       },
       {
         queryKey: queryKeys.dashboard.calendarBoard(householdId, range.from, range.to),
@@ -51,13 +55,34 @@ export const useDashboardData = ({ householdId }: UseDashboardDataArgs) => {
     ],
   });
 
-  const refreshDashboard = useCallback(async () => {
+  const refreshDashboard = useCallback(async (options: DashboardRefreshOptions = {}) => {
+    if (householdId === null) {
+      return;
+    }
+
+    const bypassCache = Boolean(options.bypassCache);
+
     await Promise.all([
-      dashboardQuery.refetch(),
-      budgetBoardQuery.refetch(),
-      calendarQuery.refetch(),
+      queryClient.fetchQuery({
+        queryKey: queryKeys.dashboard.summary(householdId),
+        queryFn: () => fetchDashboardSummary({ bypassCache }),
+        staleTime: bypassCache ? 0 : 20_000,
+        gcTime: 10 * 60_000,
+      }),
+      queryClient.fetchQuery({
+        queryKey: queryKeys.dashboard.budgetBoard(householdId),
+        queryFn: () => fetchDashboardBudgetBoard({ bypassCache }),
+        staleTime: bypassCache ? 0 : 20_000,
+        gcTime: 10 * 60_000,
+      }),
+      queryClient.fetchQuery({
+        queryKey: queryKeys.dashboard.calendarBoard(householdId, range.from, range.to),
+        queryFn: () => fetchDashboardCalendarSummary(range, { bypassCache }),
+        staleTime: bypassCache ? 0 : 15_000,
+        gcTime: 10 * 60_000,
+      }),
     ]);
-  }, [budgetBoardQuery, calendarQuery, dashboardQuery]);
+  }, [householdId, queryClient, range]);
 
   const invalidateDashboard = useCallback(async () => {
     await queryClient.invalidateQueries({

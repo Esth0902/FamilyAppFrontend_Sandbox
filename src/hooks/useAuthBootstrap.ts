@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { persistStoredUser } from "@/src/session/user-cache";
-import { fetchMe } from "@/src/services/authService";
+import { fetchMe, toAuthServiceError } from "@/src/services/authService";
 import { logoutAuth, hydrateAuthState, useAuthStore, type AuthUser } from "@/src/store/useAuthStore";
 
 type UseAuthBootstrapResult = {
@@ -30,6 +30,7 @@ export const useAuthBootstrap = (): UseAuthBootstrapResult => {
         const snapshot = await hydrateAuthState();
         let resolvedToken = snapshot.token;
         let resolvedUser = snapshot.user;
+        let mustLogoutAfterProfileFetch = false;
 
         if (resolvedToken && !resolvedUser) {
           try {
@@ -38,12 +39,13 @@ export const useAuthBootstrap = (): UseAuthBootstrapResult => {
               resolvedUser = meUser;
               await persistStoredUser(meUser);
             }
-          } catch {
-            // Token invalid or backend unavailable: handled below.
+          } catch (error) {
+            const authError = toAuthServiceError(error, "Impossible de récupérer le profil.");
+            mustLogoutAfterProfileFetch = authError.kind === "unauthorized";
           }
         }
 
-        if ((!resolvedToken && resolvedUser) || (resolvedToken && !resolvedUser)) {
+        if ((!resolvedToken && resolvedUser) || mustLogoutAfterProfileFetch) {
           await logoutAuth();
         }
       } catch (error) {

@@ -17,12 +17,13 @@ jest.mock("@/src/api/client", () => ({
 
     return Number((error as { status?: unknown }).status) === 401;
   },
-  subscribeToApiUnauthorized: (...args: unknown[]) => mockSubscribeToApiUnauthorized(...args),
+  subscribeToApiUnauthorized: (listener: (error: unknown) => Promise<void> | void) =>
+    mockSubscribeToApiUnauthorized(listener),
 }));
 
 jest.mock("@/src/store/useAuthStore", () => ({
-  getAuthStateSnapshot: (...args: unknown[]) => mockGetAuthStateSnapshot(...args),
-  logoutAuth: (...args: unknown[]) => mockLogoutAuth(...args),
+  getAuthStateSnapshot: () => mockGetAuthStateSnapshot(),
+  logoutAuth: () => mockLogoutAuth(),
 }));
 
 import {
@@ -61,7 +62,7 @@ describe("session-expiration", () => {
       token: "token-active",
     });
 
-    let resolveLogout: (() => void) | null = null;
+    let resolveLogout: (() => void) | undefined;
     mockLogoutAuth.mockImplementationOnce(
       () => new Promise<void>((resolve) => { resolveLogout = resolve; })
     );
@@ -71,7 +72,9 @@ describe("session-expiration", () => {
 
     expect(mockLogoutAuth).toHaveBeenCalledTimes(1);
 
-    resolveLogout?.();
+    if (resolveLogout) {
+      resolveLogout();
+    }
     await Promise.all([first, second]);
     expect(mockLogoutAuth).toHaveBeenCalledTimes(1);
   });
@@ -85,7 +88,10 @@ describe("session-expiration", () => {
     expect(mockSubscribeToApiUnauthorized).toHaveBeenCalledTimes(1);
     expect(unauthorizedListener).toBeTruthy();
 
-    await unauthorizedListener?.({ status: 401 });
+    if (!unauthorizedListener) {
+      throw new Error("Unauthorized listener should be registered.");
+    }
+    await unauthorizedListener({ status: 401 });
     expect(mockLogoutAuth).toHaveBeenCalledTimes(1);
 
     unsubscribe();

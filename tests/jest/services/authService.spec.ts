@@ -6,7 +6,7 @@ const mockLogoutAuth = jest.fn();
 const mockPersistAuthToken = jest.fn();
 
 jest.mock("@/src/api/client", () => ({
-  apiFetch: (...args: unknown[]) => mockApiFetch(...args),
+  apiFetch: (endpoint: string, options?: unknown) => mockApiFetch(endpoint, options),
   isApiClientError: (error: unknown) => {
     if (!error || typeof error !== "object") {
       return false;
@@ -25,13 +25,13 @@ jest.mock("@/src/api/client", () => ({
 }));
 
 jest.mock("@/src/session/user-cache", () => ({
-  persistStoredUser: (...args: unknown[]) => mockPersistStoredUser(...args),
-  normalizeStoredUser: (...args: unknown[]) => mockNormalizeStoredUser(...args),
+  persistStoredUser: (user: unknown) => mockPersistStoredUser(user),
+  normalizeStoredUser: (user: unknown) => mockNormalizeStoredUser(user),
 }));
 
 jest.mock("@/src/store/useAuthStore", () => ({
-  logoutAuth: (...args: unknown[]) => mockLogoutAuth(...args),
-  persistAuthToken: (...args: unknown[]) => mockPersistAuthToken(...args),
+  logoutAuth: () => mockLogoutAuth(),
+  persistAuthToken: (token: unknown) => mockPersistAuthToken(token),
 }));
 
 import {
@@ -74,16 +74,10 @@ describe("authService", () => {
     });
   });
 
-  it("login persists token and resolved user from /me", async () => {
+  it("login persists token and user from login response", async () => {
     mockApiFetch
       .mockResolvedValueOnce({
         access_token: "token-123",
-        user: {
-          id: 1,
-          must_change_password: false,
-        },
-      })
-      .mockResolvedValueOnce({
         user: {
           id: 42,
           household_id: 7,
@@ -108,7 +102,7 @@ describe("authService", () => {
       "/login",
       expect.objectContaining({ method: "POST" })
     );
-    expect(mockApiFetch).toHaveBeenNthCalledWith(2, "/me");
+    expect(mockApiFetch).toHaveBeenCalledTimes(1);
   });
 
   it("login throws invalid_response when token is missing", async () => {

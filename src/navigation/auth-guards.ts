@@ -5,14 +5,27 @@ export type GuardRedirect =
   | "/home"
   | null;
 
+const normalizePathname = (pathname: string | null | undefined): string => {
+  const trimmed = String(pathname ?? "").trim();
+  if (!trimmed) {
+    return "/";
+  }
+  return trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
+};
+
+const matchesRoute = (pathname: string, targetRoute: "/change-credentials" | "/householdSetup"): boolean => {
+  return pathname === targetRoute || pathname.startsWith(`${targetRoute}/`);
+};
+
 export const resolveAppRedirect = (
-  currentSegment: string,
+  currentPathname: string | null,
   isAuthenticated: boolean,
   mustChangePassword: boolean,
   hasHousehold: boolean
 ): GuardRedirect => {
-  const isChangeCredentialsRoute = currentSegment === "change-credentials";
-  const isHouseholdSetupRoute = currentSegment === "householdSetup";
+  const pathname = normalizePathname(currentPathname);
+  const isChangeCredentialsRoute = matchesRoute(pathname, "/change-credentials");
+  const isHouseholdSetupRoute = matchesRoute(pathname, "/householdSetup");
 
   if (!isAuthenticated) {
     return "/";

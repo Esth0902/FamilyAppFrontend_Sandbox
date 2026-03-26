@@ -118,7 +118,7 @@ export const useNotificationSetup = ({
             notificationType = String(matchedNotification?.type ?? "").trim();
             if (!resolvedHouseholdId) {
               resolvedHouseholdId = toPositiveInt(
-                matchedNotification?.household_id
+                matchedNotification?.householdId
                 ?? (matchedNotification?.data as Record<string, unknown> | null)?.household_id
               );
             }

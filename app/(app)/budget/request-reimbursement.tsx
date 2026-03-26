@@ -66,7 +66,7 @@ export default function BudgetRequestReimbursementScreen() {
       router.back();
       return;
     }
-    router.replace("/(tabs)/budget");
+    router.replace("/(app)/(tabs)/budget");
   }, [router]);
 
   const isParent = board?.current_user.role === "parent";

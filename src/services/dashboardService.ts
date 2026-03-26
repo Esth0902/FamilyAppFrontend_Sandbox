@@ -122,8 +122,13 @@ export const currentMonthRange = () => {
   };
 };
 
-export const fetchDashboardSummary = async (): Promise<DashboardResponse | null> => {
-  const payload = await apiFetch("/dashboard");
+export const fetchDashboardSummary = async (
+  options: DashboardFetchOptions = {}
+): Promise<DashboardResponse | null> => {
+  const payload = await apiFetch("/dashboard", {
+    cacheTtlMs: 20_000,
+    bypassCache: Boolean(options.bypassCache),
+  });
   return toDashboardResponse(payload);
 };
 

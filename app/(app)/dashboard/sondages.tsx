@@ -106,23 +106,25 @@ export default function DashboardPollsScreen() {
     gcTime: 10 * 60_000,
     refetchOnMount: false,
     refetchOnWindowFocus: false,
-    queryFn: fetchDashboardSummary,
+    queryFn: () => fetchDashboardSummary(),
   });
+  const refetchDashboard = dashboardQuery.refetch;
+  const dashboardError = dashboardQuery.error;
 
   useFocusEffect(
     useCallback(() => {
-      void dashboardQuery.refetch();
-    }, [dashboardQuery.refetch])
+      void refetchDashboard();
+    }, [refetchDashboard])
   );
 
   useEffect(() => {
-    if (!dashboardQuery.error) {
+    if (!dashboardError) {
       return;
     }
 
-    const error = dashboardQuery.error as { message?: string } | null;
+    const error = dashboardError as { message?: string } | null;
     Alert.alert("Dashboard", error?.message || "Impossible de charger le dashboard.");
-  }, [dashboardQuery.error]);
+  }, [dashboardError]);
 
   useEffect(() => {
     if (!householdId) {
@@ -139,7 +141,7 @@ export default function DashboardPollsScreen() {
         if (module !== "meal_poll" && module !== "tasks" && module !== "budget" && module !== "calendar") {
           return;
         }
-        void dashboardQuery.refetch();
+        void refetchDashboard();
       });
     };
 
@@ -151,7 +153,7 @@ export default function DashboardPollsScreen() {
         unsubscribeRealtime();
       }
     };
-  }, [dashboardQuery.refetch, householdId]);
+  }, [householdId, refetchDashboard]);
 
   const data = (dashboardQuery.data ?? null) as DashboardResponse | null;
 
@@ -214,7 +216,7 @@ export default function DashboardPollsScreen() {
             <Text style={[styles.emptyText, { color: theme.textSecondary }]}>Aucune option.</Text>
           )}
 
-          <View style={styles.votersWrap}>
+          <View style={[styles.votersWrap, { borderTopColor: `${theme.icon}88` }]}>
             <Text style={[styles.votersTitle, { color: theme.text }]}>Votes par membre</Text>
             {Array.isArray(poll.voters_summary) && poll.voters_summary.length > 0 ? (
               poll.voters_summary.map((voter) => (
@@ -362,7 +364,7 @@ const styles = StyleSheet.create({
   },
   optionTitle: { flex: 1, fontSize: 13, fontWeight: "600" },
   optionVotes: { fontSize: 12, fontWeight: "600" },
-  votersWrap: { marginTop: 6, borderTopWidth: 1, borderTopColor: "#D9D9D9", paddingTop: 6 },
+  votersWrap: { marginTop: 6, borderTopWidth: 1, paddingTop: 6 },
   votersTitle: { fontSize: 12, fontWeight: "700", marginBottom: 4 },
   voterRow: {
     flexDirection: "row",

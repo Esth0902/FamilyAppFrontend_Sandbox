@@ -913,8 +913,7 @@ export default function TasksScreen() {
     [groupedInstances]
   );
 
-  const renderGroupedInstanceItem = useCallback(
-    ({ item: instance }: { item: TaskInstance }) => (
+  const renderGroupedInstanceItem = ({ item: instance }: { item: TaskInstance }) => (
       <View
         style={[styles.instanceCard, { borderColor: theme.icon, backgroundColor: theme.background }]}
       >
@@ -1002,9 +1001,7 @@ export default function TasksScreen() {
           ) : null}
         </View>
       </View>
-    ),
-    [currentUserId, members, theme.background, theme.icon, theme.text, theme.textSecondary, theme.tint]
-  );
+    );
 
   const renderGroupedInstanceHeader = useCallback(
     ({ section }: { section: { title: string } }) => (

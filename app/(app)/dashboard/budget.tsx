@@ -37,6 +37,8 @@ type HistoryItem = {
   justification: string | null;
 };
 
+const BUTTON_TEXT_COLOR = "#FFFFFF";
+
 const toTimestamp = (iso: string | null | undefined): number => {
   if (!iso) return 0;
   const parsed = new Date(iso).getTime();
@@ -110,23 +112,25 @@ export default function DashboardBudgetScreen() {
     gcTime: 10 * 60_000,
     refetchOnMount: false,
     refetchOnWindowFocus: false,
-    queryFn: fetchDashboardBudgetBoard,
+    queryFn: () => fetchDashboardBudgetBoard(),
   });
+  const refetchBudgetBoard = budgetBoardQuery.refetch;
+  const budgetBoardError = budgetBoardQuery.error;
 
   useFocusEffect(
     useCallback(() => {
-      void budgetBoardQuery.refetch();
-    }, [budgetBoardQuery.refetch])
+      void refetchBudgetBoard();
+    }, [refetchBudgetBoard])
   );
 
   useEffect(() => {
-    if (!budgetBoardQuery.error) {
+    if (!budgetBoardError) {
       return;
     }
 
-    const error = budgetBoardQuery.error as { message?: string } | null;
+    const error = budgetBoardError as { message?: string } | null;
     Alert.alert("Budget", error?.message || "Impossible de charger la vue budget.");
-  }, [budgetBoardQuery.error]);
+  }, [budgetBoardError]);
 
   useEffect(() => {
     if (!householdId) {
@@ -140,7 +144,7 @@ export default function DashboardBudgetScreen() {
       unsubscribeRealtime = await subscribeToHouseholdRealtime(householdId, (message) => {
         if (!active) return;
         if (message?.module !== "budget") return;
-        void budgetBoardQuery.refetch();
+        void refetchBudgetBoard();
       });
     };
 
@@ -152,7 +156,7 @@ export default function DashboardBudgetScreen() {
         unsubscribeRealtime();
       }
     };
-  }, [budgetBoardQuery.refetch, householdId]);
+  }, [householdId, refetchBudgetBoard]);
 
   const board = (budgetBoardQuery.data ?? null) as BudgetBoardPayload | null;
 
@@ -266,7 +270,7 @@ export default function DashboardBudgetScreen() {
               <Text style={[styles.title, { color: theme.text }]}>Historique récent</Text>
               {history.length > 0 ? history.map((item) => (
                 <View key={item.id} style={[styles.historyRow, { borderTopColor: `${theme.icon}55` }]}> 
-                  <View style={{ flex: 1 }}>
+                  <View style={styles.flexOne}>
                     <Text style={[styles.historyTitle, { color: theme.text }]}>
                       {isParent ? `${item.childName} - ${item.typeLabel}` : item.typeLabel}
                     </Text>
@@ -290,7 +294,7 @@ export default function DashboardBudgetScreen() {
 
         <TouchableOpacity
           style={[styles.primaryButton, { backgroundColor: theme.tint }]}
-          onPress={() => router.push("/(tabs)/budget")}
+          onPress={() => router.push("/(app)/(tabs)/budget")}
         >
           <Text style={styles.primaryButtonText}>Ouvrir le module Budget</Text>
         </TouchableOpacity>
@@ -352,5 +356,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  primaryButtonText: { color: "#FFF", fontWeight: "700", fontSize: 13 },
+  primaryButtonText: { color: BUTTON_TEXT_COLOR, fontWeight: "700", fontSize: 13 },
+  flexOne: { flex: 1 },
 });

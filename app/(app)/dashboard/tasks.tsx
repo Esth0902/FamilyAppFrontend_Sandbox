@@ -52,6 +52,8 @@ type TaskBoardResponse = {
   instances: TaskInstance[];
 };
 
+const BUTTON_TEXT_COLOR = "#FFFFFF";
+
 const isoWeekDayFromDate = (date: Date): number => {
   const day = date.getDay();
   return day === 0 ? 7 : day;
@@ -237,7 +239,7 @@ export default function DashboardTasksScreen() {
 
         <TouchableOpacity
           style={[styles.primaryButton, { backgroundColor: theme.tint }]}
-          onPress={() => router.push("/(tabs)/tasks")}
+          onPress={() => router.push("/(app)/(tabs)/tasks")}
         >
           <Text style={styles.primaryButtonText}>Ouvrir le module Tâches</Text>
         </TouchableOpacity>
@@ -289,5 +291,5 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  primaryButtonText: { color: "#FFF", fontWeight: "700", fontSize: 13 },
+  primaryButtonText: { color: BUTTON_TEXT_COLOR, fontWeight: "700", fontSize: 13 },
 });

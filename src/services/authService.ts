@@ -211,9 +211,13 @@ const normalizeUser = (rawUser: unknown): StoredUser | null => {
 };
 
 const syncUserFromMeOrFallback = async (fallbackUser: StoredUser | null): Promise<StoredUser | null> => {
+  if (fallbackUser) {
+    return fallbackUser;
+  }
+
   try {
     const meUser = await fetchMe();
-    return meUser ?? fallbackUser;
+    return meUser;
   } catch {
     return fallbackUser;
   }

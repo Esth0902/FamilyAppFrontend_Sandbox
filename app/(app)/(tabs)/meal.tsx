@@ -115,7 +115,8 @@ export default function MealScreen() {
             };
 
             const loadMealModuleConfig = async () => {
-                if (!(Number.isInteger(householdId) && householdId > 0)) {
+                const activeHouseholdId = Number(householdId);
+                if (!Number.isInteger(activeHouseholdId) || activeHouseholdId <= 0) {
                     setLoadingConfig(false);
                     return;
                 }
@@ -124,7 +125,7 @@ export default function MealScreen() {
 
                 try {
                     const response = await queryClient.fetchQuery({
-                        queryKey: queryKeys.household.config(householdId),
+                        queryKey: queryKeys.household.config(activeHouseholdId),
                         queryFn: () => apiFetch("/households/config"),
                         staleTime: 30_000,
                         gcTime: 10 * 60_000,

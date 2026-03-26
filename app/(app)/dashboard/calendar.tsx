@@ -58,6 +58,8 @@ type CalendarBoardResponse = {
   meal_plan: MealPlanEntry[];
 };
 
+const BUTTON_TEXT_COLOR = "#FFFFFF";
+
 const buildRange = () => {
   const today = new Date();
   return {
@@ -122,20 +124,22 @@ export default function DashboardCalendarScreen() {
     refetchOnWindowFocus: false,
     queryFn: () => fetchCalendarBoardForRange<CalendarBoardResponse>(range.from, range.to),
   });
+  const refetchCalendarBoard = calendarBoardQuery.refetch;
+  const calendarBoardError = calendarBoardQuery.error;
 
   useFocusEffect(
     useCallback(() => {
-      void calendarBoardQuery.refetch();
-    }, [calendarBoardQuery.refetch])
+      void refetchCalendarBoard();
+    }, [refetchCalendarBoard])
   );
 
   useEffect(() => {
-    if (!calendarBoardQuery.error) {
+    if (!calendarBoardError) {
       return;
     }
-    const error = calendarBoardQuery.error as { message?: string } | null;
+    const error = calendarBoardError as { message?: string } | null;
     Alert.alert("Calendrier", error?.message || "Impossible de charger la vue calendrier.");
-  }, [calendarBoardQuery.error]);
+  }, [calendarBoardError]);
 
   useEffect(() => {
     if (!householdId) {
@@ -149,7 +153,7 @@ export default function DashboardCalendarScreen() {
       unsubscribeRealtime = await subscribeToHouseholdRealtime(householdId, (message) => {
         if (!active) return;
         if (message?.module !== "calendar") return;
-        void calendarBoardQuery.refetch();
+        void refetchCalendarBoard();
       });
     };
 
@@ -161,7 +165,7 @@ export default function DashboardCalendarScreen() {
         unsubscribeRealtime();
       }
     };
-  }, [calendarBoardQuery.refetch, householdId]);
+  }, [householdId, refetchCalendarBoard]);
 
   const board = (calendarBoardQuery.data ?? null) as CalendarBoardResponse | null;
 
@@ -288,7 +292,7 @@ export default function DashboardCalendarScreen() {
 
         <TouchableOpacity
           style={[styles.primaryButton, { backgroundColor: theme.tint }]}
-          onPress={() => router.push("/(tabs)/calendar")}
+          onPress={() => router.push("/(app)/(tabs)/calendar")}
         >
           <Text style={styles.primaryButtonText}>Ouvrir le module Calendrier</Text>
         </TouchableOpacity>
@@ -340,5 +344,5 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  primaryButtonText: { color: "#FFF", fontWeight: "700", fontSize: 13 },
+  primaryButtonText: { color: BUTTON_TEXT_COLOR, fontWeight: "700", fontSize: 13 },
 });

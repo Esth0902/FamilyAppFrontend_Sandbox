@@ -2,6 +2,7 @@
 import type { ReactNode } from "react";
 import { Alert } from "react-native";
 import { fireEvent, render, screen } from "@testing-library/react-native";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import LoginScreen from "@/app/(auth)/login";
 
@@ -48,16 +49,24 @@ describe("Login screen", () => {
 
   it("shows a validation alert when form is empty", () => {
     const alertSpy = jest.spyOn(Alert, "alert").mockImplementation(jest.fn());
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+        mutations: { retry: false },
+      },
+    });
 
     const Wrapper = ({ children }: { children: ReactNode }) => (
-      <SafeAreaProvider
-        initialMetrics={{
-          frame: { x: 0, y: 0, width: 390, height: 844 },
-          insets: { top: 44, bottom: 34, left: 0, right: 0 },
-        }}
-      >
-        {children}
-      </SafeAreaProvider>
+      <QueryClientProvider client={queryClient}>
+        <SafeAreaProvider
+          initialMetrics={{
+            frame: { x: 0, y: 0, width: 390, height: 844 },
+            insets: { top: 44, bottom: 34, left: 0, right: 0 },
+          }}
+        >
+          {children}
+        </SafeAreaProvider>
+      </QueryClientProvider>
     );
 
     render(<LoginScreen />, { wrapper: Wrapper });

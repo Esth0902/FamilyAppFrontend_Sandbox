@@ -94,7 +94,7 @@ export default function BudgetAdjustmentsScreen() {
       router.back();
       return;
     }
-    router.replace("/(tabs)/budget");
+    router.replace("/(app)/(tabs)/budget");
   }, [router]);
 
   useEffect(() => {

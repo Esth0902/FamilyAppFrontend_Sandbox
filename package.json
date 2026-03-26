@@ -10,6 +10,8 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
+    "typecheck": "tsc --noEmit",
+    "quality:check": "npm run typecheck && npm run lint && npm run test",
     "lint": "expo lint",
     "test": "jest --runInBand --forceExit",
     "test:unit": "jest --runInBand --forceExit tests/jest",

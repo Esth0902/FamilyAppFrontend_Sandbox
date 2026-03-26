@@ -19,7 +19,10 @@ const parseJsonSafe = async (response: Response) => {
   }
 };
 
-export type ApiFetchOptions = RequestInit;
+export type ApiFetchOptions = RequestInit & {
+  cacheTtlMs?: number;
+  bypassCache?: boolean;
+};
 
 export type ApiErrorCode =
   | "CONFIG"
@@ -239,7 +242,11 @@ export const apiFetch = async (endpoint: string, options: ApiFetchOptions = {}) 
     }
   }
 
-  const requestOptions = options;
+  const {
+    cacheTtlMs: _cacheTtlMs,
+    bypassCache: _bypassCache,
+    ...requestOptions
+  } = options;
   const method = String(requestOptions.method ?? "GET").toUpperCase();
 
   const headers: Record<string, string> = {

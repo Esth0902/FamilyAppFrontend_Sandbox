@@ -220,7 +220,7 @@ export default function ShoppingListsHomeScreen() {
       <Stack.Screen options={{ headerShown: false }} />
 
       <View style={[styles.header, { borderBottomColor: theme.icon, paddingTop: Math.max(insets.top, 12) }]}>
-        <TouchableOpacity onPress={() => router.replace("/(tabs)/meal")} style={[styles.backBtn, { borderColor: theme.icon }]}>
+        <TouchableOpacity onPress={() => router.replace("/(app)/(tabs)/meal")} style={[styles.backBtn, { borderColor: theme.icon }]}>
           <MaterialCommunityIcons name="arrow-left" size={20} color={theme.tint} />
         </TouchableOpacity>
         <Text style={[styles.title, { color: theme.text }]}>Listes de courses</Text>
