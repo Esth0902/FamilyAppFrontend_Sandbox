@@ -21,7 +21,6 @@ import {
     toPositiveInt,
     type NotificationNavigationTarget,
 } from "@/src/notifications/navigation";
-import { subscribeToUserRealtime } from "@/src/realtime/client";
 import {
     persistStoredUser,
     switchStoredHousehold,
@@ -104,7 +103,6 @@ export default function ConnectedHome() {
         notificationsError,
         refreshAll,
         refreshNotifications,
-        invalidateNotifications,
     } = useHomeData({ token, user });
 
     const [processingNotificationId, setProcessingNotificationId] = useState<number | null>(null);
@@ -132,45 +130,6 @@ export default function ConnectedHome() {
         });
     }, [notificationsError, profileError]);
 
-    useEffect(() => {
-        if (!token) {
-            return;
-        }
-
-        let isActive = true;
-        let unsubscribeRealtime: (() => void) | null = null;
-
-        const subscribeRealtime = async () => {
-            const parsedUserId = Number(user?.id ?? 0);
-            if (!Number.isFinite(parsedUserId) || parsedUserId <= 0) {
-                return;
-            }
-
-            const unsubscribe = await subscribeToUserRealtime(parsedUserId, (message) => {
-                const module = String(message?.module ?? "");
-                if (module !== "notifications") {
-                    return;
-                }
-                void invalidateNotifications();
-            });
-
-            if (!isActive) {
-                unsubscribe();
-                return;
-            }
-
-            unsubscribeRealtime = unsubscribe;
-        };
-
-        void subscribeRealtime();
-
-        return () => {
-            isActive = false;
-            if (unsubscribeRealtime) {
-                unsubscribeRealtime();
-            }
-        };
-    }, [invalidateNotifications, token, user?.id]);
     const onSetupHouse = () => {
         router.push("/householdSetup");
     };

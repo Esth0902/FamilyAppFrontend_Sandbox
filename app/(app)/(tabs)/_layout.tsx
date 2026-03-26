@@ -142,7 +142,6 @@ const activeTabRoute = useMemo<TabsRouteName | null>(() => {
                 void queryClient.invalidateQueries({
                     queryKey: queryKeys.household.config(householdId),
                 });
-                void refetchHouseholdConfig();
             });
         };
 

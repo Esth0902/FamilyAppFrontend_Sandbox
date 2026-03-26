@@ -36,6 +36,46 @@ type FetchTasksBoardResult = {
   resolvedWeekStartDay: number;
 };
 
+type UnknownRecord = Record<string, unknown>;
+
+const isRecord = (value: unknown): value is UnknownRecord => {
+  return typeof value === "object" && value !== null;
+};
+
+const isTasksBoardPayload = (value: unknown): value is TasksBoardPayload => {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return (
+    typeof value.tasks_enabled === "boolean"
+    && typeof value.can_manage_templates === "boolean"
+    && typeof value.can_manage_instances === "boolean"
+    && Array.isArray(value.instances)
+  );
+};
+
+const parseTasksBoardPayload = (value: unknown, endpoint: string): TasksBoardPayload => {
+  if (!isTasksBoardPayload(value)) {
+    throw new Error(`Réponse invalide pour ${endpoint}.`);
+  }
+
+  return value;
+};
+
+const fetchTasksBoardPayload = async (
+  from: string,
+  to: string,
+  options: { bypassCache?: boolean } = {}
+): Promise<TasksBoardPayload> => {
+  const endpoint = `/tasks/board?from=${from}&to=${to}`;
+  const payload = await apiFetch(endpoint, {
+    cacheTtlMs: 12_000,
+    bypassCache: Boolean(options.bypassCache),
+  });
+  return parseTasksBoardPayload(payload, endpoint);
+};
+
 const isoWeekDayFromDate = (date: Date) => {
   const day = date.getDay();
   return day === 0 ? 7 : day;
@@ -102,7 +142,7 @@ export const fetchTasksBoardForCurrentWeek = async (
   const weekStart = weekStartFromDateWithIsoDay(new Date(), plannedWeekStartDay);
   const rangeFrom = toIsoDate(weekStart);
   const rangeTo = toIsoDate(addDays(weekStart, 6));
-  let payload = await apiFetch(`/tasks/board?from=${rangeFrom}&to=${rangeTo}`) as TasksBoardPayload;
+  let payload = await fetchTasksBoardPayload(rangeFrom, rangeTo);
 
   const isAlternatingCustodyEnabled = Boolean(payload?.settings?.alternating_custody_enabled);
   const homeWeekStartDay = resolveIsoWeekDayFromIsoDate(payload?.settings?.custody_home_week_start);
@@ -116,7 +156,9 @@ export const fetchTasksBoardForCurrentWeek = async (
     const correctedTo = toIsoDate(addDays(correctedWeekStart, 6));
 
     if (correctedFrom !== rangeFrom || correctedTo !== rangeTo) {
-      payload = await apiFetch(`/tasks/board?from=${correctedFrom}&to=${correctedTo}`) as TasksBoardPayload;
+      payload = await fetchTasksBoardPayload(correctedFrom, correctedTo, {
+        bypassCache: true,
+      });
     }
   }
 

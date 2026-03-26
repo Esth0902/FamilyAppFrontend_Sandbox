@@ -2,6 +2,9 @@
 
 # dependencies
 node_modules/
+.idea/
+.tmp-tests/
+*.bak
 
 # Expo
 .expo/

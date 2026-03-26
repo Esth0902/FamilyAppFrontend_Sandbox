@@ -29,9 +29,12 @@ export const useRealtimeRefetch = ({
 
   useFocusEffect(
     useCallback(() => {
+      if (!enabled) {
+        return;
+      }
       const options = focusSilent === undefined ? undefined : { silent: focusSilent };
       void refresh(options);
-    }, [focusSilent, refresh])
+    }, [enabled, focusSilent, refresh])
   );
 
   useEffect(() => {

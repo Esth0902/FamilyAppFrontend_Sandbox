@@ -14,6 +14,7 @@ type UseAppRealtimeArgs = {
   enabled: boolean;
   userId: number;
   scheduleLocalNotification: (input: ScheduleLocalNotificationInput) => Promise<void>;
+  onNotificationEvent?: (payload: Record<string, unknown>) => void | Promise<void>;
   onIncompleteNotificationPayload: () => void | Promise<void>;
 };
 
@@ -21,6 +22,7 @@ export const useAppRealtime = ({
   enabled,
   userId,
   scheduleLocalNotification,
+  onNotificationEvent,
   onIncompleteNotificationPayload,
 }: UseAppRealtimeArgs): void => {
   useEffect(() => {
@@ -46,6 +48,7 @@ export const useAppRealtime = ({
         const notificationType = String(payload.notification_type ?? payload.type ?? "").trim();
 
         if (notificationId > 0 && title.length > 0 && body.length > 0) {
+          void onNotificationEvent?.(payload);
           void scheduleLocalNotification({
             notificationId,
             title,
@@ -79,5 +82,5 @@ export const useAppRealtime = ({
         unsubscribeUserRealtime();
       }
     };
-  }, [enabled, onIncompleteNotificationPayload, scheduleLocalNotification, userId]);
+  }, [enabled, onIncompleteNotificationPayload, onNotificationEvent, scheduleLocalNotification, userId]);
 };

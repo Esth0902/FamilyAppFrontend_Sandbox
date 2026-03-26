@@ -1,6 +1,6 @@
 import { Slot } from "expo-router";
-import { useCallback, useEffect, useState } from "react";
-import { LogBox, View } from "react-native";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { AppState, LogBox, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
@@ -61,6 +61,7 @@ installIosTextScale();
 
 export default function RootLayout() {
   const [queryClient] = useState(createRootQueryClient);
+  const pendingNotificationsPullRef = useRef<Promise<void> | null>(null);
   const { isBootstrapping, mustChangePassword, user } = useAuthBootstrap();
   const token = useAuthStore((state) => state.token);
   const authReady = !isBootstrapping;
@@ -76,24 +77,44 @@ export default function RootLayout() {
       return;
     }
 
-    try {
-      await queryClient.fetchQuery({
-        queryKey: queryKeys.home.pendingNotifications(token),
-        queryFn: fetchPendingNotifications,
-        staleTime: 10_000,
-        gcTime: 5 * 60_000,
-      });
-    } catch (error: any) {
-      if (Number(error?.status) !== 429) {
-        console.error("Erreur pull notifications:", error);
-      }
+    if (pendingNotificationsPullRef.current) {
+      await pendingNotificationsPullRef.current;
+      return;
     }
+
+    const nextPull = (async () => {
+      try {
+        await queryClient.fetchQuery({
+          queryKey: queryKeys.home.pendingNotifications(token),
+          queryFn: fetchPendingNotifications,
+          staleTime: 10_000,
+          gcTime: 5 * 60_000,
+        });
+      } catch (error: any) {
+        if (Number(error?.status) !== 429) {
+          console.error("Erreur pull notifications:", error);
+        }
+      }
+    })();
+
+    pendingNotificationsPullRef.current = nextPull;
+    await nextPull.finally(() => {
+      if (pendingNotificationsPullRef.current === nextPull) {
+        pendingNotificationsPullRef.current = null;
+      }
+    });
   }, [queryClient, token]);
+  const invalidatePendingNotifications = useCallback(async () => {
+    await queryClient.invalidateQueries({
+      queryKey: queryKeys.home.pendingNotificationsRoot(),
+    });
+  }, [queryClient]);
 
   useAppRealtime({
     enabled: notificationsEnabled,
     userId,
     scheduleLocalNotification,
+    onNotificationEvent: invalidatePendingNotifications,
     onIncompleteNotificationPayload: pullPendingNotifications,
   });
 
@@ -116,16 +137,20 @@ export default function RootLayout() {
       return;
     }
 
-    let timer: ReturnType<typeof setInterval> | null = null;
     void pullPendingNotifications();
-    timer = setInterval(() => {
-      void pullPendingNotifications();
-    }, 30000);
+
+    let currentAppState = AppState.currentState;
+    const subscription = AppState.addEventListener("change", (nextAppState) => {
+      const wasBackgrounded = currentAppState === "inactive" || currentAppState === "background";
+      currentAppState = nextAppState;
+
+      if (wasBackgrounded && nextAppState === "active") {
+        void pullPendingNotifications();
+      }
+    });
 
     return () => {
-      if (timer) {
-        clearInterval(timer);
-      }
+      subscription.remove();
     };
   }, [notificationsEnabled, pullPendingNotifications]);
 

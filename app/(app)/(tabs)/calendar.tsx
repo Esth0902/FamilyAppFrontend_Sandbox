@@ -581,7 +581,8 @@ export default function CalendarScreen() {
     }
 
     await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ["tasks"] }),
+      queryClient.invalidateQueries({ queryKey: ["tasks", "overview", householdId] }),
+      queryClient.invalidateQueries({ queryKey: ["tasks", "board", householdId] }),
       queryClient.invalidateQueries({ queryKey: queryKeys.dashboard.root(householdId) }),
     ]);
   }, [householdId, queryClient]);

@@ -12,8 +12,6 @@ export function HouseholdModulesSection(state: any) {
 
   if (wizard.shouldUseSetupWizard && !wizard.isModulesStepActive) return null;
 
-  const memberItemBackground = `${theme.tint}12`;
-
   const renderContent = () => (
     <View style={styles.section}>
       <View style={[styles.collapsibleSectionCard, { backgroundColor: theme.card, borderColor: theme.icon }]}>
@@ -140,7 +138,9 @@ export function HouseholdModulesSection(state: any) {
 
                           {data.canSuggestCreateDietaryTag && (
                             <View style={[styles.createTagBox, { borderColor: theme.icon, backgroundColor: theme.card }]}>
-                              <Text style={[styles.createTagTitle, { color: theme.text }]}>Ajouter "{form.dietaryTagSearch.trim()}" ?</Text>
+                              <Text style={[styles.createTagTitle, { color: theme.text }]}>
+                                Ajouter &quot;{form.dietaryTagSearch.trim()}&quot; ?
+                              </Text>
                               <AppButton onPress={actions.createDietaryTag} disabled={asyncState.creatingDietaryTag} style={[styles.createTagBtn, { backgroundColor: theme.tint }]}>
                                 {asyncState.creatingDietaryTag ? <ActivityIndicator size="small" color="white" /> : <Text style={styles.createTagBtnText}>Ajouter ce tag</Text>}
                               </AppButton>
@@ -229,7 +229,7 @@ export function HouseholdModulesSection(state: any) {
                             ))}
                           </View>
 
-                          <Text style={[styles.label, { color: theme.text }]}>Début d'une semaine à la maison</Text>
+                          <Text style={[styles.label, { color: theme.text }]}>Début d&apos;une semaine à la maison</Text>
                           <AppButton onPress={actions.openCustodyDateWheel} style={[styles.pickerFieldBtn, { borderColor: theme.icon, backgroundColor: theme.background }]}>
                             <MaterialCommunityIcons name="calendar-month-outline" size={16} color={theme.textSecondary} />
                             <Text style={[styles.pickerFieldText, { color: theme.text }]}>{form.tasksSettings.custody_home_week_start}</Text>

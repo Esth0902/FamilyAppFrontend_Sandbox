@@ -1187,7 +1187,6 @@ export function useSetupHouseholdScreen() {
     }
   }, [
     activeModules,
-    alreadyConfigured,
     authUser,
     budgetSettings,
     calendarSettings,
@@ -1195,6 +1194,8 @@ export function useSetupHouseholdScreen() {
     defaultServings,
     houseName,
     isEditMode,
+    managedMembers,
+    managedRoleDrafts,
     maxVotesPerUser,
     mealOptions,
     members,
@@ -1203,6 +1204,7 @@ export function useSetupHouseholdScreen() {
     pollTime,
     router,
     selectedMealDietaryTags,
+    shouldUseSetupWizard,
     tasksSettings,
   ]);
 

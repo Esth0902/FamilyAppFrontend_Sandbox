@@ -264,7 +264,7 @@ export function RecipeModal({
                             >
                                 <MaterialCommunityIcons name="lightbulb-on" size={28} color="white" />
                                 <View>
-                                    <Text style={styles.choiceBtnText}>Trouver l'inspiration</Text>
+                                    <Text style={styles.choiceBtnText}>Trouver l&apos;inspiration</Text>
                                     <Text style={styles.choiceBtnSubText}>Suggestions selon mes goûts</Text>
                                 </View>
                             </TouchableOpacity>

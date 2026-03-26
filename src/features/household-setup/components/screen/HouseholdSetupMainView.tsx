@@ -1,6 +1,5 @@
 import React from "react";
 import { View, Text, StyleSheet, ScrollView, ActivityIndicator, KeyboardAvoidingView, Platform } from "react-native";
-import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { AppButton } from "@/src/components/ui/AppButton";
 
 import { HouseholdNameSection } from "../sections/HouseholdNameSection";
@@ -10,7 +9,7 @@ import { HouseholdModulesSection } from "../sections/HouseholdModulesSection";
 import { ScreenHeader } from "@/src/components/ui/ScreenHeader";
 
 export function HouseholdSetupMainView(state: any) {
-  const { insets, theme, ui, wizard, actions } = state;
+  const { theme, ui, wizard, actions } = state;
 
 return (
   <KeyboardAvoidingView

@@ -456,10 +456,13 @@ export default function TasksScreen() {
     [templates]
   );
   const invalidateTaskCaches = useCallback(() => {
-    void queryClient.invalidateQueries({ queryKey: ["tasks"] });
-    if (householdId !== null) {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.dashboard.root(householdId) });
+    if (householdId === null) {
+      return;
     }
+
+    void queryClient.invalidateQueries({ queryKey: ["tasks", "overview", householdId] });
+    void queryClient.invalidateQueries({ queryKey: ["tasks", "board", householdId] });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.dashboard.root(householdId) });
   }, [householdId, queryClient]);
   const withOptimisticInstanceUpdate = useCallback(
     (instanceId: number, updater: (instance: TaskInstance) => TaskInstance) => {

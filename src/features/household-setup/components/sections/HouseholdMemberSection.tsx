@@ -162,7 +162,13 @@ export function HouseholdMembersSection(state: any) {
                 </View>
 
                 <AppButton
-                  onPress={() => { ui.isEditMode ? void actions.onAddManagedMember() : actions.addMember(); }}
+                  onPress={() => {
+                    if (ui.isEditMode) {
+                      void actions.onAddManagedMember();
+                      return;
+                    }
+                    actions.addMember();
+                  }}
                   style={[styles.addButton, { backgroundColor: theme.background }]}
                   disabled={ui.isEditMode && asyncState.addingManagedMember}
                 >
