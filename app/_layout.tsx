@@ -197,66 +197,27 @@ export default function RootLayout() {
                     if (!Notifications) {
                         return;
                     }
-                    if (!Number.isFinite(notificationId) || notificationId <= 0) {
-                        return;
-                    }
-                    if (notifiedNotificationIdsRef.current.has(notificationId)) {
-                        return;
-                    }
+                if (!Number.isFinite(notificationId) || notificationId <= 0) {
+                    return;
+                }
+                if (notifiedNotificationIdsRef.current.has(notificationId) === false) {
+                        notifiedNotificationIdsRef.current.add(notificationId);
+                }
 
-                    await Notifications.scheduleNotificationAsync({
-                        content: {
-                            title,
-                            body,
-                            data,
-                        },
-                        trigger: null,
-                    });
-                    notifiedNotificationIdsRef.current.add(notificationId);
-                };
+                await Notifications.scheduleNotificationAsync({
+                    content: {
+                    title,
+                    body,
+                    data,
+                    },
+                    trigger: null,
+                });
+            };
 
                 const pullPendingNotifications = async () => {
-                    if (isCancelled) {
-                        return;
-                    }
-
+                    if (isCancelled) {return;}
                     try {
-                        const response = await apiFetch("/notifications/pending?all_households=1");
-                        const notifications = Array.isArray(response?.notifications) ? response.notifications : [];
-
-                        for (const notification of notifications) {
-                            const notificationId = Number(notification?.id ?? 0);
-                            if (!Number.isFinite(notificationId) || notificationId <= 0) {
-                                continue;
-                            }
-
-                            const notificationType = String(notification?.type ?? "");
-                            const data = (notification?.data ?? {}) as Record<string, unknown>;
-                            const householdId = toPositiveInt(notification?.household_id ?? data.household_id);
-                            const inviterName = String(data.inviter_name ?? "").trim() || "Un parent";
-                            const householdName = String(data.household_name ?? "").trim() || "ce foyer";
-                            const requesterName = String(data.requester_name ?? data.requester_household_name ?? "").trim() || "Un foyer";
-                            const taskName = String(data.task_name ?? "").trim() || "une tâche";
-                            const body = notificationType === "household_invite"
-                                ? `${inviterName} vous invite à rejoindre le foyer ${householdName}.`
-                                : notificationType === "household_link_request"
-                                    ? `${requesterName} souhaite connecter son foyer à ${householdName}.`
-                                : notificationType === "task_reassignment_invite"
-                                    ? `${requesterName} vous demande de reprendre ${taskName} (foyer : ${householdName}).`
-                                    : String(notification?.body ?? "");
-
-                            await scheduleLocalNotification(
-                                notificationId,
-                                String(notification?.title ?? "FamilyFlow"),
-                                body,
-                                {
-                                    ...data,
-                                    notification_id: notificationId,
-                                    notification_type: notificationType,
-                                    ...(householdId ? { household_id: householdId } : {}),
-                                },
-                            );
-                        }
+                        await apiFetch("/notifications/pending?all_households=1");
                     } catch (error: any) {
                         if (Number(error?.status) !== 429) {
                             console.error("Erreur pull notifications:", error);
@@ -279,14 +240,20 @@ export default function RootLayout() {
                         const notificationType = String(payload.notification_type ?? payload.type ?? "").trim();
 
                         if (notificationId > 0 && title.length > 0 && body.length > 0) {
-                            void scheduleLocalNotification(notificationId, title, body, {
-                                ...payload,
-                                notification_id: notificationId,
-                                notification_type: notificationType,
-                                ...(householdId ? { household_id: householdId } : {}),
-                            });
+                            if (notifiedNotificationIdsRef.current.has(notificationId)) {
                             return;
-                        }
+                            }
+
+                        notifiedNotificationIdsRef.current.add(notificationId);
+
+                        void scheduleLocalNotification(notificationId, title, body, {
+                            ...payload,
+                            notification_id: notificationId,
+                            notification_type: notificationType,
+                            ...(householdId ? { household_id: householdId } : {}),
+                        });
+                        return;
+                    }
 
                         void pullPendingNotifications();
                     });
@@ -397,11 +364,11 @@ export default function RootLayout() {
                     redirectHref = "/change-credentials";
                 }
             } else if (isChangeCredentialsRoute) {
-                redirectHref = hasHousehold ? "/(tabs)/home" : "/householdSetup";
+                redirectHref = hasHousehold ? "/home" : "/householdSetup";
             } else if (!hasHousehold && !isHouseholdSetupRoute) {
                 redirectHref = "/householdSetup";
             } else if (hasHousehold && isPublicRoute) {
-                redirectHref = "/(tabs)/home";
+                redirectHref = "/home";
             }
         }
     }

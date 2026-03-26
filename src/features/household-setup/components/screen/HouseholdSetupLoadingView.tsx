@@ -1,15 +1,7 @@
 import React from "react";
-import { ActivityIndicator, StyleSheet, View } from "react-native";
+import { View, ActivityIndicator, StyleSheet } from "react-native";
 
-type HouseholdSetupLoadingViewProps = {
-  theme: {
-    tint: string;
-  };
-};
-
-export function HouseholdSetupLoadingView({
-  theme,
-}: HouseholdSetupLoadingViewProps) {
+export function HouseholdSetupLoadingView({ theme }: { theme: any }) {
   return (
     <View style={styles.centerContainer}>
       <ActivityIndicator size="large" color={theme.tint} />
@@ -18,9 +10,5 @@ export function HouseholdSetupLoadingView({
 }
 
 const styles = StyleSheet.create({
-  centerContainer: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-  },
+  centerContainer: { flex: 1, justifyContent: "center", alignItems: "center" },
 });

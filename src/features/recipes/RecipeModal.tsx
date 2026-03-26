@@ -27,6 +27,19 @@ import { useRecipeForm } from "@/src/features/recipes/useRecipeForm";
 type ModalMode = "choice" | "manual" | "ai" | "preview";
 type AiIntent = "specific" | "ideas";
 
+type FinalizeAiRecipePayload = {
+    title: string;
+    type: string;
+    description: string;
+    instructions: string;
+    ingredients: {
+        name: string;
+        unit?: string | null;
+        quantity: number;
+        category?: string | null;
+    }[];
+};
+
 type RecipeModalProps = {
     visible: boolean;
     onClose: () => void;
@@ -43,7 +56,7 @@ type RecipeModalProps = {
         intent: "specific" | "ideas";
     }) => Promise<unknown>;
     previewAiRecipe: (payload: { title: string; dietary_preferences?: string }) => Promise<unknown>;
-    storeAiRecipe: (payload: Record<string, unknown>) => Promise<unknown>;
+    storeAiRecipe: (payload: FinalizeAiRecipePayload) => Promise<unknown>;
 };
 
 export function RecipeModal({
@@ -195,10 +208,7 @@ export function RecipeModal({
         }
 
         try {
-            await storeAiRecipe({
-                ...previewRecipe,
-                household_id: householdId,
-            });
+            await storeAiRecipe(previewRecipe);
             closeAndReset();
         } catch {
             Alert.alert("Recettes", "L'enregistrement a échoué.");
@@ -254,7 +264,7 @@ export function RecipeModal({
                             >
                                 <MaterialCommunityIcons name="lightbulb-on" size={28} color="white" />
                                 <View>
-                                    <Text style={styles.choiceBtnText}>Trouver l’inspiration</Text>
+                                    <Text style={styles.choiceBtnText}>Trouver l'inspiration</Text>
                                     <Text style={styles.choiceBtnSubText}>Suggestions selon mes goûts</Text>
                                 </View>
                             </TouchableOpacity>

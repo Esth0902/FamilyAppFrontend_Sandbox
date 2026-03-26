@@ -81,8 +81,10 @@ export function useSetupHouseholdScreen() {
   const householdEditHeaderOffset = isEditMode && !isMealsScope && !isTasksScope && !isBudgetScope && !isCalendarScope
     ? 6
     : 0;
+  
+  const [isSetupCompleted, setIsSetupCompleted] = useState(true);
 
-  const shouldUseSetupWizard = isCreateMode && !isModuleScope;
+  const shouldUseSetupWizard = (isCreateMode || !isSetupCompleted) && !isModuleScope;
 
   const setupFlow = useHouseholdSetupFlow({
     enabled: shouldUseSetupWizard,
@@ -987,24 +989,33 @@ export function useSetupHouseholdScreen() {
   }, [router, scopedBackRoute]);
 
   const handleSave = useCallback(async () => {
-    if (!isEditMode && createdMembersForShare.length > 0) {
+    // 1. Si on est sur l'écran final de partage des accès et qu'on clique sur Terminer
+    if (createdMembersForShare.length > 0) {
+      setIsSetupCompleted(true);
       router.replace("/(app)/(tabs)/home");
       return;
     }
 
+    // 2. Vérification du nom
     if (!houseName.trim()) {
       Alert.alert("Oups", "Le nom du foyer est obligatoire.");
       return;
     }
 
-    if (!isEditMode && activeModules.budget) {
-      const childCount = members.filter((m) => m.role === "enfant").length;
-      if (childCount === 0) {
-        Alert.alert("Budget", "Active: ajoute au moins un membre enfant.");
+    // 3. Vérification du budget : on compte les enfants non sauvegardés ET les enfants en base de données
+    if (shouldUseSetupWizard && activeModules.budget) {
+      const draftChildCount = members.filter((m) => m.role === "enfant").length;
+      const managedChildCount = managedMembers.filter(
+        (m) => (managedRoleDrafts[m.id] ?? m.role) === "enfant"
+      ).length;
+
+      if (draftChildCount + managedChildCount === 0) {
+        Alert.alert("Budget", "Le module budget nécessite au moins un membre enfant dans le foyer.");
         return;
       }
     }
 
+    
     const parsedDefaultServings = Number(defaultServings);
     if (!Number.isInteger(parsedDefaultServings) || parsedDefaultServings < 1 || parsedDefaultServings > 30) {
       Alert.alert("Repas", "Le nombre de portions par défaut doit être entre 1 et 30.");
@@ -1137,7 +1148,7 @@ export function useSetupHouseholdScreen() {
               });
             }
           } catch (refreshError) {
-            console.error("Erreur rafraichissement profil apres creation foyer:", refreshError);
+            console.error("Erreur rafraîchissement profil après création foyer:", refreshError);
             if (authUser) {
               await persistStoredUser({
                 ...(authUser as StoredUser),

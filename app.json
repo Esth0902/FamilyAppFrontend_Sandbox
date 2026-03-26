@@ -14,7 +14,6 @@
       "bundleIdentifier": "com.esther0902.frontend"
     },
     "android": {
-      "usesCleartextTraffic": false,
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
       "package": "com.esther0902.frontend"

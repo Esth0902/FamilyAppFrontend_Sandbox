@@ -9,7 +9,7 @@ import { subscribeToHouseholdRealtime } from "@/src/realtime/client";
 import { useStoredUserState } from "@/src/session/user-cache";
 
 type HouseholdModuleKey = "meals" | "tasks" | "budget" | "calendar";
-type HouseholdModulesState = Record<HouseholdModuleKey, boolean>;
+type HouseholdModulesState = Record<HouseholdModuleKey, boolean> & { isSetupCompleted: boolean };
 type TabsRouteName = "home" | "meal" | "tasks" | "budget" | "calendar";
 
 const DEFAULT_HOUSEHOLD_MODULES: HouseholdModulesState = {
@@ -17,6 +17,7 @@ const DEFAULT_HOUSEHOLD_MODULES: HouseholdModulesState = {
     tasks: true,
     budget: true,
     calendar: true,
+    isSetupCompleted: true,
 };
 
 const TABS_ROUTE_MODULE_MAP: Partial<Record<TabsRouteName, HouseholdModuleKey>> = {
@@ -41,6 +42,7 @@ const parseModuleEnabled = (rawModule: unknown): boolean => {
 const parseHouseholdModules = (response: unknown): HouseholdModulesState => {
     const config = (response as { config?: unknown } | null)?.config;
     const modules = (config as { modules?: unknown } | null)?.modules;
+    const isSetupCompleted = (config as { is_setup_completed?: unknown } | null)?.is_setup_completed;
     const safeModules = (modules ?? {}) as Record<string, unknown>;
 
     return {
@@ -48,6 +50,7 @@ const parseHouseholdModules = (response: unknown): HouseholdModulesState => {
         tasks: parseModuleEnabled(safeModules.tasks),
         budget: parseModuleEnabled(safeModules.budget),
         calendar: parseModuleEnabled(safeModules.calendar),
+        isSetupCompleted: isSetupCompleted !== false, // On vérifie le flag de la DB
     };
 };
 
@@ -123,6 +126,16 @@ const activeTabRoute = useMemo<TabsRouteName | null>(() => {
             void loadHouseholdModules(householdId, { forceRefresh: true });
         }, [householdId, loadHouseholdModules])
     );
+
+    useEffect(() => {
+        console.log("Modules reçus par le Layout :", householdModules);
+        if (!householdModules) return;
+
+        if (householdModules.isSetupCompleted === false) {
+            console.log("Onboarding incomplet détecté, redirection vers le setup !");
+            router.replace("/(app)/householdSetup?mode=edit");
+        }
+    }, [householdModules.isSetupCompleted, router]);
 
     useEffect(() => {
         if (!householdId) {

@@ -11,7 +11,6 @@ import { useRouter } from "expo-router";
 import { API_BASE_URL } from "@/src/api/client";
 import { Colors } from "@/constants/theme";
 
-// Import de tes composants UI partagés
 import { AppTextInput } from "@/src/components/ui/AppTextInput";
 import { AppButton } from "@/src/components/ui/AppButton";
 import { ScreenHeader } from "@/src/components/ui/ScreenHeader";
@@ -82,7 +81,6 @@ export default function ForgotPasswordScreen() {
             style={[styles.container, { backgroundColor: theme.background }]}
         >
             <View style={styles.content}>
-                {/* Utilisation de ton ScreenHeader au lieu de vues brutes */}
                 <ScreenHeader
                     title="Mot de passe oublié"
                     subtitle="Saisis ton e-mail pour recevoir un lien de réinitialisation."
@@ -93,7 +91,6 @@ export default function ForgotPasswordScreen() {
                 />
 
                 <View style={styles.form}>
-                    {/* Utilisation de ton AppTextInput */}
                     <AppTextInput
                         label="E-mail"
                         containerStyle={styles.inputContainer}
@@ -104,7 +101,6 @@ export default function ForgotPasswordScreen() {
                         onChangeText={setEmail}
                     />
 
-                    {/* Utilisation de ton AppButton qui gère le loading nativement */}
                     <AppButton
                         title="Envoyer le lien"
                         variant="primary"
@@ -124,9 +120,9 @@ const styles = StyleSheet.create({
     },
     content: {
         flex: 1,
-        padding: 12, // Alignement avec ton Login
-        paddingTop: 56, // Pour matcher la hauteur du Login
-        justifyContent: "flex-start", // On remonte le formulaire vers le haut
+        padding: 12, 
+        paddingTop: 56, 
+        justifyContent: "flex-start",
     },
     headerContainer: {
         paddingHorizontal: 0, 

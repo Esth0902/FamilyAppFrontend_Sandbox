@@ -10,6 +10,7 @@ import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { apiFetch } from '@/src/api/client';
 import { getStoredUser } from '@/src/session/user-cache';
+import { useKeepAwake } from 'expo-keep-awake';
 
 interface Ingredient {
     id: number;
@@ -36,6 +37,7 @@ interface Recipe {
 }
 
 export default function RecipeDetailScreen() {
+    useKeepAwake();
     const { id, autoEdit } = useLocalSearchParams();
     const router = useRouter();
     const insets = useSafeAreaInsets();

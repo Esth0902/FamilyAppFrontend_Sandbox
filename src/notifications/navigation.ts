@@ -1,6 +1,6 @@
 export type NotificationNavigationTarget =
-    | "/(tabs)/home"
-    | "/(tabs)/budget"
+    | "/home"
+    | "/budget"
     | "/meal/poll"
     | "/settings"
     | {
@@ -67,7 +67,7 @@ export const resolveNotificationNavigationTarget = (
     }
 
     if (BUDGET_NOTIFICATION_TYPES.has(type)) {
-        return "/(tabs)/budget";
+        return "/budget";
     }
 
     if (POLL_NOTIFICATION_TYPES.has(type)) {
@@ -78,5 +78,5 @@ export const resolveNotificationNavigationTarget = (
         return "/settings";
     }
 
-    return "/(tabs)/home";
+    return "/home";
 };

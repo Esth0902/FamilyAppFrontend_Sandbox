@@ -93,7 +93,6 @@ export const useAuthStore = create<AuthStoreState>((set, get) => ({
     return hydratePromise;
   },
   logout: async () => {
-    // Ensure UI redirection is instant before touching secure storage.
     set({
       hydrated: true,
       token: null,
