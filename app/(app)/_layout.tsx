@@ -1,34 +1,7 @@
 import { Redirect, Slot, useSegments, type Href } from "expo-router";
 
+import { resolveAppRedirect } from "@/src/navigation/auth-guards";
 import { useAuthStore } from "@/src/store/useAuthStore";
-
-const resolveAppRedirect = (
-  currentSegment: string,
-  isAuthenticated: boolean,
-  mustChangePassword: boolean,
-  hasHousehold: boolean
-): Href | null => {
-  const isChangeCredentialsRoute = currentSegment === "change-credentials";
-  const isHouseholdSetupRoute = currentSegment === "householdSetup";
-
-  if (!isAuthenticated) {
-    return "/";
-  }
-
-  if (mustChangePassword) {
-    return isChangeCredentialsRoute ? null : "/change-credentials";
-  }
-
-  if (isChangeCredentialsRoute) {
-    return hasHousehold ? "/home" : "/householdSetup";
-  }
-
-  if (!hasHousehold && !isHouseholdSetupRoute) {
-    return "/householdSetup";
-  }
-
-  return null;
-};
 
 export default function AppGroupLayout() {
   const segments = useSegments() as string[];
@@ -49,7 +22,7 @@ export default function AppGroupLayout() {
     isAuthenticated,
     mustChangePassword,
     hasHousehold
-  );
+  ) as Href | null;
 
   if (redirectHref) {
     return <Redirect href={redirectHref} />;

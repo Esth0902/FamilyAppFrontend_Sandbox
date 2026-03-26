@@ -1,26 +1,7 @@
 import { Redirect, Slot, type Href } from "expo-router";
 
+import { resolveAuthRedirect } from "@/src/navigation/auth-guards";
 import { useAuthStore } from "@/src/store/useAuthStore";
-
-const resolveAuthRedirect = (
-  isAuthenticated: boolean,
-  mustChangePassword: boolean,
-  hasHousehold: boolean
-): Href | null => {
-  if (!isAuthenticated) {
-    return null;
-  }
-
-  if (mustChangePassword) {
-    return "/change-credentials";
-  }
-
-  if (!hasHousehold) {
-    return "/householdSetup";
-  }
-
-  return "/home";
-};
 
 export default function AuthGroupLayout() {
   const token = useAuthStore((state) => state.token);
@@ -33,7 +14,7 @@ export default function AuthGroupLayout() {
     isAuthenticated,
     mustChangePassword,
     hasHousehold
-  );
+  ) as Href | null;
 
   if (redirectHref) {
     return <Redirect href={redirectHref} />;
