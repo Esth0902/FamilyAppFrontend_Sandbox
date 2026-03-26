@@ -1,6 +1,6 @@
 /* eslint-env jest */
 import { fireEvent, render, screen } from "@testing-library/react-native";
-import PublicHome from "@/app/index";
+import PublicHome from "@/app/(auth)/index";
 
 const mockPush = jest.fn();
 
