@@ -358,7 +358,12 @@ export default function MealPollScreen() {
 
       if (currentRole === "parent") {
         try {
-          const configResponse = await apiFetch("/households/config");
+          const configResponse = await queryClient.fetchQuery({
+            queryKey: queryKeys.household.config(householdId),
+            queryFn: () => apiFetch("/households/config"),
+            staleTime: 30_000,
+            gcTime: 10 * 60_000,
+          });
           const mealsSettings = configResponse?.config?.modules?.meals?.settings ?? {};
 
           configuredDuration = Number.isInteger(mealsSettings?.poll_duration)

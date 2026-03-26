@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { queryKeys } from "@/src/query/query-keys";
 import {
@@ -14,21 +14,14 @@ type UseTasksOverviewArgs = {
   householdId: number | null;
 };
 
-type RefreshOptions = {
-  bypassCache?: boolean;
-};
-
 export const useTasksOverview = ({ householdId }: UseTasksOverviewArgs) => {
   const [plannedWeekStartDay, setPlannedWeekStartDay] = useState<number>(1);
-  const bypassCacheRef = useRef(false);
 
   const query = useQuery({
     queryKey: queryKeys.tasks.overview(householdId, plannedWeekStartDay),
     enabled: householdId !== null,
     staleTime: 12_000,
-    queryFn: () => fetchTasksBoardForCurrentWeek(plannedWeekStartDay, {
-      bypassCache: bypassCacheRef.current,
-    }),
+    queryFn: () => fetchTasksBoardForCurrentWeek(plannedWeekStartDay),
   });
 
   useEffect(() => {
@@ -38,13 +31,8 @@ export const useTasksOverview = ({ householdId }: UseTasksOverviewArgs) => {
     }
   }, [plannedWeekStartDay, query.data?.resolvedWeekStartDay]);
 
-  const refreshBoard = useCallback(async (options?: RefreshOptions) => {
-    bypassCacheRef.current = options?.bypassCache === true;
-    try {
-      await query.refetch();
-    } finally {
-      bypassCacheRef.current = false;
-    }
+  const refreshBoard = useCallback(async () => {
+    await query.refetch();
   }, [query]);
 
   const payload = useMemo(() => (query.data?.payload ?? null) as TasksBoardPayload | null, [query.data?.payload]);

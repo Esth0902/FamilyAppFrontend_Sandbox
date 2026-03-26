@@ -45,7 +45,6 @@ export default function BudgetTabScreen() {
     householdId,
     module: "budget",
     refresh: refreshBoard,
-    realtimeOptions: { bypassCache: true },
   });
 
   useEffect(() => {
@@ -204,7 +203,7 @@ export default function BudgetTabScreen() {
           message={error.message || "Vérifie ta connexion puis réessaie."}
           actionLabel="Réessayer"
           onActionPress={() => {
-            void refreshBoard({ bypassCache: true });
+            void refreshBoard();
           }}
         />
       ) : !board?.budget_enabled ? (

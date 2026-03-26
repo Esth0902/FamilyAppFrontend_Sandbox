@@ -26,6 +26,9 @@ export const useHomeData = ({ token, user }: UseHomeDataArgs) => {
         queryKey: queryKeys.home.profile(token, user?.household_id),
         enabled: !!token,
         staleTime: 30_000,
+        gcTime: 10 * 60_000,
+        refetchOnMount: false,
+        refetchOnWindowFocus: false,
         queryFn: async () => {
             const apiUser = await fetchHomeProfile();
             if (!apiUser) {
@@ -52,6 +55,9 @@ export const useHomeData = ({ token, user }: UseHomeDataArgs) => {
         queryKey: queryKeys.home.pendingNotifications(token),
         enabled: !!token,
         staleTime: 10_000,
+        gcTime: 5 * 60_000,
+        refetchOnMount: false,
+        refetchOnWindowFocus: false,
         queryFn: fetchPendingNotifications,
     });
 

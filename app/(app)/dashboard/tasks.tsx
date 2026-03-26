@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -11,13 +11,15 @@ import {
 import { Stack, useFocusEffect, useRouter } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useQuery } from "@tanstack/react-query";
 
 import { Colors } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
-import { apiFetch } from "@/src/api/client";
-import { addDays, toIsoDate } from "@/src/utils/date";
+import { queryKeys } from "@/src/query/query-keys";
 import { subscribeToHouseholdRealtime } from "@/src/realtime/client";
 import { useStoredUserState } from "@/src/session/user-cache";
+import { fetchTasksBoardForRange } from "@/src/services/tasksService";
+import { addDays, toIsoDate } from "@/src/utils/date";
 
 type TaskStatus = "à faire" | "réalisée" | "annulée";
 
@@ -106,34 +108,36 @@ export default function DashboardTasksScreen() {
   const colorScheme = useColorScheme();
   const theme = Colors[colorScheme ?? "light"];
   const { householdId } = useStoredUserState();
+  const range = useMemo(() => weekRange(), []);
 
-  const [loading, setLoading] = useState(true);
-  const [board, setBoard] = useState<TaskBoardResponse | null>(null);
-
-  const loadBoard = useCallback(async (options?: { silent?: boolean }) => {
-    const silent = options?.silent ?? false;
-    if (!silent) {
-      setLoading(true);
-    }
-
-    try {
-      const range = weekRange();
-      const payload = await apiFetch(`/tasks/board?from=${range.from}&to=${range.to}`);
-      setBoard((payload ?? null) as TaskBoardResponse | null);
-    } catch (error: any) {
-      Alert.alert("Tâches", error?.message || "Impossible de charger la vue tâches.");
-    } finally {
-      if (!silent) {
-        setLoading(false);
-      }
-    }
-  }, []);
+  const tasksBoardQuery = useQuery({
+    queryKey: queryKeys.dashboard.tasksBoard(householdId, range.from, range.to),
+    enabled: householdId !== null,
+    staleTime: 15_000,
+    gcTime: 10 * 60_000,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
+    queryFn: () => fetchTasksBoardForRange<TaskBoardResponse>(range.from, range.to),
+  });
+  const refetchTasksBoard = tasksBoardQuery.refetch;
+  const tasksBoardError = tasksBoardQuery.error;
+  const isTasksBoardPending = tasksBoardQuery.isPending;
+  const board = (tasksBoardQuery.data ?? null) as TaskBoardResponse | null;
 
   useFocusEffect(
     useCallback(() => {
-      void loadBoard({ silent: false });
-    }, [loadBoard])
+      void refetchTasksBoard();
+    }, [refetchTasksBoard])
   );
+
+  useEffect(() => {
+    if (!tasksBoardError) {
+      return;
+    }
+
+    const error = tasksBoardError as { message?: string } | null;
+    Alert.alert("Tâches", error?.message || "Impossible de charger la vue tâches.");
+  }, [tasksBoardError]);
 
   useEffect(() => {
     if (!householdId) {
@@ -147,7 +151,7 @@ export default function DashboardTasksScreen() {
       unsubscribeRealtime = await subscribeToHouseholdRealtime(householdId, (message) => {
         if (!active) return;
         if (message?.module !== "tasks") return;
-        void loadBoard({ silent: true });
+        void refetchTasksBoard();
       });
     };
 
@@ -159,12 +163,12 @@ export default function DashboardTasksScreen() {
         unsubscribeRealtime();
       }
     };
-  }, [householdId, loadBoard]);
+  }, [householdId, refetchTasksBoard]);
 
   const isParent = board?.current_user?.role === "parent";
   const currentUserId = Number(board?.current_user?.id ?? 0);
   const visibleInstances = useMemo(() => {
-    const instances = Array.isArray(board?.instances) ? board?.instances : [];
+    const instances = Array.isArray(board?.instances) ? board.instances : [];
     if (isParent) {
       return instances;
     }
@@ -175,7 +179,7 @@ export default function DashboardTasksScreen() {
   const doneCount = visibleInstances.filter((instance) => isDoneStatus(String(instance.status ?? ""))).length;
   const validatedCount = visibleInstances.filter((instance) => Boolean(instance.validated_by_parent)).length;
 
-  if (loading) {
+  if (isTasksBoardPending && !board) {
     return (
       <View style={[styles.center, { backgroundColor: theme.background }]}> 
         <ActivityIndicator size="large" color={theme.tint} />

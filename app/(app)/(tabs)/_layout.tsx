@@ -1,10 +1,12 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo } from "react";
 import { Tabs, useFocusEffect, useRouter, useSegments } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColorScheme } from "react-native";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Colors } from "@/constants/theme";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { apiFetch } from "@/src/api/client";
+import { queryKeys } from "@/src/query/query-keys";
 import { subscribeToHouseholdRealtime } from "@/src/realtime/client";
 import { useStoredUserState } from "@/src/session/user-cache";
 
@@ -60,10 +62,24 @@ export default function TabsLayout() {
     const colorScheme = useColorScheme();
     const theme = Colors[colorScheme ?? "light"];
     const insets = useSafeAreaInsets();
+    const queryClient = useQueryClient();
     const { householdId } = useStoredUserState();
-
-    const modulesCacheRef = useRef<Record<number, HouseholdModulesState>>({});
-    const [householdModules, setHouseholdModules] = useState<HouseholdModulesState>(DEFAULT_HOUSEHOLD_MODULES);
+    const householdConfigQuery = useQuery({
+        queryKey: queryKeys.household.config(householdId),
+        enabled: householdId !== null,
+        staleTime: 30_000,
+        gcTime: 10 * 60_000,
+        refetchOnMount: false,
+        refetchOnWindowFocus: false,
+        queryFn: () => apiFetch("/households/config"),
+    });
+    const refetchHouseholdConfig = householdConfigQuery.refetch;
+    const householdModules = useMemo<HouseholdModulesState>(() => {
+        if (householdId === null) {
+            return DEFAULT_HOUSEHOLD_MODULES;
+        }
+        return parseHouseholdModules(householdConfigQuery.data);
+    }, [householdConfigQuery.data, householdId]);
 
 const activeTabRoute = useMemo<TabsRouteName | null>(() => {
         const safeSegments = segments as string[];
@@ -85,57 +101,22 @@ const activeTabRoute = useMemo<TabsRouteName | null>(() => {
         return null;
     }, [segments]);
 
-    const loadHouseholdModules = useCallback(
-        async (activeHouseholdId: number | null, options?: { forceRefresh?: boolean; bypassCache?: boolean }) => {
-            if (!activeHouseholdId) {
-                setHouseholdModules(DEFAULT_HOUSEHOLD_MODULES);
-                return;
-            }
-
-            const forceRefresh = options?.forceRefresh === true;
-            const bypassCache = options?.bypassCache === true;
-            const cachedModules = modulesCacheRef.current[activeHouseholdId];
-
-            if (cachedModules) {
-                setHouseholdModules(cachedModules);
-                if (!forceRefresh) {
-                    return;
-                }
-            }
-
-            try {
-                const response = await apiFetch("/households/config", {
-                    cacheTtlMs: 20_000,
-                    bypassCache,
-                });
-                const parsedModules = parseHouseholdModules(response);
-                modulesCacheRef.current[activeHouseholdId] = parsedModules;
-                setHouseholdModules(parsedModules);
-            } catch (error) {
-                console.error("Erreur chargement modules foyer (tabs):", error);
-                if (!cachedModules) {
-                    setHouseholdModules(DEFAULT_HOUSEHOLD_MODULES);
-                }
-            }
-        },
-        []
-    );
-
     useFocusEffect(
         useCallback(() => {
-            void loadHouseholdModules(householdId, { forceRefresh: true });
-        }, [householdId, loadHouseholdModules])
+            if (householdId === null) {
+                return;
+            }
+            void refetchHouseholdConfig();
+        }, [householdId, refetchHouseholdConfig])
     );
 
     useEffect(() => {
         console.log("Modules reçus par le Layout :", householdModules);
-        if (!householdModules) return;
-
         if (householdModules.isSetupCompleted === false) {
             console.log("Onboarding incomplet détecté, redirection vers le setup !");
             router.replace("/(app)/householdSetup?mode=edit");
         }
-    }, [householdModules.isSetupCompleted, router]);
+    }, [householdModules, router]);
 
     useEffect(() => {
         if (!householdId) {
@@ -158,7 +139,10 @@ const activeTabRoute = useMemo<TabsRouteName | null>(() => {
                     return;
                 }
 
-                void loadHouseholdModules(householdId, { forceRefresh: true, bypassCache: true });
+                void queryClient.invalidateQueries({
+                    queryKey: queryKeys.household.config(householdId),
+                });
+                void refetchHouseholdConfig();
             });
         };
 
@@ -170,7 +154,7 @@ const activeTabRoute = useMemo<TabsRouteName | null>(() => {
                 unsubscribeRealtime();
             }
         };
-    }, [householdId, loadHouseholdModules]);
+    }, [householdId, queryClient, refetchHouseholdConfig]);
 
     useEffect(() => {
         if (!activeTabRoute) {

@@ -8,10 +8,12 @@ import {
     ActivityIndicator,
 } from "react-native";
 import { useFocusEffect, useRouter } from "expo-router";
+import { useQueryClient } from "@tanstack/react-query";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { Colors } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import { apiFetch } from "@/src/api/client";
+import { queryKeys } from "@/src/query/query-keys";
 import { useStoredUserState } from "@/src/session/user-cache";
 
 type MealOptionKey = "polls" | "recipes" | "shopping_list";
@@ -27,15 +29,9 @@ type MealOptionCard = {
 };
 
 type MealModuleConfig = {
-    loadedAt: number;
     mealsEnabled: boolean;
     mealOptions: Record<MealOptionKey, boolean>;
 };
-
-const MEAL_CONFIG_CACHE_TTL_MS = 30_000;
-
-let mealModuleConfigCache: MealModuleConfig | null = null;
-let mealModuleConfigInFlight: Promise<MealModuleConfig> | null = null;
 
 const extractMealModuleConfig = (response: any): MealModuleConfig => {
     const modules = response?.config?.modules ?? {};
@@ -43,7 +39,6 @@ const extractMealModuleConfig = (response: any): MealModuleConfig => {
     const options = meals?.options ?? {};
 
     return {
-        loadedAt: Date.now(),
         mealsEnabled: meals?.enabled !== false,
         mealOptions: {
             recipes: options?.recipes !== false,
@@ -53,23 +48,12 @@ const extractMealModuleConfig = (response: any): MealModuleConfig => {
     };
 };
 
-const fetchMealModuleConfig = async (): Promise<MealModuleConfig> => {
-    if (!mealModuleConfigInFlight) {
-        mealModuleConfigInFlight = apiFetch("/households/config")
-            .then((response) => extractMealModuleConfig(response))
-            .finally(() => {
-                mealModuleConfigInFlight = null;
-            });
-    }
-
-    return mealModuleConfigInFlight;
-};
-
 export default function MealScreen() {
     const router = useRouter();
+    const queryClient = useQueryClient();
     const colorScheme = useColorScheme();
     const themeColors = Colors[colorScheme ?? "light"];
-    const { role } = useStoredUserState();
+    const { householdId, role } = useStoredUserState();
     const canManageHouseholdConfig = role === "parent";
 
     const [loadingConfig, setLoadingConfig] = useState(true);
@@ -131,39 +115,30 @@ export default function MealScreen() {
             };
 
             const loadMealModuleConfig = async () => {
-                const cachedConfig = mealModuleConfigCache;
-                const isCacheFresh = cachedConfig !== null
-                    && (Date.now() - cachedConfig.loadedAt) < MEAL_CONFIG_CACHE_TTL_MS;
-
-                if (cachedConfig) {
-                    applyMealConfig(cachedConfig);
+                if (!(Number.isInteger(householdId) && householdId > 0)) {
                     setLoadingConfig(false);
-                } else {
-                    setLoadingConfig(true);
-                }
-
-                if (isCacheFresh) {
                     return;
                 }
 
+                setLoadingConfig(true);
+
                 try {
-                    const config = await fetchMealModuleConfig();
+                    const response = await queryClient.fetchQuery({
+                        queryKey: queryKeys.household.config(householdId),
+                        queryFn: () => apiFetch("/households/config"),
+                        staleTime: 30_000,
+                        gcTime: 10 * 60_000,
+                    });
+                    const config = extractMealModuleConfig(response);
 
                     if (cancelled) {
                         return;
                     }
 
-                    mealModuleConfigCache = config;
                     applyMealConfig(config);
                 } catch (error: any) {
                     if (Number(error?.status) === 429) {
-                        if (!cachedConfig) {
-                            console.warn("Configuration repas temporairement limitée (429).");
-                        }
-                        return;
-                    }
-                    if (Number(error?.status) === 401) {
-                        router.replace("/");
+                        console.warn("Configuration repas temporairement limitée (429).");
                         return;
                     }
                     console.error("Erreur chargement config repas:", error);
@@ -179,7 +154,7 @@ export default function MealScreen() {
             return () => {
                 cancelled = true;
             };
-        }, [router])
+        }, [householdId, queryClient])
     );
 
     return (
@@ -417,3 +392,4 @@ const styles = StyleSheet.create({
         textAlign: "center",
     },
 });
+

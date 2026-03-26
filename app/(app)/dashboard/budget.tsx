@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -11,10 +11,10 @@ import {
 import { Stack, useFocusEffect, useRouter } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useQuery } from "@tanstack/react-query";
 
 import { Colors } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
-import { apiFetch } from "@/src/api/client";
 import {
   BudgetBoardPayload,
   BudgetTransaction,
@@ -22,13 +22,10 @@ import {
   computePaymentBreakdown,
   formatMoney,
 } from "@/src/budget/common";
+import { queryKeys } from "@/src/query/query-keys";
 import { subscribeToHouseholdRealtime } from "@/src/realtime/client";
 import { useStoredUserState } from "@/src/session/user-cache";
-
-type ApiError = {
-  status?: number;
-  message?: string;
-};
+import { fetchDashboardBudgetBoard } from "@/src/services/dashboardService";
 
 type HistoryItem = {
   id: string;
@@ -106,38 +103,30 @@ export default function DashboardBudgetScreen() {
   const colorScheme = useColorScheme();
   const theme = Colors[colorScheme ?? "light"];
   const { householdId, role } = useStoredUserState();
-
-  const [loading, setLoading] = useState(true);
-  const [board, setBoard] = useState<BudgetBoardPayload | null>(null);
-
-  const loadBoard = useCallback(async (options?: { silent?: boolean }) => {
-    const silent = options?.silent ?? false;
-    if (!silent) {
-      setLoading(true);
-    }
-
-    try {
-      const payload = await apiFetch("/budget/board");
-      setBoard((payload ?? null) as BudgetBoardPayload | null);
-    } catch (error: any) {
-      const typedError = error as ApiError;
-      if (typedError?.status === 403 || typedError?.status === 404) {
-        setBoard(null);
-      } else {
-        Alert.alert("Budget", typedError?.message || "Impossible de charger la vue budget.");
-      }
-    } finally {
-      if (!silent) {
-        setLoading(false);
-      }
-    }
-  }, []);
+  const budgetBoardQuery = useQuery({
+    queryKey: queryKeys.dashboard.budgetBoard(householdId),
+    enabled: householdId !== null,
+    staleTime: 20_000,
+    gcTime: 10 * 60_000,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
+    queryFn: fetchDashboardBudgetBoard,
+  });
 
   useFocusEffect(
     useCallback(() => {
-      void loadBoard({ silent: false });
-    }, [loadBoard])
+      void budgetBoardQuery.refetch();
+    }, [budgetBoardQuery.refetch])
   );
+
+  useEffect(() => {
+    if (!budgetBoardQuery.error) {
+      return;
+    }
+
+    const error = budgetBoardQuery.error as { message?: string } | null;
+    Alert.alert("Budget", error?.message || "Impossible de charger la vue budget.");
+  }, [budgetBoardQuery.error]);
 
   useEffect(() => {
     if (!householdId) {
@@ -151,7 +140,7 @@ export default function DashboardBudgetScreen() {
       unsubscribeRealtime = await subscribeToHouseholdRealtime(householdId, (message) => {
         if (!active) return;
         if (message?.module !== "budget") return;
-        void loadBoard({ silent: true });
+        void budgetBoardQuery.refetch();
       });
     };
 
@@ -163,7 +152,9 @@ export default function DashboardBudgetScreen() {
         unsubscribeRealtime();
       }
     };
-  }, [householdId, loadBoard]);
+  }, [budgetBoardQuery.refetch, householdId]);
+
+  const board = (budgetBoardQuery.data ?? null) as BudgetBoardPayload | null;
 
   const isParent = role === "parent";
   const currency = (board?.currency || "EUR").toUpperCase();
@@ -205,7 +196,7 @@ export default function DashboardBudgetScreen() {
     return buildHistory(board?.children ?? [], 12);
   }, [board?.children]);
 
-  if (loading) {
+  if (budgetBoardQuery.isPending && !board) {
     return (
       <View style={[styles.center, { backgroundColor: theme.background }]}> 
         <ActivityIndicator size="large" color={theme.tint} />

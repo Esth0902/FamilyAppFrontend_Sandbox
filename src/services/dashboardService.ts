@@ -42,10 +42,6 @@ type ApiError = {
   status?: number;
 };
 
-type FetchOptions = {
-  bypassCache?: boolean;
-};
-
 export const currentMonthRange = () => {
   const now = new Date();
   const start = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -56,23 +52,13 @@ export const currentMonthRange = () => {
   };
 };
 
-export const fetchDashboardSummary = async (
-  options?: FetchOptions
-): Promise<DashboardResponse | null> => {
-  return (await apiFetch("/dashboard", {
-    cacheTtlMs: 20_000,
-    bypassCache: options?.bypassCache === true,
-  })) as DashboardResponse | null;
+export const fetchDashboardSummary = async (): Promise<DashboardResponse | null> => {
+  return (await apiFetch("/dashboard")) as DashboardResponse | null;
 };
 
-export const fetchDashboardBudgetBoard = async (
-  options?: FetchOptions
-): Promise<BudgetBoardPayload | null> => {
+export const fetchDashboardBudgetBoard = async (): Promise<BudgetBoardPayload | null> => {
   try {
-    return (await apiFetch("/budget/board", {
-      cacheTtlMs: 20_000,
-      bypassCache: options?.bypassCache === true,
-    })) as BudgetBoardPayload | null;
+    return (await apiFetch("/budget/board")) as BudgetBoardPayload | null;
   } catch (error: any) {
     const typedError = error as ApiError;
     if (typedError?.status === 403 || typedError?.status === 404) {
@@ -83,14 +69,10 @@ export const fetchDashboardBudgetBoard = async (
 };
 
 export const fetchDashboardCalendarSummary = async (
-  range: { from: string; to: string },
-  options?: FetchOptions
+  range: { from: string; to: string }
 ): Promise<CalendarSummaryResponse | null> => {
   try {
-    return (await apiFetch(`/calendar/board?from=${range.from}&to=${range.to}`, {
-      cacheTtlMs: 15_000,
-      bypassCache: options?.bypassCache === true,
-    })) as CalendarSummaryResponse | null;
+    return (await apiFetch(`/calendar/board?from=${range.from}&to=${range.to}`)) as CalendarSummaryResponse | null;
   } catch (error: any) {
     const typedError = error as ApiError;
     if (typedError?.status === 403 || typedError?.status === 404) {

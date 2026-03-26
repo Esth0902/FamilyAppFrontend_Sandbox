@@ -1,12 +1,14 @@
-import * as SecureStore from "expo-secure-store";
 import { useEffect } from "react";
 import {
   getAuthStateSnapshot,
   hydrateAuthState,
-  setAuthState,
+  persistAuthUser,
   useAuthStore,
   type AuthUser,
 } from "@/src/store/useAuthStore";
+
+// Adaptateur de compatibilité: calculs de vue utilisateur + normalisation household.
+// La persistance et l'état session restent pilotés par useAuthStore.
 
 export type StoredHousehold = {
   id?: number;
@@ -107,6 +109,19 @@ export const areUserSnapshotsEqual = (
   return serializeUserSnapshot(left) === serializeUserSnapshot(right);
 };
 
+const buildStoredUserState = (snapshot: {
+  hydrated: boolean;
+  user: AuthUser | null;
+}): StoredUserState => {
+  const normalizedUser = normalizeStoredUser(snapshot.user as StoredUser | null);
+  return {
+    hydrated: snapshot.hydrated,
+    user: normalizedUser,
+    householdId: toHouseholdId(normalizedUser),
+    role: toRole(normalizedUser),
+  };
+};
+
 const toHouseholdId = (user: StoredUser | null): number | null => {
   return toPositiveInteger(user?.household_id) ?? toPositiveInteger(user?.households?.[0]?.id);
 };
@@ -120,33 +135,8 @@ const toRole = (user: StoredUser | null): string | null => {
   return typeof role === "string" && role.length > 0 ? role : null;
 };
 
-export const setStoredUserCache = (user: StoredUser | null, hydrated = true): StoredUserState => {
-  const normalizedUser = normalizeStoredUser(user);
-
-  setAuthState({
-    hydrated,
-    user: normalizedUser,
-  });
-
-  const snapshot = getAuthStateSnapshot();
-  return {
-    hydrated: snapshot.hydrated,
-    user: normalizeStoredUser(snapshot.user as StoredUser | null),
-    householdId: toHouseholdId(snapshot.user as StoredUser | null),
-    role: toRole(snapshot.user as StoredUser | null),
-  };
-};
-
 export const getStoredUserStateSnapshot = (): StoredUserState => {
-  const snapshot = getAuthStateSnapshot();
-  const normalizedUser = normalizeStoredUser(snapshot.user as StoredUser | null);
-
-  return {
-    hydrated: snapshot.hydrated,
-    user: normalizedUser,
-    householdId: toHouseholdId(normalizedUser),
-    role: toRole(normalizedUser),
-  };
+  return buildStoredUserState(getAuthStateSnapshot());
 };
 
 export const subscribeStoredUserState = (listener: () => void): (() => void) => {
@@ -160,15 +150,11 @@ export const refreshStoredUserFromStorage = async (): Promise<StoredUserState> =
   const normalizedUser = normalizeStoredUser(snapshot.user as StoredUser | null);
 
   if (!areUserSnapshotsEqual(normalizedUser, snapshot.user as StoredUser | null)) {
-    setAuthState({ user: normalizedUser });
+    await persistAuthUser(normalizedUser);
+    return getStoredUserStateSnapshot();
   }
 
-  return {
-    hydrated: true,
-    user: normalizedUser,
-    householdId: toHouseholdId(normalizedUser),
-    role: toRole(normalizedUser),
-  };
+  return buildStoredUserState(snapshot);
 };
 
 export const hydrateStoredUserState = async (): Promise<StoredUserState> => {
@@ -177,29 +163,20 @@ export const hydrateStoredUserState = async (): Promise<StoredUserState> => {
 
 export const persistStoredUser = async (user: StoredUser): Promise<StoredUserState> => {
   const normalizedUser = normalizeStoredUser(user);
-  if (!normalizedUser) {
-    return setStoredUserCache(null, true);
-  }
-
-  await SecureStore.setItemAsync("user", JSON.stringify(normalizedUser));
-  return setStoredUserCache(normalizedUser, true);
+  await persistAuthUser(normalizedUser);
+  return getStoredUserStateSnapshot();
 };
 
 export const switchStoredHousehold = async (householdId: number): Promise<StoredUserState> => {
   const snapshot = await hydrateAuthState();
   const normalizedUser = normalizeStoredUser(snapshot.user as StoredUser | null, householdId);
-
-  if (!normalizedUser) {
-    return setStoredUserCache(null, true);
-  }
-
-  await SecureStore.setItemAsync("user", JSON.stringify(normalizedUser));
-  return setStoredUserCache(normalizedUser, true);
+  await persistAuthUser(normalizedUser);
+  return getStoredUserStateSnapshot();
 };
 
 export const clearStoredUser = async (): Promise<StoredUserState> => {
-  await SecureStore.deleteItemAsync("user");
-  return setStoredUserCache(null, true);
+  await persistAuthUser(null);
+  return getStoredUserStateSnapshot();
 };
 
 export const useStoredUserState = (): StoredUserState => {

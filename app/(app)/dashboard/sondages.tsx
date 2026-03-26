@@ -11,12 +11,14 @@ import {
 import { Stack, useFocusEffect, useRouter } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useQuery } from "@tanstack/react-query";
 
 import { Colors } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
-import { apiFetch } from "@/src/api/client";
+import { queryKeys } from "@/src/query/query-keys";
 import { subscribeToHouseholdRealtime } from "@/src/realtime/client";
 import { useStoredUserState } from "@/src/session/user-cache";
+import { fetchDashboardSummary } from "@/src/services/dashboardService";
 
 type DashboardPollOption = {
   id: number;
@@ -92,35 +94,35 @@ export default function DashboardPollsScreen() {
   const theme = Colors[colorScheme ?? "light"];
   const { householdId } = useStoredUserState();
 
-  const [loading, setLoading] = useState(true);
-  const [data, setData] = useState<DashboardResponse | null>(null);
   const [openOpenPolls, setOpenOpenPolls] = useState(false);
   const [openClosedPolls, setOpenClosedPolls] = useState(false);
   const [openAllPolls, setOpenAllPolls] = useState(false);
   const [openFavoriteRecipes, setOpenFavoriteRecipes] = useState(false);
 
-  const loadDashboard = useCallback(async (options?: { silent?: boolean }) => {
-    const silent = options?.silent ?? false;
-    if (!silent) {
-      setLoading(true);
-    }
-    try {
-      const response = await apiFetch("/dashboard");
-      setData(response ?? null);
-    } catch (error: any) {
-      Alert.alert("Dashboard", error?.message || "Impossible de charger le dashboard.");
-    } finally {
-      if (!silent) {
-        setLoading(false);
-      }
-    }
-  }, []);
+  const dashboardQuery = useQuery({
+    queryKey: queryKeys.dashboard.summary(householdId),
+    enabled: householdId !== null,
+    staleTime: 20_000,
+    gcTime: 10 * 60_000,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
+    queryFn: fetchDashboardSummary,
+  });
 
   useFocusEffect(
     useCallback(() => {
-      void loadDashboard({ silent: false });
-    }, [loadDashboard])
+      void dashboardQuery.refetch();
+    }, [dashboardQuery.refetch])
   );
+
+  useEffect(() => {
+    if (!dashboardQuery.error) {
+      return;
+    }
+
+    const error = dashboardQuery.error as { message?: string } | null;
+    Alert.alert("Dashboard", error?.message || "Impossible de charger le dashboard.");
+  }, [dashboardQuery.error]);
 
   useEffect(() => {
     if (!householdId) {
@@ -137,7 +139,7 @@ export default function DashboardPollsScreen() {
         if (module !== "meal_poll" && module !== "tasks" && module !== "budget" && module !== "calendar") {
           return;
         }
-        void loadDashboard({ silent: true });
+        void dashboardQuery.refetch();
       });
     };
 
@@ -149,7 +151,9 @@ export default function DashboardPollsScreen() {
         unsubscribeRealtime();
       }
     };
-  }, [householdId, loadDashboard]);
+  }, [dashboardQuery.refetch, householdId]);
+
+  const data = (dashboardQuery.data ?? null) as DashboardResponse | null;
 
   const pollsOpen = data?.polls_open ?? [];
   const pollsClosed = data?.polls_closed ?? [];
@@ -228,7 +232,7 @@ export default function DashboardPollsScreen() {
     </View>
   );
 
-  if (loading) {
+  if (dashboardQuery.isPending && !data) {
     return (
       <View style={[styles.center, { backgroundColor: theme.background }]}>
         <ActivityIndicator size="large" color={theme.tint} />

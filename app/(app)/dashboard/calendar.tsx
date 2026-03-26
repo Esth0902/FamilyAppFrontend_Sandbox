@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -11,13 +11,15 @@ import {
 import { Stack, useFocusEffect, useRouter } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useQuery } from "@tanstack/react-query";
 
 import { Colors } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
-import { apiFetch } from "@/src/api/client";
+import { queryKeys } from "@/src/query/query-keys";
 import { addDays, toIsoDate } from "@/src/utils/date";
 import { subscribeToHouseholdRealtime } from "@/src/realtime/client";
 import { useStoredUserState } from "@/src/session/user-cache";
+import { fetchCalendarBoardForRange } from "@/src/services/calendarService";
 
 type CalendarEvent = {
   id: number;
@@ -109,34 +111,31 @@ export default function DashboardCalendarScreen() {
   const colorScheme = useColorScheme();
   const theme = Colors[colorScheme ?? "light"];
   const { householdId, role } = useStoredUserState();
+  const range = useMemo(() => buildRange(), []);
 
-  const [loading, setLoading] = useState(true);
-  const [board, setBoard] = useState<CalendarBoardResponse | null>(null);
-
-  const loadBoard = useCallback(async (options?: { silent?: boolean }) => {
-    const silent = options?.silent ?? false;
-    if (!silent) {
-      setLoading(true);
-    }
-
-    try {
-      const range = buildRange();
-      const payload = await apiFetch(`/calendar/board?from=${range.from}&to=${range.to}`);
-      setBoard((payload ?? null) as CalendarBoardResponse | null);
-    } catch (error: any) {
-      Alert.alert("Calendrier", error?.message || "Impossible de charger la vue calendrier.");
-    } finally {
-      if (!silent) {
-        setLoading(false);
-      }
-    }
-  }, []);
+  const calendarBoardQuery = useQuery({
+    queryKey: queryKeys.dashboard.calendarBoard(householdId, range.from, range.to),
+    enabled: householdId !== null,
+    staleTime: 15_000,
+    gcTime: 10 * 60_000,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
+    queryFn: () => fetchCalendarBoardForRange<CalendarBoardResponse>(range.from, range.to),
+  });
 
   useFocusEffect(
     useCallback(() => {
-      void loadBoard({ silent: false });
-    }, [loadBoard])
+      void calendarBoardQuery.refetch();
+    }, [calendarBoardQuery.refetch])
   );
+
+  useEffect(() => {
+    if (!calendarBoardQuery.error) {
+      return;
+    }
+    const error = calendarBoardQuery.error as { message?: string } | null;
+    Alert.alert("Calendrier", error?.message || "Impossible de charger la vue calendrier.");
+  }, [calendarBoardQuery.error]);
 
   useEffect(() => {
     if (!householdId) {
@@ -150,7 +149,7 @@ export default function DashboardCalendarScreen() {
       unsubscribeRealtime = await subscribeToHouseholdRealtime(householdId, (message) => {
         if (!active) return;
         if (message?.module !== "calendar") return;
-        void loadBoard({ silent: true });
+        void calendarBoardQuery.refetch();
       });
     };
 
@@ -162,7 +161,9 @@ export default function DashboardCalendarScreen() {
         unsubscribeRealtime();
       }
     };
-  }, [householdId, loadBoard]);
+  }, [calendarBoardQuery.refetch, householdId]);
+
+  const board = (calendarBoardQuery.data ?? null) as CalendarBoardResponse | null;
 
   const isParent = role === "parent";
   const events = useMemo(() => {
@@ -201,7 +202,7 @@ export default function DashboardCalendarScreen() {
   }, [meals]);
   const compactCardBackground = colorScheme === "dark" ? `${theme.icon}22` : theme.background;
 
-  if (loading) {
+  if (calendarBoardQuery.isPending && !board) {
     return (
       <View style={[styles.center, { backgroundColor: theme.background }]}> 
         <ActivityIndicator size="large" color={theme.tint} />

@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef } from "react";
+import { useCallback, useMemo } from "react";
 import { useQueries, useQueryClient } from "@tanstack/react-query";
 import { queryKeys } from "@/src/query/query-keys";
 import {
@@ -15,13 +15,8 @@ type UseDashboardDataArgs = {
   householdId: number | null;
 };
 
-type RefreshOptions = {
-  bypassCache?: boolean;
-};
-
 export const useDashboardData = ({ householdId }: UseDashboardDataArgs) => {
   const queryClient = useQueryClient();
-  const bypassCacheRef = useRef(false);
   const range = useMemo(() => currentMonthRange(), []);
 
   const [dashboardQuery, budgetBoardQuery, calendarQuery] = useQueries({
@@ -30,34 +25,38 @@ export const useDashboardData = ({ householdId }: UseDashboardDataArgs) => {
         queryKey: queryKeys.dashboard.summary(householdId),
         enabled: householdId !== null,
         staleTime: 20_000,
-        queryFn: () => fetchDashboardSummary({ bypassCache: bypassCacheRef.current }),
+        gcTime: 10 * 60_000,
+        refetchOnMount: false,
+        refetchOnWindowFocus: false,
+        queryFn: fetchDashboardSummary,
       },
       {
         queryKey: queryKeys.dashboard.budgetBoard(householdId),
         enabled: householdId !== null,
         staleTime: 20_000,
-        queryFn: () => fetchDashboardBudgetBoard({ bypassCache: bypassCacheRef.current }),
+        gcTime: 10 * 60_000,
+        refetchOnMount: false,
+        refetchOnWindowFocus: false,
+        queryFn: fetchDashboardBudgetBoard,
       },
       {
         queryKey: queryKeys.dashboard.calendarBoard(householdId, range.from, range.to),
         enabled: householdId !== null,
         staleTime: 15_000,
-        queryFn: () => fetchDashboardCalendarSummary(range, { bypassCache: bypassCacheRef.current }),
+        gcTime: 10 * 60_000,
+        refetchOnMount: false,
+        refetchOnWindowFocus: false,
+        queryFn: () => fetchDashboardCalendarSummary(range),
       },
     ],
   });
 
-  const refreshDashboard = useCallback(async (options?: RefreshOptions) => {
-    bypassCacheRef.current = options?.bypassCache === true;
-    try {
-      await Promise.all([
-        dashboardQuery.refetch(),
-        budgetBoardQuery.refetch(),
-        calendarQuery.refetch(),
-      ]);
-    } finally {
-      bypassCacheRef.current = false;
-    }
+  const refreshDashboard = useCallback(async () => {
+    await Promise.all([
+      dashboardQuery.refetch(),
+      budgetBoardQuery.refetch(),
+      calendarQuery.refetch(),
+    ]);
   }, [budgetBoardQuery, calendarQuery, dashboardQuery]);
 
   const invalidateDashboard = useCallback(async () => {

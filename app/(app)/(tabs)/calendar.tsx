@@ -14,6 +14,7 @@ import {
 } from "react-native";
 import { useFocusEffect, useRouter } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
+import { useQueryClient } from "@tanstack/react-query";
 
 import { Colors } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
@@ -23,6 +24,7 @@ import { calendarStyles as styles } from "@/src/features/calendar/calendar-scree
 import { useDebounce } from "@/src/hooks/useDebounce";
 import { mergeUniqueRecipes } from "@/src/features/recipes/recipe-utils";
 import { useRecipeSearch } from "@/src/hooks/useRecipeSearch";
+import { queryKeys } from "@/src/query/query-keys";
 import { subscribeToHouseholdRealtime, subscribeToUserRealtime } from "@/src/realtime/client";
 import { useStoredUserState } from "@/src/session/user-cache";
 import {
@@ -334,6 +336,7 @@ const timeInputFromDateTime = (value: string) => {
 
 export default function CalendarScreen() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const colorScheme = useColorScheme();
   const theme = Colors[colorScheme ?? "light"];
   const { householdId, role } = useStoredUserState();
@@ -572,24 +575,28 @@ export default function CalendarScreen() {
     [eventEndTime, eventStartTime, timeWheelTarget]
   );
 
+  const invalidateTaskAndDashboardQueries = useCallback(async () => {
+    if (!householdId) {
+      return;
+    }
 
-  const loadBoard = useCallback(async (options?: { silent?: boolean; bypassCache?: boolean }) => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["tasks"] }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.dashboard.root(householdId) }),
+    ]);
+  }, [householdId, queryClient]);
+
+
+  const loadBoard = useCallback(async (options?: { silent?: boolean }) => {
     const silent = options?.silent ?? hasLoadedOnceRef.current;
-    const bypassCache = options?.bypassCache === true;
     if (!silent) {
       setLoading(true);
     }
 
     try {
       const [calendarResult, tasksResult] = await Promise.allSettled([
-        fetchCalendarBoardForRange<CalendarBoardPayload>(calendarRange.from, calendarRange.to, {
-          cacheTtlMs: 12_000,
-          bypassCache,
-        }),
-        fetchTasksBoardForRange<TaskBoardPayload>(calendarRange.from, calendarRange.to, {
-          cacheTtlMs: 12_000,
-          bypassCache,
-        }),
+        fetchCalendarBoardForRange<CalendarBoardPayload>(calendarRange.from, calendarRange.to),
+        fetchTasksBoardForRange<TaskBoardPayload>(calendarRange.from, calendarRange.to),
       ]);
 
       if (calendarResult.status !== "fulfilled") {
@@ -669,7 +676,7 @@ export default function CalendarScreen() {
         if (module !== "calendar" && module !== "tasks") {
           return;
         }
-        void loadBoard({ silent: true, bypassCache: true });
+        void loadBoard({ silent: true });
       });
 
       if (!active) {
@@ -711,7 +718,7 @@ export default function CalendarScreen() {
           return;
         }
 
-        void loadBoard({ silent: true, bypassCache: true });
+        void loadBoard({ silent: true });
       });
 
       if (!active) {
@@ -1362,6 +1369,7 @@ export default function CalendarScreen() {
       resetMealPlanForm();
       resetTaskForm();
       await loadBoard({ silent: true });
+      await invalidateTaskAndDashboardQueries();
     } catch (error: any) {
       Alert.alert("Calendrier", error?.message || "Impossible d'enregistrer l'événement.");
     } finally {
@@ -1410,6 +1418,7 @@ export default function CalendarScreen() {
       resetMealPlanForm();
       resetTaskForm();
       await loadBoard({ silent: true });
+      await invalidateTaskAndDashboardQueries();
     } catch (error: any) {
       Alert.alert("Calendrier", error?.message || "Impossible de planifier ce repas.");
     } finally {
@@ -1469,6 +1478,7 @@ export default function CalendarScreen() {
       resetMealPlanForm();
       resetTaskForm();
       await loadBoard({ silent: true });
+      await invalidateTaskAndDashboardQueries();
     } catch (error: any) {
       Alert.alert("Calendrier", error?.message || "Impossible de créer cette tâche.");
     } finally {
@@ -1509,6 +1519,7 @@ export default function CalendarScreen() {
         resetEventForm();
       }
       await loadBoard({ silent: true });
+      await invalidateTaskAndDashboardQueries();
     } catch (error: any) {
       Alert.alert("Calendrier", error?.message || "Impossible de supprimer l' événement.");
     } finally {
@@ -1554,6 +1565,7 @@ export default function CalendarScreen() {
       setMealPlanModalVisible(false);
       resetMealPlanForm();
       await loadBoard({ silent: true });
+      await invalidateTaskAndDashboardQueries();
     } catch (error: any) {
       Alert.alert("Calendrier", error?.message || "Impossible de modifier ce repas.");
     } finally {
@@ -1581,6 +1593,7 @@ export default function CalendarScreen() {
         resetMealPlanForm();
       }
       await loadBoard({ silent: true });
+      await invalidateTaskAndDashboardQueries();
     } catch (error: any) {
       Alert.alert("Calendrier", error?.message || "Impossible de supprimer ce repas.");
     } finally {
@@ -1605,6 +1618,7 @@ export default function CalendarScreen() {
         reason: reason?.trim() ? reason.trim() : null,
       });
       await loadBoard({ silent: true });
+      await invalidateTaskAndDashboardQueries();
       return true;
     } catch (error: any) {
       Alert.alert("Calendrier", error?.message || "Impossible d'enregistrer la présence au repas.");
@@ -1626,6 +1640,7 @@ export default function CalendarScreen() {
         reason: reason?.trim() ? reason.trim() : null,
       });
       await loadBoard({ silent: true });
+      await invalidateTaskAndDashboardQueries();
       return true;
     } catch (error: any) {
       Alert.alert("Calendrier", error?.message || "Impossible d'enregistrer la participation à l'événement.");
@@ -1846,6 +1861,7 @@ export default function CalendarScreen() {
     try {
       await updateTaskInstance(task.id, { status: nextStatus });
       await loadBoard({ silent: true });
+      await invalidateTaskAndDashboardQueries();
     } catch (error: any) {
       Alert.alert("Calendrier", error?.message || "Impossible de mettre à jour cette tâche.");
     } finally {
@@ -1862,6 +1878,7 @@ export default function CalendarScreen() {
     try {
       await validateTaskInstanceService(task.id);
       await loadBoard({ silent: true });
+      await invalidateTaskAndDashboardQueries();
     } catch (error: any) {
       Alert.alert("Calendrier", error?.message || "Impossible de valider cette tâche.");
     } finally {

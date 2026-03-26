@@ -34,7 +34,7 @@ import {
     respondToNotification,
     type HomePendingNotification,
 } from "@/src/services/homeService";
-import { logoutAuthenticatedUser } from "@/src/services/authService";
+import { logout } from "@/src/services/authService";
 import { useAuthStore } from "@/src/store/useAuthStore";
 
 type PendingNotification = HomePendingNotification;
@@ -96,7 +96,6 @@ export default function ConnectedHome() {
     const theme = Colors[colorScheme ?? "light"];
     const { user } = useStoredUserState();
     const token = useAuthStore((state) => state.token);
-    const logout = useAuthStore((state) => state.logout);
 
     const {
         pendingNotifications,
@@ -718,13 +717,9 @@ export default function ConnectedHome() {
 
     const onLogout = async () => {
         try {
-            if (token) {
-                logoutAuthenticatedUser().catch((e) => console.log("Logout backend error:", e));
-            }
+            await logout();
         } catch (e) {
             console.error("Erreur logout:", e);
-        } finally {
-            await logout();
         }
     };
 

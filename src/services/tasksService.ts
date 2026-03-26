@@ -36,15 +36,6 @@ type FetchTasksBoardResult = {
   resolvedWeekStartDay: number;
 };
 
-type FetchTasksBoardOptions = {
-  bypassCache?: boolean;
-};
-
-type FetchTasksBoardForRangeOptions = {
-  cacheTtlMs?: number;
-  bypassCache?: boolean;
-};
-
 const isoWeekDayFromDate = (date: Date) => {
   const day = date.getDay();
   return day === 0 ? 7 : day;
@@ -106,16 +97,12 @@ export const isInstanceAssignedToUser = (
 };
 
 export const fetchTasksBoardForCurrentWeek = async (
-  plannedWeekStartDay: number,
-  options?: FetchTasksBoardOptions
+  plannedWeekStartDay: number
 ): Promise<FetchTasksBoardResult> => {
   const weekStart = weekStartFromDateWithIsoDay(new Date(), plannedWeekStartDay);
   const rangeFrom = toIsoDate(weekStart);
   const rangeTo = toIsoDate(addDays(weekStart, 6));
-  let payload = await apiFetch(`/tasks/board?from=${rangeFrom}&to=${rangeTo}`, {
-    cacheTtlMs: 12_000,
-    bypassCache: options?.bypassCache === true,
-  }) as TasksBoardPayload;
+  let payload = await apiFetch(`/tasks/board?from=${rangeFrom}&to=${rangeTo}`) as TasksBoardPayload;
 
   const isAlternatingCustodyEnabled = Boolean(payload?.settings?.alternating_custody_enabled);
   const homeWeekStartDay = resolveIsoWeekDayFromIsoDate(payload?.settings?.custody_home_week_start);
@@ -129,10 +116,7 @@ export const fetchTasksBoardForCurrentWeek = async (
     const correctedTo = toIsoDate(addDays(correctedWeekStart, 6));
 
     if (correctedFrom !== rangeFrom || correctedTo !== rangeTo) {
-      payload = await apiFetch(`/tasks/board?from=${correctedFrom}&to=${correctedTo}`, {
-        cacheTtlMs: 12_000,
-        bypassCache: true,
-      }) as TasksBoardPayload;
+      payload = await apiFetch(`/tasks/board?from=${correctedFrom}&to=${correctedTo}`) as TasksBoardPayload;
     }
   }
 
@@ -144,13 +128,9 @@ export const fetchTasksBoardForCurrentWeek = async (
 
 export const fetchTasksBoardForRange = async <T = unknown>(
   from: string,
-  to: string,
-  options?: FetchTasksBoardForRangeOptions
+  to: string
 ): Promise<T> => {
-  return await apiFetch(`/tasks/board?from=${from}&to=${to}`, {
-    cacheTtlMs: options?.cacheTtlMs ?? 12_000,
-    bypassCache: options?.bypassCache === true,
-  }) as T;
+  return await apiFetch(`/tasks/board?from=${from}&to=${to}`) as T;
 };
 
 export const createTaskInstance = async (payload: {

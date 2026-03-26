@@ -61,7 +61,7 @@ export default function DashboardScreen() {
         if (!active) return;
         const module = String(message?.module ?? "");
         if (module !== "tasks" && module !== "meal_poll" && module !== "budget" && module !== "calendar") return;
-        void refreshDashboard({ bypassCache: true });
+        void refreshDashboard();
       });
     };
 
@@ -186,7 +186,7 @@ export default function DashboardScreen() {
           title="Dashboard"
           subtitle="Clique pour voir le détail"
           withBackButton
-          onBackPress={() => router.replace("/(tabs)/home")}
+          onBackPress={() => router.replace("/(app)/(tabs)/home")}
           safeTop
           showBorder
         />
@@ -197,7 +197,7 @@ export default function DashboardScreen() {
             message={error.message || "Vérifie ta connexion puis réessaie."}
             actionLabel="Réessayer"
             onActionPress={() => {
-              void refreshDashboard({ bypassCache: true });
+              void refreshDashboard();
             }}
           />
         </ScrollView>
@@ -213,7 +213,7 @@ export default function DashboardScreen() {
         title="Dashboard"
         subtitle="Clique pour voir le détail"
         withBackButton
-        onBackPress={() => router.replace("/(tabs)/home")}
+        onBackPress={() => router.replace("/(app)/(tabs)/home")}
         safeTop
         showBorder
       />

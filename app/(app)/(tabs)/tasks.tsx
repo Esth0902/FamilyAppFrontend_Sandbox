@@ -65,7 +65,7 @@ export default function TasksTabScreen() {
       unsubscribeRealtime = await subscribeToHouseholdRealtime(householdId, (message) => {
         if (!active) return;
         if (message?.module !== "tasks") return;
-        void refreshBoard({ bypassCache: true });
+        void refreshBoard();
       });
     };
 
@@ -168,7 +168,7 @@ export default function TasksTabScreen() {
           message={error.message || "Vérifie ta connexion puis réessaie."}
           actionLabel="Réessayer"
           onActionPress={() => {
-            void refreshBoard({ bypassCache: true });
+            void refreshBoard();
           }}
         />
       ) : !tasksEnabled ? (

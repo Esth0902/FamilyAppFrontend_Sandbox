@@ -1,20 +1,11 @@
 import { apiFetch } from "@/src/api/client";
 import type { MealType } from "@/src/features/calendar/calendar-types";
 
-type FetchCalendarBoardOptions = {
-  cacheTtlMs?: number;
-  bypassCache?: boolean;
-};
-
 export const fetchCalendarBoardForRange = async <T = unknown>(
   from: string,
-  to: string,
-  options?: FetchCalendarBoardOptions
+  to: string
 ): Promise<T> => {
-  return await apiFetch(`/calendar/board?from=${from}&to=${to}`, {
-    cacheTtlMs: options?.cacheTtlMs ?? 12_000,
-    bypassCache: options?.bypassCache === true,
-  }) as T;
+  return await apiFetch(`/calendar/board?from=${from}&to=${to}`) as T;
 };
 
 export const saveCalendarEvent = async (

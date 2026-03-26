@@ -5,7 +5,6 @@ import { subscribeToHouseholdRealtime } from "@/src/realtime/client";
 
 type RefreshOptions = {
   silent?: boolean;
-  bypassCache?: boolean;
 };
 
 type UseRealtimeRefetchArgs = {
@@ -26,17 +25,13 @@ export const useRealtimeRefetch = ({
   enabled = true,
 }: UseRealtimeRefetchArgs) => {
   const focusSilent = focusOptions?.silent;
-  const focusBypassCache = focusOptions?.bypassCache;
   const realtimeSilent = realtimeOptions?.silent;
-  const realtimeBypassCache = realtimeOptions?.bypassCache;
 
   useFocusEffect(
     useCallback(() => {
-      const options = focusSilent === undefined && focusBypassCache === undefined
-        ? undefined
-        : { silent: focusSilent, bypassCache: focusBypassCache };
+      const options = focusSilent === undefined ? undefined : { silent: focusSilent };
       void refresh(options);
-    }, [focusBypassCache, focusSilent, refresh])
+    }, [focusSilent, refresh])
   );
 
   useEffect(() => {
@@ -51,9 +46,7 @@ export const useRealtimeRefetch = ({
       unsubscribeRealtime = await subscribeToHouseholdRealtime(householdId, (message) => {
         if (!active) return;
         if (message?.module !== module) return;
-        const options = realtimeSilent === undefined && realtimeBypassCache === undefined
-          ? undefined
-          : { silent: realtimeSilent, bypassCache: realtimeBypassCache };
+        const options = realtimeSilent === undefined ? undefined : { silent: realtimeSilent };
         void refresh(options);
       });
     };
@@ -66,5 +59,5 @@ export const useRealtimeRefetch = ({
         unsubscribeRealtime();
       }
     };
-  }, [enabled, householdId, module, realtimeBypassCache, realtimeSilent, refresh]);
+  }, [enabled, householdId, module, realtimeSilent, refresh]);
 };

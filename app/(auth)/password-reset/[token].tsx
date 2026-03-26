@@ -12,19 +12,9 @@ import {
     useColorScheme,
 } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { API_BASE_URL } from "@/src/api/client";
 import { Colors } from "@/constants/theme";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
-
-const parseJsonSafe = async (response: Response) => {
-    const text = await response.text();
-    if (!text) return null;
-    try {
-        return JSON.parse(text);
-    } catch {
-        return null;
-    }
-};
+import { resetPassword, toAuthServiceError } from "@/src/services/authService";
 
 const toSingleParam = (value: string | string[] | undefined): string => {
     if (Array.isArray(value)) {
@@ -65,39 +55,20 @@ export default function PasswordResetScreen() {
             return;
         }
 
-        if (!API_BASE_URL) {
-            Alert.alert("Erreur", "Configuration API manquante. Vérifie EXPO_PUBLIC_API_MODE et EXPO_PUBLIC_API_URL_*.");
-            return;
-        }
-
         setLoading(true);
         try {
-            const response = await fetch(`${API_BASE_URL}/auth/reset-password`, {
-                method: "POST",
-                headers: {
-                    Accept: "application/json",
-                    "Content-Type": "application/json",
-                },
-                body: JSON.stringify({
-                    token,
-                    email: email.trim(),
-                    password,
-                    password_confirmation: passwordConfirmation,
-                }),
+            const result = await resetPassword({
+                token,
+                email: email.trim(),
+                password,
+                passwordConfirmation,
             });
 
-            const data = await parseJsonSafe(response);
-
-            if (!response.ok) {
-                Alert.alert("Erreur", data?.message || "Impossible de reinitialiser le mot de passe.");
-                return;
-            }
-
-            Alert.alert("Réinitialisation", data?.message || "Mot de passe réinitialisé.");
+            Alert.alert("Réinitialisation", result.message);
             router.replace("/login");
-        } catch (error) {
-            console.error("Erreur reset password:", error);
-            Alert.alert("Erreur réseau", "Impossible de contacter le serveur.");
+        } catch (error: unknown) {
+            const authError = toAuthServiceError(error, "Impossible de réinitialiser le mot de passe.");
+            Alert.alert("Erreur", authError.message);
         } finally {
             setLoading(false);
         }
@@ -116,12 +87,12 @@ export default function PasswordResetScreen() {
                 <View style={styles.header}>
                     <Text style={[styles.title, { color: theme.text }]}>Nouveau mot de passe</Text>
                     <Text style={[styles.subtitle, { color: theme.textSecondary }]}>
-                        Definis un nouveau mot de passe pour ton compte.
+                        Définis un nouveau mot de passe pour ton compte.
                     </Text>
                 </View>
 
                 <View style={styles.form}>
-                    <Text style={[styles.label, { color: theme.text }]}>Email</Text>
+                    <Text style={[styles.label, { color: theme.text }]}>E-mail</Text>
                     <TextInput
                         style={[styles.input, { backgroundColor: theme.card, color: theme.text, borderColor: theme.icon }]}
                         placeholder="Ex: parent@famille.com"
@@ -135,7 +106,7 @@ export default function PasswordResetScreen() {
                     <Text style={[styles.label, { color: theme.text }]}>Nouveau mot de passe</Text>
                     <TextInput
                         style={[styles.input, { backgroundColor: theme.card, color: theme.text, borderColor: theme.icon }]}
-                        placeholder="Minimum 8 caracteres"
+                        placeholder="Minimum 8 caractères"
                         placeholderTextColor={theme.textSecondary}
                         secureTextEntry={!showPassword}
                         value={password}

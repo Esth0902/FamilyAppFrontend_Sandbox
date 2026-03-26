@@ -3,11 +3,13 @@ import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TextInput, Touc
 import { useRouter } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useQueryClient } from "@tanstack/react-query";
 
 import { Colors } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import { apiFetch } from "@/src/api/client";
 import { useRealtimeRefetch } from "@/src/hooks/useRealtimeRefetch";
+import { queryKeys } from "@/src/query/query-keys";
 import { useStoredUserState } from "@/src/session/user-cache";
 import { BudgetBoardPayload, formatMoney, toNumber } from "@/src/budget/common";
 
@@ -17,6 +19,7 @@ export default function BudgetRequestAdvanceScreen() {
   const colorScheme = useColorScheme();
   const theme = Colors[colorScheme ?? "light"];
   const { householdId } = useStoredUserState();
+  const queryClient = useQueryClient();
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -46,6 +49,17 @@ export default function BudgetRequestAdvanceScreen() {
     focusOptions: { silent: false },
     realtimeOptions: { silent: true },
   });
+
+  const invalidateBudgetAndDashboard = useCallback(async () => {
+    if (!householdId) {
+      return;
+    }
+
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: queryKeys.budget.board(householdId) }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.dashboard.root(householdId) }),
+    ]);
+  }, [householdId, queryClient]);
 
   const onBackPress = useCallback(() => {
     if (router.canGoBack()) {
@@ -79,6 +93,7 @@ export default function BudgetRequestAdvanceScreen() {
       setAmountInput("");
       setCommentInput("");
       await loadBoard();
+      await invalidateBudgetAndDashboard();
       Alert.alert("Budget", "Demande d'avance envoyée.");
     } catch (error: unknown) {
       const message = (error as { message?: string })?.message || "Impossible d'envoyer la demande.";

@@ -7,12 +7,17 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import Constants from "expo-constants";
 
 import { Colors } from "@/constants/theme";
-import { apiFetch, isApiClientError } from "@/src/api/client";
+import { isApiClientError } from "@/src/api/client";
 import { AppErrorBoundary } from "@/src/components/app-error-boundary";
 import { AppAlertHost } from "@/src/components/app-alert-host";
 import { resolveNotificationNavigationTarget, toPositiveInt } from "@/src/notifications/navigation";
+import { queryKeys } from "@/src/query/query-keys";
+import { setGlobalQueryClient } from "@/src/query/query-client";
 import { subscribeToUserRealtime } from "@/src/realtime/client";
+import { installUnauthorizedSessionHandler } from "@/src/session/session-expiration";
 import { persistStoredUser, switchStoredHousehold } from "@/src/session/user-cache";
+import { fetchMe } from "@/src/services/authService";
+import { fetchPendingNotifications } from "@/src/services/homeService";
 import { hydrateAuthState, logoutAuth, useAuthStore } from "@/src/store/useAuthStore";
 import { installAppAlertInterceptor } from "@/src/utils/app-alert";
 import { installIosTextScale } from "@/src/ui/ios-text-scale";
@@ -81,6 +86,20 @@ export default function RootLayout() {
     const userMustChangePassword = !!user?.must_change_password;
 
     useEffect(() => {
+        setGlobalQueryClient(queryClient);
+        return () => {
+            setGlobalQueryClient(null);
+        };
+    }, [queryClient]);
+
+    useEffect(() => {
+        const unsubscribe = installUnauthorizedSessionHandler();
+        return () => {
+            unsubscribe();
+        };
+    }, []);
+
+    useEffect(() => {
         if (!authReady || !token || userMustChangePassword) {
             return;
         }
@@ -128,11 +147,19 @@ export default function RootLayout() {
 
                     let resolvedHouseholdId = toPositiveInt(rawData.household_id ?? rawData.householdId);
                     let notificationType = String(rawData.notification_type ?? rawData.type ?? "").trim();
+                    const pendingNotificationsQueryKey = queryKeys.home.pendingNotifications(token);
+                    const fetchPendingNotificationsQuery = async () => {
+                        return await queryClient.fetchQuery({
+                            queryKey: pendingNotificationsQueryKey,
+                            queryFn: fetchPendingNotifications,
+                            staleTime: 10_000,
+                            gcTime: 5 * 60_000,
+                        });
+                    };
 
                     if (notificationId && notificationType.length === 0) {
                         try {
-                            const response = await apiFetch("/notifications/pending?all_households=1");
-                            const notifications = Array.isArray(response?.notifications) ? response.notifications : [];
+                            const notifications = await fetchPendingNotificationsQuery();
                             const matchedNotification = notifications.find(
                                 (notification: any) => Number(notification?.id ?? 0) === notificationId
                             );
@@ -217,7 +244,12 @@ export default function RootLayout() {
                 const pullPendingNotifications = async () => {
                     if (isCancelled) {return;}
                     try {
-                        await apiFetch("/notifications/pending?all_households=1");
+                        await queryClient.fetchQuery({
+                            queryKey: queryKeys.home.pendingNotifications(token),
+                            queryFn: fetchPendingNotifications,
+                            staleTime: 10_000,
+                            gcTime: 5 * 60_000,
+                        });
                     } catch (error: any) {
                         if (Number(error?.status) !== 429) {
                             console.error("Erreur pull notifications:", error);
@@ -302,16 +334,10 @@ export default function RootLayout() {
 
                 if (resolvedToken && !resolvedUser) {
                     try {
-                        const meResponse = await apiFetch("/me", {
-                            headers: {
-                                Authorization: `Bearer ${resolvedToken}`,
-                            },
-                            bypassCache: true,
-                        });
-
-                        if (meResponse?.user) {
-                            resolvedUser = meResponse.user;
-                            await persistStoredUser(meResponse.user);
+                        const meUser = await fetchMe();
+                        if (meUser) {
+                            resolvedUser = meUser;
+                            await persistStoredUser(meUser);
                         }
                     } catch {
                         // Token invalid or backend unavailable: handled below.
