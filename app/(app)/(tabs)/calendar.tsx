@@ -229,12 +229,11 @@ export default function CalendarScreen() {
 
   const handleDateWheelChange = useCallback((nextIsoDate: string) => {
     if (dateWheelTarget === "event_start") {
-      const nextEventEndDate = eventEndDate < nextIsoDate ? nextIsoDate : eventEndDate;
       if (eventDate !== nextIsoDate) {
         setEventDate(nextIsoDate);
       }
-      if (eventEndDate !== nextEventEndDate) {
-        setEventEndDate(nextEventEndDate);
+      if (eventEndDate !== nextIsoDate) {
+        setEventEndDate(nextIsoDate);
       }
       return;
     }
@@ -249,12 +248,11 @@ export default function CalendarScreen() {
       return;
     }
     if (dateWheelTarget === "task_start") {
-      const nextTaskEndDate = taskEndDate < nextIsoDate ? nextIsoDate : taskEndDate;
       if (taskDueDate !== nextIsoDate) {
         setTaskDueDate(nextIsoDate);
       }
-      if (taskEndDate !== nextTaskEndDate) {
-        setTaskEndDate(nextTaskEndDate);
+      if (taskEndDate !== nextIsoDate) {
+        setTaskEndDate(nextIsoDate);
       }
       return;
     }
@@ -303,8 +301,8 @@ export default function CalendarScreen() {
     }
 
     await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ["tasks", "overview", householdId] }),
-      queryClient.invalidateQueries({ queryKey: ["tasks", "board", householdId] }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.tasks.overviewRoot(householdId) }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.tasks.boardRoot(householdId) }),
       queryClient.invalidateQueries({ queryKey: queryKeys.dashboard.root(householdId) }),
     ]);
   }, [householdId, queryClient]);
@@ -511,6 +509,13 @@ export default function CalendarScreen() {
       visible={dateWheelVisible}
       title={dateWheelTitle}
       value={dateWheelValue}
+      minValue={
+        dateWheelTarget === "event_end"
+          ? eventDate
+          : dateWheelTarget === "task_end"
+            ? taskDueDate
+            : undefined
+      }
       onChange={handleDateWheelChange}
       theme={theme}
     />

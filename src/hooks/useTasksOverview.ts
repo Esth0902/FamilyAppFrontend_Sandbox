@@ -18,7 +18,7 @@ export const useTasksOverview = ({ householdId }: UseTasksOverviewArgs) => {
   const [plannedWeekStartDay, setPlannedWeekStartDay] = useState<number>(1);
 
   const query = useQuery({
-    queryKey: queryKeys.tasks.overview(householdId, plannedWeekStartDay),
+    queryKey: queryKeys.tasks.overviewCurrentWeek(householdId),
     enabled: householdId !== null,
     staleTime: 12_000,
     queryFn: () => fetchTasksBoardForCurrentWeek(plannedWeekStartDay),

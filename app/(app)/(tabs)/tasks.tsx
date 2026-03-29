@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo } from "react";
+import React, { useCallback, useEffect, useMemo, useRef } from "react";
 import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useFocusEffect, useRouter } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
@@ -43,9 +43,14 @@ export default function TasksTabScreen() {
     error,
     refreshBoard,
   } = useTasksOverview({ householdId });
+  const hasFocusedOnceRef = useRef(false);
 
   useFocusEffect(
     useCallback(() => {
+      if (!hasFocusedOnceRef.current) {
+        hasFocusedOnceRef.current = true;
+        return;
+      }
       void refreshBoard();
     }, [refreshBoard])
   );
@@ -122,6 +127,11 @@ export default function TasksTabScreen() {
   );
 
   const visibleOptions = useMemo(() => menuOptions.filter((option) => option.enabled), [menuOptions]);
+  const routeByModule = useMemo(() => ({
+    planned: "/tasks/planned",
+    schedule: "/tasks/schedule",
+    routines: "/tasks/routines",
+  } as const), []);
   const canManageHouseholdConfig = currentUserRole === "parent";
   const cardThemeStyle = useMemo(
     () => ({ backgroundColor: theme.card, borderColor: theme.icon }),
@@ -202,7 +212,7 @@ export default function TasksTabScreen() {
                 key={option.id}
                 style={[styles.menuCard, cardThemeStyle]}
                 accentColor={option.color}
-                onPress={() => router.push({ pathname: "/tasks/manage", params: { module: option.id } })}
+                onPress={() => router.push(routeByModule[option.id] as any)}
                 activeOpacity={0.8}
               >
                 <View style={[styles.iconContainer, { backgroundColor: `${option.color}15` }]}>

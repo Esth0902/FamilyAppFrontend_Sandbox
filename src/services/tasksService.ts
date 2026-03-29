@@ -17,8 +17,11 @@ export type TasksBoardPayload = {
     role: "parent" | "enfant";
   };
   instances: {
+    id?: number;
+    title?: string;
+    description?: string | null;
     due_date?: string;
-    status: TaskStatus;
+    status: TaskStatus | string;
     validated_by_parent: boolean;
     assignee?: {
       id: number;
@@ -181,6 +184,7 @@ export const createTaskInstance = async (payload: {
   due_date: string;
   end_date: string;
   user_id?: number;
+  user_ids?: number[];
 }): Promise<void> => {
   await apiFetch("/tasks/instances", {
     method: "POST",
@@ -203,5 +207,38 @@ export const updateTaskInstance = async (
 export const validateTaskInstance = async (instanceId: number): Promise<void> => {
   await apiFetch(`/tasks/instances/${instanceId}/validate`, {
     method: "POST",
+  });
+};
+
+export const requestTaskInstanceReassignment = async (payload: {
+  instanceId: number;
+  invitedUserId: number;
+}): Promise<void> => {
+  await apiFetch(`/tasks/instances/${payload.instanceId}/reassignment-request`, {
+    method: "POST",
+    body: JSON.stringify({ invited_user_id: payload.invitedUserId }),
+  });
+};
+
+export const createTaskTemplate = async (payload: Record<string, unknown>): Promise<void> => {
+  await apiFetch("/tasks/templates", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+};
+
+export const updateTaskTemplate = async (
+  templateId: number,
+  payload: Record<string, unknown>
+): Promise<void> => {
+  await apiFetch(`/tasks/templates/${templateId}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+};
+
+export const deleteTaskTemplate = async (templateId: number): Promise<void> => {
+  await apiFetch(`/tasks/templates/${templateId}`, {
+    method: "DELETE",
   });
 };

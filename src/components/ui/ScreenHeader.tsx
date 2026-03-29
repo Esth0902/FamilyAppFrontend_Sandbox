@@ -23,6 +23,7 @@ type ScreenHeaderProps = {
   rightSlot?: React.ReactNode;
   safeTop?: boolean;
   showBorder?: boolean;
+  bottomSpacing?: number;
   containerStyle?: StyleProp<ViewStyle>;
   contentStyle?: StyleProp<ViewStyle>;
 };
@@ -36,6 +37,7 @@ export function ScreenHeader({
   rightSlot,
   safeTop = false,
   showBorder = false,
+  bottomSpacing = 8,
   containerStyle,
   contentStyle,
 }: ScreenHeaderProps) {
@@ -67,7 +69,8 @@ export function ScreenHeader({
         {
           borderBottomColor: theme.icon,
           borderBottomWidth: showBorder ? 1 : 0,
-          paddingTop: safeTop ? Math.max(insets.top + 10, 24) : 0, 
+          paddingTop: safeTop ? Math.max(insets.top + 10, 24) : 0,
+          marginBottom: bottomSpacing,
         },
         containerStyle,
       ]}
@@ -99,7 +102,6 @@ const styles = StyleSheet.create({
   container: {
     paddingHorizontal: 20,
     paddingBottom: 8,
-    marginBottom: 8,
   },
   row: {
     minHeight: 52,
