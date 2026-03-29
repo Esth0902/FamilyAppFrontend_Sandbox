@@ -13,6 +13,7 @@ import { useQueryClient } from "@tanstack/react-query";
 
 import { Colors } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
+import { ScreenHeader } from "@/src/components/ui/ScreenHeader";
 import { WheelDatePicker, WheelTimePicker } from "@/src/components/ui/WheelDatePicker";
 import { MEAL_TYPES, mealTypeLabel, type MealType } from "@/src/features/calendar/calendar-types";
 import { calendarStyles as styles } from "@/src/features/calendar/calendar-screen.styles";
@@ -715,24 +716,22 @@ export default function CalendarScreen() {
       style={[styles.container, { backgroundColor: theme.background }]}
       contentContainerStyle={styles.content}
     >
-      <View style={styles.header}>
-        <View style={styles.headerRow}>
-          <View style={{ flex: 1 }}>
-            <Text style={[styles.headerTitle, { color: theme.text }]}>Calendrier familial</Text>
-            <Text style={[styles.headerSubtitle, { color: theme.textSecondary }]}>
-              Événements du foyer, tâches à effectuer, repas validés et partage inter-foyers.
-            </Text>
-          </View>
-          {canManageHouseholdConfig ? (
+      <ScreenHeader
+        title="Calendrier familial"
+        subtitle="Événements du foyer, tâches à effectuer, repas validés et partage inter-foyers."
+        containerStyle={styles.headerContainer}
+        contentStyle={styles.headerContent}
+        rightSlot={
+          canManageHouseholdConfig ? (
             <TouchableOpacity
               onPress={() => router.push("/householdSetup?mode=edit&scope=calendar")}
               style={[styles.settingsBtn, { borderColor: theme.icon }]}
             >
               <MaterialCommunityIcons name="cog-outline" size={20} color={theme.tint} />
             </TouchableOpacity>
-          ) : null}
-        </View>
-      </View>
+          ) : null
+        }
+      />
 
       {!calendarEnabled ? (
         <View style={[styles.card, { backgroundColor: theme.card }]}>
