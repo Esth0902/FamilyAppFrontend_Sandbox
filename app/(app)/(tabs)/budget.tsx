@@ -60,10 +60,6 @@ export default function BudgetTabScreen() {
     () => (board?.pending_advance_requests ?? []).length,
     [board?.pending_advance_requests]
   );
-  const totalPendingPayments = useMemo(
-    () => (board?.children ?? []).reduce((sum, child) => sum + computePaymentBreakdown(child).remainingToPay, 0),
-    [board?.children]
-  );
   const childAdvancePending = useMemo(
     () =>
       (myBudget?.transactions ?? []).filter(
@@ -91,8 +87,6 @@ export default function BudgetTabScreen() {
         id: "advances",
         title: "Demandes d'avance",
         description: totalPendingRequests > 0 ? `${totalPendingRequests} demande(s) en attente` : "Pas de demandes en cours",
-        chipLabel: totalPendingRequests > 0 ? `${totalPendingRequests} en attente` : "À jour",
-        chipTone: totalPendingRequests > 0 ? "warning" : "success",
         icon: "cash-clock",
         color: colorScheme === "dark" ? "#4DABFF" : theme.tint,
         route: "/budget/advances",
@@ -108,15 +102,13 @@ export default function BudgetTabScreen() {
       {
         id: "payments",
         title: "Paiements",
-        description: `Total à payer actuellement : ${formatMoney(totalPendingPayments, currency)}`,
-        chipLabel: formatMoney(totalPendingPayments, currency),
-        chipTone: "info",
+        description: "Valider les paiements et gérer les reports négatifs",
         icon: "cash-check",
         color: theme.accentCool,
         route: "/budget/payments",
       },
     ],
-    [colorScheme, currency, theme.accentCool, theme.accentWarm, theme.tint, totalPendingPayments, totalPendingRequests]
+    [colorScheme, theme.accentCool, theme.accentWarm, theme.tint, totalPendingRequests]
   );
 
   const childCards = useMemo<MenuCard[]>(

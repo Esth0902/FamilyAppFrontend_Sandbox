@@ -16,9 +16,9 @@ export const useBudgetBoard = ({ householdId }: UseBudgetBoardArgs) => {
     queryFn: fetchBudgetBoard,
   });
 
-  const refreshBoard = useCallback(async () => {
+  const refreshBoard = useCallback(async (_options?: { silent?: boolean }) => {
     await query.refetch();
-  }, [query]);
+  }, [query.refetch]);
 
   return {
     board: (query.data ?? null) as BudgetBoardPayload | null,
