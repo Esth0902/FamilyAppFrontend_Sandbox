@@ -50,7 +50,6 @@ type RoutineFormCardProps = {
   onToggleInterHouseholdAlternating: () => void;
   onToggleInterHouseholdWeekStartWheel: () => void;
   onInterHouseholdWeekStartChange: (nextIsoDate: string) => void;
-  onCancelEdit: () => void;
   onSave: () => void;
 };
 
@@ -95,14 +94,10 @@ export const RoutineFormCard = memo(function RoutineFormCard({
   onToggleInterHouseholdAlternating,
   onToggleInterHouseholdWeekStartWheel,
   onInterHouseholdWeekStartChange,
-  onCancelEdit,
   onSave,
 }: RoutineFormCardProps) {
   return (
     <>
-      <Text style={[styles.cardSubtitle, { color: theme.text, marginTop: 14 }]}>
-        {editingTemplateId ? "Modifier la routine" : "Nouvelle routine"}
-      </Text>
       <TextInput
         style={[styles.input, { backgroundColor: theme.background, color: theme.text, borderColor: theme.icon }]}
         value={templateName}
@@ -366,15 +361,6 @@ export const RoutineFormCard = memo(function RoutineFormCard({
         </>
       ) : null}
 
-      {editingTemplateId ? (
-        <TouchableOpacity
-          onPress={onCancelEdit}
-          style={[styles.iconBtn, { borderColor: theme.icon, alignSelf: "flex-end", marginBottom: 6 }]}
-          disabled={saving}
-        >
-          <MaterialCommunityIcons name="close" size={20} color={theme.textSecondary} />
-        </TouchableOpacity>
-      ) : null}
       <TouchableOpacity
         onPress={onSave}
         style={[styles.primaryBtn, { backgroundColor: theme.tint, opacity: saving ? 0.7 : 1 }]}

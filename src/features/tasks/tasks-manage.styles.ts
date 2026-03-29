@@ -145,9 +145,26 @@ export const tasksManageStyles = StyleSheet.create({
     borderWidth: 1,
     borderRadius: 10,
     padding: 10,
+    gap: 4,
+  },
+  templateHeaderRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 8,
+  },
+  templateActionsRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
+    gap: 6,
+  },
+  templateIconBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
   },
   iconBtn: {
     width: 36,

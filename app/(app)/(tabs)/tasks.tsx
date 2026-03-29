@@ -20,8 +20,6 @@ type TaskModuleCard = {
   id: TaskModuleKey;
   title: string;
   description: string;
-  chipLabel: string;
-  chipTone: "neutral" | "info" | "success" | "warning";
   icon: keyof typeof MaterialCommunityIcons.glyphMap;
   color: string;
   enabled: boolean;
@@ -88,8 +86,6 @@ export default function TasksTabScreen() {
         id: "planned",
         title: "Tâches planifiées",
         description: "Suivi des tâches prévues et de leur statut",
-        chipLabel: `${stats.todo} à faire`,
-        chipTone: stats.todo > 0 ? "warning" : "success",
         icon: "calendar-check-outline",
         color: colorScheme === "dark" ? "#4DABFF" : theme.tint,
         enabled: true,
@@ -98,8 +94,6 @@ export default function TasksTabScreen() {
         id: "schedule",
         title: "Planifier une tâche ponctuelle",
         description: "Créer une tâche ponctuelle et l'attribuer à un membre du foyer",
-        chipLabel: canManageTemplates || canManageInstances ? "Ouvert" : "Restreint",
-        chipTone: canManageTemplates || canManageInstances ? "info" : "neutral",
         icon: "calendar-plus",
         color: theme.accentCool,
         enabled: canManageTemplates || canManageInstances,
@@ -108,8 +102,6 @@ export default function TasksTabScreen() {
         id: "routines",
         title: "Gérer les routines",
         description: "Créer et modifier des tâches réutilisables",
-        chipLabel: canManageTemplates ? "Disponible" : "Restreint",
-        chipTone: canManageTemplates ? "success" : "neutral",
         icon: "playlist-edit",
         color: theme.accentWarm,
         enabled: canManageTemplates,
@@ -119,7 +111,6 @@ export default function TasksTabScreen() {
       canManageInstances,
       canManageTemplates,
       colorScheme,
-      stats.todo,
       theme.accentCool,
       theme.accentWarm,
       theme.tint,
@@ -219,10 +210,7 @@ export default function TasksTabScreen() {
                   <MaterialCommunityIcons name={option.icon} size={24} color={option.color} />
                 </View>
                 <View style={styles.textContainer}>
-                  <View style={styles.titleRow}>
-                    <Text style={[styles.menuTitle, { color: theme.text }]}>{option.title}</Text>
-                    <Chip label={option.chipLabel} tone={option.chipTone} />
-                  </View>
+                  <Text style={[styles.menuTitle, { color: theme.text }]}>{option.title}</Text>
                   <Text style={[styles.menuDescription, { color: theme.textSecondary }]}>{option.description}</Text>
                 </View>
                 <MaterialCommunityIcons name="chevron-right" size={20} color={theme.textSecondary} />
@@ -265,11 +253,12 @@ const styles = StyleSheet.create({
   statCard: {
     flex: 1,
     borderRadius: 12,
+    minHeight: 94,
   },
   statCardContent: {
     flexDirection: "column",
     alignItems: "center",
-    justifyContent: "center",
+    justifyContent: "space-between",
     gap: 6,
     paddingVertical: 12,
   },
@@ -293,17 +282,11 @@ const styles = StyleSheet.create({
   textContainer: {
     flex: 1,
   },
-  titleRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 8,
-    marginBottom: 2,
-  },
   menuTitle: {
     flex: 1,
     fontSize: 15,
     fontWeight: "700",
+    marginBottom: 2,
   },
   menuDescription: {
     fontSize: 12,

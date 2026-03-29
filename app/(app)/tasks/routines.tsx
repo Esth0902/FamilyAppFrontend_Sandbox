@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Alert, ScrollView, Text, TouchableOpacity, View } from "react-native";
 import { useFocusEffect, useRouter } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
@@ -22,6 +22,8 @@ export default function RoutinesTasksScreen() {
   const theme = Colors[colorScheme ?? "light"];
   const { householdId } = useStoredUserState();
   const hasFocusedOnceRef = useRef(false);
+  const [routinesListExpanded, setRoutinesListExpanded] = useState(true);
+  const [routineFormExpanded, setRoutineFormExpanded] = useState(true);
 
   const {
     loading,
@@ -221,6 +223,17 @@ export default function RoutinesTasksScreen() {
     templateInterHouseholdAlternating,
   ]);
 
+  useEffect(() => {
+    if (editingTemplateId !== null) {
+      setRoutineFormExpanded(true);
+    }
+  }, [editingTemplateId]);
+
+  const handleStartEditTemplate = useCallback((template: TaskTemplate) => {
+    setRoutineFormExpanded(true);
+    startEditTemplate(template);
+  }, [startEditTemplate]);
+
   const saveTemplate = async () => {
     const built = buildTemplatePayload();
     if (!built.payload || built.error) {
@@ -307,84 +320,134 @@ export default function RoutinesTasksScreen() {
             </Text>
           </View>
         ) : (
-          <View style={[styles.card, { backgroundColor: theme.card }]}>
-            <Text style={[styles.cardTitle, { color: theme.text }]}>Gérer les routines</Text>
-            <RoutinesListCard
-              theme={theme}
-              templates={routinesTemplates}
-              memberNameById={memberNameById}
-              saving={saving}
-              onEdit={startEditTemplate}
-              onDelete={deleteTemplate}
-            />
-            <RoutineFormCard
-              theme={theme}
-              saving={saving}
-              editingTemplateId={editingTemplateId}
-              members={members}
-              templateName={templateName}
-              templateDescription={templateDescription}
-              templateRecurrence={templateRecurrence}
-              templateRecurrenceDays={templateRecurrenceDays}
-              templateHasEndDate={templateHasEndDate}
-              templateStartDate={templateStartDate}
-              templateEndDate={templateEndDate}
-              templateStartDateWheelVisible={templateStartDateWheelVisible}
-              templateEndDateWheelVisible={templateEndDateWheelVisible}
-              templateEndMinDate={templateStartDate}
-              templateRotation={templateRotation}
-              templateRotationCycleWeeks={templateRotationCycleWeeks}
-              templateAssigneeUserIds={templateAssigneeUserIds}
-              templateRotationUserIds={templateRotationUserIds}
-              templateInterHouseholdAlternating={templateInterHouseholdAlternating}
-              templateInterHouseholdWeekStart={templateInterHouseholdWeekStart}
-              templateInterHouseholdWeekStartWheelVisible={templateInterHouseholdWeekStartWheelVisible}
-              interHouseholdWeekLabel={interHouseholdWeekLabel}
-              interHouseholdWeekStartIso={interHouseholdWeekStartIso}
-              onTemplateNameChange={setTemplateName}
-              onTemplateDescriptionChange={setTemplateDescription}
-              onRecurrenceSelect={setTemplateRecurrence}
-              onToggleRecurrenceDay={toggleRecurrenceDay}
-              onToggleHasEndDate={toggleHasEndDate}
-              onToggleStartDateWheel={() => {
-                setTemplateInterHouseholdWeekStartWheelVisible(false);
-                setTemplateEndDateWheelVisible(false);
-                setTemplateStartDateWheelVisible((prev) => !prev);
-              }}
-              onToggleEndDateWheel={() => {
-                if (!templateHasEndDate) {
-                  return;
-                }
-                setTemplateInterHouseholdWeekStartWheelVisible(false);
-                setTemplateStartDateWheelVisible(false);
-                setTemplateEndDateWheelVisible((prev) => !prev);
-              }}
-              onStartDateChange={(nextIsoDate) => {
-                setTemplateStartDate(nextIsoDate);
-                setTemplateEndDate(nextIsoDate);
-              }}
-              onEndDateChange={(nextIsoDate) => setTemplateEndDate(nextIsoDate < templateStartDate ? templateStartDate : nextIsoDate)}
-              onToggleRotation={toggleRotation}
-              onSetRotationCycleWeeks={setTemplateRotationCycleWeeks}
-              onToggleAssignee={toggleAssignee}
-              onToggleRotationMember={toggleRotationMember}
-              onMoveRotationMember={moveRotationMember}
-              onToggleInterHouseholdAlternating={toggleInterHouseholdAlternating}
-              onToggleInterHouseholdWeekStartWheel={() => {
-                if (!templateInterHouseholdAlternating) {
-                  return;
-                }
-                setTemplateStartDateWheelVisible(false);
-                setTemplateEndDateWheelVisible(false);
-                setTemplateInterHouseholdWeekStartWheelVisible((prev) => !prev);
-              }}
-              onInterHouseholdWeekStartChange={setTemplateInterHouseholdWeekStart}
-              onCancelEdit={resetTemplateForm}
-              onSave={() => {
-                void saveTemplate();
-              }}
-            />
-          </View>
+          <>
+            <View style={[styles.card, { backgroundColor: theme.card }]}>
+              <TouchableOpacity
+                onPress={() => setRoutinesListExpanded((prev) => !prev)}
+                style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}
+                activeOpacity={0.8}
+              >
+                <Text style={[styles.cardTitle, { color: theme.text, marginBottom: 0 }]}>Gérer les routines</Text>
+                <MaterialCommunityIcons
+                  name={routinesListExpanded ? "chevron-down" : "chevron-right"}
+                  size={22}
+                  color={theme.textSecondary}
+                />
+              </TouchableOpacity>
+              {routinesListExpanded ? (
+                <View style={{ marginTop: 10 }}>
+                  <RoutinesListCard
+                    theme={theme}
+                    templates={routinesTemplates}
+                    memberNameById={memberNameById}
+                    saving={saving}
+                    onEdit={handleStartEditTemplate}
+                    onDelete={deleteTemplate}
+                  />
+                </View>
+              ) : null}
+            </View>
+
+            <View style={[styles.card, { backgroundColor: theme.card }]}>
+              <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                <Text style={[styles.cardTitle, { color: theme.text, marginBottom: 0 }]}>
+                  {editingTemplateId ? "Modifier la routine" : "Nouvelle routine"}
+                </Text>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                  {editingTemplateId !== null ? (
+                    <TouchableOpacity
+                      onPress={() => resetTemplateForm()}
+                      style={[styles.templateIconBtn, { borderColor: theme.icon }]}
+                      disabled={saving}
+                    >
+                      <MaterialCommunityIcons name="close" size={18} color={theme.textSecondary} />
+                    </TouchableOpacity>
+                  ) : null}
+                  <TouchableOpacity
+                    onPress={() => setRoutineFormExpanded((prev) => !prev)}
+                    style={[styles.templateIconBtn, { borderColor: theme.icon }]}
+                    activeOpacity={0.8}
+                  >
+                    <MaterialCommunityIcons
+                      name={routineFormExpanded ? "chevron-down" : "chevron-right"}
+                      size={18}
+                      color={theme.textSecondary}
+                    />
+                  </TouchableOpacity>
+                </View>
+              </View>
+              {routineFormExpanded ? (
+                <View style={{ marginTop: 10 }}>
+                  <RoutineFormCard
+                    theme={theme}
+                    saving={saving}
+                    editingTemplateId={editingTemplateId}
+                    members={members}
+                    templateName={templateName}
+                    templateDescription={templateDescription}
+                    templateRecurrence={templateRecurrence}
+                    templateRecurrenceDays={templateRecurrenceDays}
+                    templateHasEndDate={templateHasEndDate}
+                    templateStartDate={templateStartDate}
+                    templateEndDate={templateEndDate}
+                    templateStartDateWheelVisible={templateStartDateWheelVisible}
+                    templateEndDateWheelVisible={templateEndDateWheelVisible}
+                    templateEndMinDate={templateStartDate}
+                    templateRotation={templateRotation}
+                    templateRotationCycleWeeks={templateRotationCycleWeeks}
+                    templateAssigneeUserIds={templateAssigneeUserIds}
+                    templateRotationUserIds={templateRotationUserIds}
+                    templateInterHouseholdAlternating={templateInterHouseholdAlternating}
+                    templateInterHouseholdWeekStart={templateInterHouseholdWeekStart}
+                    templateInterHouseholdWeekStartWheelVisible={templateInterHouseholdWeekStartWheelVisible}
+                    interHouseholdWeekLabel={interHouseholdWeekLabel}
+                    interHouseholdWeekStartIso={interHouseholdWeekStartIso}
+                    onTemplateNameChange={setTemplateName}
+                    onTemplateDescriptionChange={setTemplateDescription}
+                    onRecurrenceSelect={setTemplateRecurrence}
+                    onToggleRecurrenceDay={toggleRecurrenceDay}
+                    onToggleHasEndDate={toggleHasEndDate}
+                    onToggleStartDateWheel={() => {
+                      setTemplateInterHouseholdWeekStartWheelVisible(false);
+                      setTemplateEndDateWheelVisible(false);
+                      setTemplateStartDateWheelVisible((prev) => !prev);
+                    }}
+                    onToggleEndDateWheel={() => {
+                      if (!templateHasEndDate) {
+                        return;
+                      }
+                      setTemplateInterHouseholdWeekStartWheelVisible(false);
+                      setTemplateStartDateWheelVisible(false);
+                      setTemplateEndDateWheelVisible((prev) => !prev);
+                    }}
+                    onStartDateChange={(nextIsoDate) => {
+                      setTemplateStartDate(nextIsoDate);
+                      setTemplateEndDate(nextIsoDate);
+                    }}
+                    onEndDateChange={(nextIsoDate) => setTemplateEndDate(nextIsoDate < templateStartDate ? templateStartDate : nextIsoDate)}
+                    onToggleRotation={toggleRotation}
+                    onSetRotationCycleWeeks={setTemplateRotationCycleWeeks}
+                    onToggleAssignee={toggleAssignee}
+                    onToggleRotationMember={toggleRotationMember}
+                    onMoveRotationMember={moveRotationMember}
+                    onToggleInterHouseholdAlternating={toggleInterHouseholdAlternating}
+                    onToggleInterHouseholdWeekStartWheel={() => {
+                      if (!templateInterHouseholdAlternating) {
+                        return;
+                      }
+                      setTemplateStartDateWheelVisible(false);
+                      setTemplateEndDateWheelVisible(false);
+                      setTemplateInterHouseholdWeekStartWheelVisible((prev) => !prev);
+                    }}
+                    onInterHouseholdWeekStartChange={setTemplateInterHouseholdWeekStart}
+                    onSave={() => {
+                      void saveTemplate();
+                    }}
+                  />
+                </View>
+              ) : null}
+            </View>
+          </>
         )}
       </ScrollView>
     </View>

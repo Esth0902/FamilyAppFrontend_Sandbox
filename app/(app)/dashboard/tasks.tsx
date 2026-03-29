@@ -22,9 +22,9 @@ import { isDoneStatus, isInstanceAssignedToUser, isTodoStatus, toPositiveInt } f
 const BUTTON_TEXT_COLOR = "#FFFFFF";
 
 const statusLabel = (status: string): string => {
-  if (isTodoStatus(status)) return "Ã€ faire";
-  if (isDoneStatus(status)) return "RÃ©alisÃ©e";
-  return "AnnulÃ©e";
+  if (isTodoStatus(status)) return "À faire";
+  if (isDoneStatus(status)) return "Réalisée";
+  return "Annulée";
 };
 
 const formatDueDate = (iso: string): string => {
@@ -64,7 +64,7 @@ export default function DashboardTasksScreen() {
     if (!error) {
       return;
     }
-    Alert.alert("TÃ¢ches", error.message || "Impossible de charger la vue tÃ¢ches.");
+    Alert.alert("Tâches", error.message || "Impossible de charger la vue tâches.");
   }, [error]);
 
   const currentUserId = toPositiveInt(payload?.current_user?.id);
@@ -81,39 +81,39 @@ export default function DashboardTasksScreen() {
 
   if (isInitialLoading && !payload) {
     return (
-      <View style={[styles.center, { backgroundColor: theme.background }]}>
+      <View style={[styles.center, { backgroundColor: theme.background }]}> 
         <ActivityIndicator size="large" color={theme.tint} />
       </View>
     );
   }
 
   return (
-    <View style={[styles.container, { backgroundColor: theme.background }]}>
+    <View style={[styles.container, { backgroundColor: theme.background }]}> 
       <Stack.Screen options={{ headerShown: false }} />
 
-      <View style={[styles.header, { borderBottomColor: theme.icon, paddingTop: Math.max(insets.top, 12) }]}>
-        <TouchableOpacity onPress={() => router.replace("/dashboard")} style={[styles.backBtn, { borderColor: theme.icon }]}>
+      <View style={[styles.header, { borderBottomColor: theme.icon, paddingTop: Math.max(insets.top, 12) }]}> 
+        <TouchableOpacity onPress={() => router.replace("/dashboard")} style={[styles.backBtn, { borderColor: theme.icon }]}> 
           <MaterialCommunityIcons name="arrow-left" size={20} color={theme.tint} />
         </TouchableOpacity>
-        <Text style={[styles.headerTitle, { color: theme.text }]}>DÃ©tail tÃ¢ches</Text>
+        <Text style={[styles.headerTitle, { color: theme.text }]}>Détail tâches</Text>
       </View>
 
       <ScrollView contentContainerStyle={styles.content}>
         {!tasksEnabled ? (
-          <View style={[styles.card, { backgroundColor: theme.card, borderColor: theme.icon }]}>
-            <Text style={[styles.text, { color: theme.textSecondary }]}>Module tÃ¢ches dÃ©sactivÃ©.</Text>
+          <View style={[styles.card, { backgroundColor: theme.card, borderColor: theme.icon }]}> 
+            <Text style={[styles.text, { color: theme.textSecondary }]}>Module tâches désactivé.</Text>
           </View>
         ) : (
           <>
-            <View style={[styles.card, { backgroundColor: theme.card, borderColor: theme.icon }]}>
-              <Text style={[styles.title, { color: theme.text }]}>RÃ©sumÃ© semaine</Text>
-              <Text style={[styles.text, { color: theme.textSecondary }]}>Ã€ faire: {stats.todo}</Text>
-              <Text style={[styles.text, { color: theme.textSecondary }]}>RÃ©alisÃ©es: {stats.done}</Text>
-              <Text style={[styles.text, { color: theme.textSecondary }]}>ValidÃ©es: {stats.validated}</Text>
+            <View style={[styles.card, { backgroundColor: theme.card, borderColor: theme.icon }]}> 
+              <Text style={[styles.title, { color: theme.text }]}>Résumé semaine</Text>
+              <Text style={[styles.text, { color: theme.textSecondary }]}>À faire: {stats.todo}</Text>
+              <Text style={[styles.text, { color: theme.textSecondary }]}>Réalisées: {stats.done}</Text>
+              <Text style={[styles.text, { color: theme.textSecondary }]}>Validées: {stats.validated}</Text>
             </View>
 
-            <View style={[styles.card, { backgroundColor: theme.card, borderColor: theme.icon }]}>
-              <Text style={[styles.title, { color: theme.text }]}>TÃ¢ches de la semaine</Text>
+            <View style={[styles.card, { backgroundColor: theme.card, borderColor: theme.icon }]}> 
+              <Text style={[styles.title, { color: theme.text }]}>Tâches de la semaine</Text>
               {visibleInstances.length > 0 ? visibleInstances.map((instance) => {
                 const assigneeNames = Array.isArray(instance.assignees) && instance.assignees.length > 0
                   ? instance.assignees.map((assignee) => assignee.name).join(", ")
@@ -121,20 +121,20 @@ export default function DashboardTasksScreen() {
                 const taskId = Number.isInteger(instance.id) ? instance.id : `${instance.due_date}-${instance.title}`;
                 const taskTitle = typeof instance.title === "string" && instance.title.trim().length > 0
                   ? instance.title
-                  : "TÃ¢che";
+                  : "Tâche";
                 const taskDueDate = typeof instance.due_date === "string" ? instance.due_date : "";
 
                 return (
-                  <View key={`task-${taskId}`} style={[styles.detailRow, { borderColor: `${theme.icon}55` }]}>
+                  <View key={`task-${taskId}`} style={[styles.detailRow, { borderColor: `${theme.icon}55` }]}> 
                     <Text style={[styles.detailTitle, { color: theme.text }]}>{taskTitle}</Text>
-                    <Text style={[styles.text, { color: theme.textSecondary }]}>Ã‰chÃ©ance: {formatDueDate(taskDueDate)}</Text>
+                    <Text style={[styles.text, { color: theme.textSecondary }]}>Échéance: {formatDueDate(taskDueDate)}</Text>
                     <Text style={[styles.text, { color: theme.textSecondary }]}>Statut: {statusLabel(String(instance.status ?? ""))}</Text>
-                    <Text style={[styles.text, { color: theme.textSecondary }]}>AssignÃ© Ã : {assigneeNames}</Text>
+                    <Text style={[styles.text, { color: theme.textSecondary }]}>Assigné à: {assigneeNames}</Text>
                     <Text style={[styles.text, { color: theme.textSecondary }]}>Validation parent: {instance.validated_by_parent ? "Oui" : "Non"}</Text>
                   </View>
                 );
               }) : (
-                <Text style={[styles.text, { color: theme.textSecondary }]}>Aucune tÃ¢che sur la pÃ©riode.</Text>
+                <Text style={[styles.text, { color: theme.textSecondary }]}>Aucune tâche sur la période.</Text>
               )}
             </View>
           </>
@@ -144,7 +144,7 @@ export default function DashboardTasksScreen() {
           style={[styles.primaryButton, { backgroundColor: theme.tint }]}
           onPress={() => router.push("/(app)/(tabs)/tasks")}
         >
-          <Text style={styles.primaryButtonText}>Ouvrir le module TÃ¢ches</Text>
+          <Text style={styles.primaryButtonText}>Ouvrir le module Tâches</Text>
         </TouchableOpacity>
       </ScrollView>
     </View>

@@ -27,10 +27,35 @@ export const RoutinesListCard = memo(function RoutinesListCard({
 }: RoutinesListCardProps) {
   return (
     <>
-      {templates.map((template) => (
-        <View key={`template-${template.id}`} style={[styles.templateRow, { borderColor: theme.icon, backgroundColor: theme.background }]}>
+      {templates.map((template, index) => (
+        <View
+          key={`template-${template.id}`}
+          style={[
+            styles.templateRow,
+            { borderColor: theme.icon, backgroundColor: theme.background },
+            index < templates.length - 1 ? { marginBottom: 8 } : null,
+          ]}
+        >
+          <View style={styles.templateHeaderRow}>
+            <Text style={{ color: theme.text, fontWeight: "700", flex: 1 }}>{template.name}</Text>
+            <View style={styles.templateActionsRow}>
+              <TouchableOpacity
+                onPress={() => onEdit(template)}
+                style={[styles.templateIconBtn, { borderColor: theme.icon }]}
+                disabled={saving}
+              >
+                <MaterialCommunityIcons name="pencil-outline" size={18} color={theme.tint} />
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => onDelete(template)}
+                style={[styles.templateIconBtn, { borderColor: theme.icon }]}
+                disabled={saving}
+              >
+                <MaterialCommunityIcons name="trash-can-outline" size={18} color="#CC4B4B" />
+              </TouchableOpacity>
+            </View>
+          </View>
           <View style={{ flex: 1 }}>
-            <Text style={{ color: theme.text, fontWeight: "700" }}>{template.name}</Text>
             <Text style={{ color: theme.textSecondary, fontSize: 12 }}>{recurrenceLabel(template.recurrence)}</Text>
             {recurrenceDaysLabel(template.recurrence, template.recurrence_days) ? (
               <Text style={{ color: theme.textSecondary, fontSize: 12 }}>
@@ -43,20 +68,6 @@ export const RoutinesListCard = memo(function RoutinesListCard({
               </Text>
             ) : null}
           </View>
-          <TouchableOpacity
-            onPress={() => onEdit(template)}
-            style={[styles.iconBtn, { borderColor: theme.icon }]}
-            disabled={saving}
-          >
-            <MaterialCommunityIcons name="pencil-outline" size={20} color={theme.tint} />
-          </TouchableOpacity>
-          <TouchableOpacity
-            onPress={() => onDelete(template)}
-            style={[styles.iconBtn, { borderColor: theme.icon }]}
-            disabled={saving}
-          >
-            <MaterialCommunityIcons name="trash-can-outline" size={20} color="#CC4B4B" />
-          </TouchableOpacity>
         </View>
       ))}
 
