@@ -9,11 +9,10 @@ import {
   View,
 } from "react-native";
 import { Stack, useRouter } from "expo-router";
-import { MaterialCommunityIcons } from "@expo/vector-icons";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Colors } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
+import { ScreenHeader } from "@/src/components/ui/ScreenHeader";
 import { useRealtimeRefetch } from "@/src/hooks/useRealtimeRefetch";
 import { useTasksOverview } from "@/src/hooks/useTasksOverview";
 import { useStoredUserState } from "@/src/session/user-cache";
@@ -35,7 +34,6 @@ const formatDueDate = (iso: string): string => {
 
 export default function DashboardTasksScreen() {
   const router = useRouter();
-  const insets = useSafeAreaInsets();
   const colorScheme = useColorScheme();
   const theme = Colors[colorScheme ?? "light"];
   const { householdId } = useStoredUserState();
@@ -78,11 +76,6 @@ export default function DashboardTasksScreen() {
     }
     return instances.filter((instance) => isInstanceAssignedToUser(instance, currentUserId));
   }, [currentUserId, currentUserRole, payload?.instances]);
-  const headerStyle = useMemo(
-    () => [styles.header, { borderBottomColor: theme.icon, paddingTop: Math.max(insets.top, 12) }],
-    [insets.top, theme.icon]
-  );
-  const backButtonStyle = useMemo(() => [styles.backBtn, { borderColor: theme.icon }], [theme.icon]);
   const cardStyle = useMemo(
     () => [styles.card, { backgroundColor: theme.card, borderColor: theme.icon }],
     [theme.card, theme.icon]
@@ -106,13 +99,14 @@ export default function DashboardTasksScreen() {
   return (
     <View style={[styles.container, { backgroundColor: theme.background }]}> 
       <Stack.Screen options={{ headerShown: false }} />
-
-      <View style={headerStyle}> 
-        <TouchableOpacity onPress={onBackPress} style={backButtonStyle}> 
-          <MaterialCommunityIcons name="arrow-left" size={20} color={theme.tint} />
-        </TouchableOpacity>
-        <Text style={[styles.headerTitle, { color: theme.text }]}>Détail tâches</Text>
-      </View>
+      <ScreenHeader
+        title="Détail tâches"
+        withBackButton
+        onBackPress={onBackPress}
+        showBorder
+        safeTop
+        bottomSpacing={0}
+      />
 
       <ScrollView contentContainerStyle={styles.content}>
         {!tasksEnabled ? (
@@ -170,24 +164,6 @@ export default function DashboardTasksScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
-  header: {
-    minHeight: 60,
-    paddingHorizontal: 20,
-    paddingVertical: 8,
-    borderBottomWidth: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-  },
-  backBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    borderWidth: 1,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  headerTitle: { fontSize: 18, fontWeight: "700" },
   content: { padding: 16, paddingBottom: 40, gap: 10 },
   card: {
     borderWidth: 1,

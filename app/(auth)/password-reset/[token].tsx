@@ -15,6 +15,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { Colors } from "@/constants/theme";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { resetPassword, toAuthServiceError } from "@/src/services/authService";
+import { ScreenHeader } from "@/src/components/ui/ScreenHeader";
 
 const toSingleParam = (value: string | string[] | undefined): string => {
     if (Array.isArray(value)) {
@@ -38,6 +39,7 @@ export default function PasswordResetScreen() {
     const [showPassword, setShowPassword] = useState(false);
     const [showPasswordConfirmation, setShowPasswordConfirmation] = useState(false);
     const [loading, setLoading] = useState(false);
+    const onBackPress = () => router.replace("/login");
 
     const onSubmit = async () => {
         if (!token) {
@@ -80,17 +82,15 @@ export default function PasswordResetScreen() {
             style={[styles.container, { backgroundColor: theme.background }]}
         >
             <View style={styles.content}>
-                <TouchableOpacity onPress={() => router.replace("/login")} style={[styles.backButton, { borderColor: theme.icon }]}>
-                    <MaterialCommunityIcons name="arrow-left" size={20} color={theme.tint} />
-                </TouchableOpacity>
-
-                <View style={styles.header}>
-                    <Text style={[styles.title, { color: theme.text }]}>Nouveau mot de passe</Text>
-                    <Text style={[styles.subtitle, { color: theme.textSecondary }]}>
-                        Définis un nouveau mot de passe pour ton compte.
-                    </Text>
-                </View>
-
+                <ScreenHeader
+                    title="Nouveau mot de passe"
+                    subtitle="Définis un nouveau mot de passe pour ton compte."
+                    showBorder
+                    withBackButton
+                    onBackPress={onBackPress}
+                    containerStyle={styles.headerContainer}
+                    contentStyle={styles.headerContent}
+                />
                 <View style={styles.form}>
                     <Text style={[styles.label, { color: theme.text }]}>E-mail</Text>
                     <TextInput
@@ -168,35 +168,20 @@ const styles = StyleSheet.create({
     },
     content: {
         flex: 1,
-        padding: 24,
-        justifyContent: "center",
+        padding: 12,
+        paddingTop: 56,
+        justifyContent: "flex-start",
     },
-    backButton: {
-        position: "absolute",
-        top: 60,
-        left: 24,
-        zIndex: 10,
-        width: 36,
-        height: 36,
-        borderRadius: 18,
-        borderWidth: 1,
-        alignItems: "center",
-        justifyContent: "center",
+    headerContainer: {
+        paddingHorizontal: 0,
+        paddingBottom: 0,
     },
-    header: {
-        marginBottom: 32,
-        alignItems: "flex-start",
-    },
-    title: {
-        fontSize: 18,
-        fontWeight: "bold",
-        marginBottom: 8,
-    },
-    subtitle: {
-        fontSize: 16,
+    headerContent: {
+        minHeight: 0,
     },
     form: {
         width: "100%",
+        marginTop: 24,
     },
     label: {
         fontSize: 14,
