@@ -220,12 +220,7 @@ export default function BudgetAdjustmentsScreen() {
   }
 
   return (
-    <ScrollView
-      keyboardShouldPersistTaps="handled"
-      stickyHeaderIndices={[0]}
-      style={[styles.container, { backgroundColor: theme.background }]}
-      contentContainerStyle={styles.content}
-    >
+    <View style={[styles.container, { backgroundColor: theme.background }]}>
       <View style={{ backgroundColor: theme.background, paddingHorizontal: 16 }}>
         <ScreenHeader
           title="Bonus et pénalités"
@@ -240,38 +235,40 @@ export default function BudgetAdjustmentsScreen() {
         />
       </View>
 
-      <AdjustmentsFormCard
-        theme={theme}
-        childrenBudgets={childrenBudgets}
-        selectedChildId={selectedChildId}
-        adjustmentType={adjustmentType}
-        amountInput={amountInput}
-        commentInput={commentInput}
-        editingTransactionId={editingTransactionId}
-        saving={saving}
-        onSelectChild={setSelectedChildId}
-        onAdjustmentTypeChange={setAdjustmentType}
-        onAmountInputChange={setAmountInput}
-        onCommentInputChange={setCommentInput}
-        onSave={handleSaveAdjustmentPress}
-        onCancelEdit={resetForm}
-      />
+      <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
+        <AdjustmentsFormCard
+          theme={theme}
+          childrenBudgets={childrenBudgets}
+          selectedChildId={selectedChildId}
+          adjustmentType={adjustmentType}
+          amountInput={amountInput}
+          commentInput={commentInput}
+          editingTransactionId={editingTransactionId}
+          saving={saving}
+          onSelectChild={setSelectedChildId}
+          onAdjustmentTypeChange={setAdjustmentType}
+          onAmountInputChange={setAmountInput}
+          onCommentInputChange={setCommentInput}
+          onSave={handleSaveAdjustmentPress}
+          onCancelEdit={resetForm}
+        />
 
-      <AdjustmentsRecentCard
-        theme={theme}
-        selectedChild={selectedChild}
-        selectedChildAdjustments={selectedChildAdjustments}
-        currency={currency}
-        saving={saving}
-        onEdit={handleStartEditAdjustment}
-        onDelete={handleDeleteAdjustment}
-      />
+        <AdjustmentsRecentCard
+          theme={theme}
+          selectedChild={selectedChild}
+          selectedChildAdjustments={selectedChildAdjustments}
+          currency={currency}
+          saving={saving}
+          onEdit={handleStartEditAdjustment}
+          onDelete={handleDeleteAdjustment}
+        />
 
-      <AdjustmentsStatusCard
-        theme={theme}
-        childrenBudgets={childrenBudgets}
-        currency={currency}
-      />
-    </ScrollView>
+        <AdjustmentsStatusCard
+          theme={theme}
+          childrenBudgets={childrenBudgets}
+          currency={currency}
+        />
+      </ScrollView>
+    </View>
   );
 }

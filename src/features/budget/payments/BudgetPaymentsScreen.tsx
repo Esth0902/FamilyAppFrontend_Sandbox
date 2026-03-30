@@ -120,7 +120,7 @@ export default function BudgetPaymentsScreen() {
   }
 
   return (
-    <ScrollView style={[styles.container, { backgroundColor: theme.background }]} contentContainerStyle={styles.content}>
+    <View style={[styles.container, { backgroundColor: theme.background }]}>
       <View style={{ backgroundColor: theme.background, paddingHorizontal: 16 }}>
         <ScreenHeader
           title="Paiements"
@@ -135,27 +135,29 @@ export default function BudgetPaymentsScreen() {
         />
       </View>
 
-      <View style={styles.listWrap}>
-        {children.map((child) => {
-          const breakdown = computePaymentBreakdown(child);
-          const isOpen = expandedChildIds[child.child.id] === true;
-          return (
-            <BudgetPaymentsChildCard
-              key={`payment-${child.child.id}`}
-              theme={theme}
-              child={child}
-              breakdown={breakdown}
-              currency={currency}
-              isOpen={isOpen}
-              saving={saving}
-              onToggleOpen={() => toggleChildExpansion(child.child.id)}
-              onConfirmAction={(action) => {
-                void handlePaymentAction(child, action);
-              }}
-            />
-          );
-        })}
-      </View>
-    </ScrollView>
+      <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
+        <View style={styles.listWrap}>
+          {children.map((child) => {
+            const breakdown = computePaymentBreakdown(child);
+            const isOpen = expandedChildIds[child.child.id] === true;
+            return (
+              <BudgetPaymentsChildCard
+                key={`payment-${child.child.id}`}
+                theme={theme}
+                child={child}
+                breakdown={breakdown}
+                currency={currency}
+                isOpen={isOpen}
+                saving={saving}
+                onToggleOpen={() => toggleChildExpansion(child.child.id)}
+                onConfirmAction={(action) => {
+                  void handlePaymentAction(child, action);
+                }}
+              />
+            );
+          })}
+        </View>
+      </ScrollView>
+    </View>
   );
 }

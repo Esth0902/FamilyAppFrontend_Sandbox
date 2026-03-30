@@ -13,20 +13,19 @@ export function HouseholdSetupModuleSettingsView(state: any) {
       behavior={Platform.OS === "ios" ? "padding" : "height"}
       style={{ flex: 1, backgroundColor: theme.background }}
     >
+      <HouseholdSetupHeader
+        title={ui.headerTitle}
+        subtitle="Modifie les réglages de ton foyer."
+        backgroundColor={theme.background}
+        onBackPress={actions.goBack}
+      />
+
       <ScrollView
         keyboardShouldPersistTaps="handled"
-        stickyHeaderIndices={[0]}
         style={{ flex: 1, backgroundColor: theme.background }}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        <HouseholdSetupHeader
-          title={ui.headerTitle}
-          subtitle="Modifie les réglages de ton foyer."
-          backgroundColor={theme.background}
-          onBackPress={actions.goBack}
-        />
-
         <View style={styles.formContainer}>
           <HouseholdModulesSection {...state} />
 
