@@ -210,14 +210,28 @@ const normalizeUser = (rawUser: unknown): StoredUser | null => {
   return normalizeStoredUser((rawUser ?? null) as StoredUser | null);
 };
 
+const hasHouseholdContext = (user: StoredUser | null): boolean => {
+  if (!user) {
+    return false;
+  }
+
+  if (typeof user.household_id !== "undefined") {
+    return true;
+  }
+
+  return Array.isArray(user.households);
+};
+
 const syncUserFromMeOrFallback = async (fallbackUser: StoredUser | null): Promise<StoredUser | null> => {
-  if (fallbackUser) {
+  // Certaines réponses auth peuvent être partielles (sans contexte foyer).
+  // On resynchronise alors via /me pour fiabiliser la navigation.
+  if (fallbackUser && hasHouseholdContext(fallbackUser)) {
     return fallbackUser;
   }
 
   try {
     const meUser = await fetchMe();
-    return meUser;
+    return meUser ?? fallbackUser;
   } catch {
     return fallbackUser;
   }

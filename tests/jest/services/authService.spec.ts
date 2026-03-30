@@ -105,6 +105,38 @@ describe("authService", () => {
     expect(mockApiFetch).toHaveBeenCalledTimes(1);
   });
 
+  it("login refreshes profile from /me when household context is missing in auth payload", async () => {
+    mockApiFetch
+      .mockResolvedValueOnce({
+        access_token: "token-456",
+        user: {
+          id: 99,
+          name: "Parent",
+          must_change_password: false,
+        },
+      })
+      .mockResolvedValueOnce({
+        user: {
+          id: 99,
+          household_id: 12,
+          households: [{ id: 12, pivot: { role: "parent" } }],
+          must_change_password: false,
+        },
+      });
+
+    const result = await login({
+      email: "parent@example.com",
+      password: "secret",
+    });
+
+    expect(mockPersistAuthToken).toHaveBeenCalledWith("token-456");
+    expect(mockApiFetch).toHaveBeenNthCalledWith(2, "/me", undefined);
+    expect(mockPersistStoredUser).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 99, household_id: 12 })
+    );
+    expect(result.user).toEqual(expect.objectContaining({ id: 99, household_id: 12 }));
+  });
+
   it("login throws invalid_response when token is missing", async () => {
     mockApiFetch.mockResolvedValueOnce({
       user: { id: 1 },

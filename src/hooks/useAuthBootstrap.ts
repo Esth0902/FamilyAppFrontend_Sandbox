@@ -16,6 +16,18 @@ const resolveHasHousehold = (user: AuthUser | null): boolean => {
   return !!(user?.household_id || (Array.isArray(user?.households) && user.households.length > 0));
 };
 
+const hasHouseholdContext = (user: AuthUser | null): boolean => {
+  if (!user) {
+    return false;
+  }
+
+  if (typeof user.household_id !== "undefined") {
+    return true;
+  }
+
+  return Array.isArray(user.households);
+};
+
 export const useAuthBootstrap = (): UseAuthBootstrapResult => {
   const [isBootstrapped, setIsBootstrapped] = useState(false);
   const token = useAuthStore((state) => state.token);
@@ -32,7 +44,9 @@ export const useAuthBootstrap = (): UseAuthBootstrapResult => {
         let resolvedUser = snapshot.user;
         let mustLogoutAfterProfileFetch = false;
 
-        if (resolvedToken && !resolvedUser) {
+        const shouldRefreshUser = !!resolvedToken && (!resolvedUser || !hasHouseholdContext(resolvedUser));
+
+        if (shouldRefreshUser) {
           try {
             const meUser = await fetchMe();
             if (meUser) {
