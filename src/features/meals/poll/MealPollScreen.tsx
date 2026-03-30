@@ -1,4 +1,4 @@
-﻿
+
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -7,11 +7,10 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
-import { Stack, useFocusEffect, useRouter } from "expo-router";
+import { Stack, useRouter } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
@@ -476,12 +475,6 @@ export default function MealPollScreen() {
     const error = mealPollQuery.error as { message?: string } | null;
     Alert.alert("Sondage", error?.message || "Impossible de charger les données.");
   }, [mealPollQuery.error]);
-
-  useFocusEffect(
-    useCallback(() => {
-      void invalidateMealPoll();
-    }, [invalidateMealPoll])
-  );
 
   useEffect(() => {
     if (!householdId) {

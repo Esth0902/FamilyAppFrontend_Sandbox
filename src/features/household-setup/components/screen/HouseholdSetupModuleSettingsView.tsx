@@ -1,15 +1,12 @@
 import React from "react";
 import { View, Text, StyleSheet, ScrollView, ActivityIndicator, KeyboardAvoidingView, Platform } from "react-native";
-import { AppButton } from "@/src/components/ui/AppButton";
 
-import { HouseholdNameSection } from "../sections/HouseholdNameSection";
-import { ConnectedHouseholdSection } from "../sections/ConnectedHouseholdSection";
-import { HouseholdMembersSection } from "../sections/HouseholdMemberSection";
+import { AppButton } from "@/src/components/ui/AppButton";
 import { HouseholdModulesSection } from "../sections/HouseholdModulesSection";
 import { HouseholdSetupHeader } from "./HouseholdSetupHeader";
 
-export function HouseholdSetupMainView(state: any) {
-  const { theme, ui, wizard, actions } = state;
+export function HouseholdSetupModuleSettingsView(state: any) {
+  const { theme, ui, actions } = state;
 
   return (
     <KeyboardAvoidingView
@@ -25,35 +22,28 @@ export function HouseholdSetupMainView(state: any) {
       >
         <HouseholdSetupHeader
           title={ui.headerTitle}
-          subtitle={ui.isEditMode ? "Modifie les réglages de ton foyer." : "Configure ton foyer pour commencer."}
+          subtitle="Modifie les réglages de ton foyer."
           backgroundColor={theme.background}
           onBackPress={actions.goBack}
         />
 
         <View style={styles.formContainer}>
-          <HouseholdNameSection {...state} />
-          <HouseholdMembersSection {...state} />
-          <ConnectedHouseholdSection {...state} />
           <HouseholdModulesSection {...state} />
 
-          {(!wizard.shouldUseSetupWizard || wizard.isChildrenStepActive) && (
-            <AppButton
-              style={[
-                styles.submitButton,
-                { backgroundColor: theme.tint, opacity: ui.loading ? 0.7 : 1 },
-              ]}
-              onPress={actions.handleSave}
-              disabled={ui.loading}
-            >
-              {ui.loading ? (
-                <ActivityIndicator color="white" />
-              ) : (
-                <Text style={styles.submitButtonText}>
-                  {ui.isEditMode ? "Enregistrer la configuration" : "Créer le foyer"}
-                </Text>
-              )}
-            </AppButton>
-          )}
+          <AppButton
+            style={[
+              styles.submitButton,
+              { backgroundColor: theme.tint, opacity: ui.loading ? 0.7 : 1 },
+            ]}
+            onPress={actions.handleSave}
+            disabled={ui.loading}
+          >
+            {ui.loading ? (
+              <ActivityIndicator color="white" />
+            ) : (
+              <Text style={styles.submitButtonText}>Enregistrer la configuration</Text>
+            )}
+          </AppButton>
 
           <View style={{ height: 30 }} />
         </View>

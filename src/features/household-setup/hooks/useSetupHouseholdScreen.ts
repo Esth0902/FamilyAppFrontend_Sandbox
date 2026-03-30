@@ -1493,7 +1493,9 @@ export function useSetupHouseholdScreen() {
             notes: typeof budget?.settings?.notes === "string" ? budget.settings.notes : "",
           });
 
-          await loadManagedMembers();
+          if (!isModuleScope) {
+            await loadManagedMembers();
+          }
 
           if (!isMealsScope && !isTasksScope && !isBudgetScope && !isCalendarScope) {
             await loadHouseholdConnection();
@@ -1525,6 +1527,7 @@ export function useSetupHouseholdScreen() {
     isCalendarScope,
     isEditMode,
     isMealsScope,
+    isModuleScope,
     isTasksScope,
     loadDietaryTags,
     loadHouseholdConnection,

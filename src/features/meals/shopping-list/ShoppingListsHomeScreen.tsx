@@ -1,6 +1,6 @@
-﻿import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Alert, FlatList, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
-import { Stack, useFocusEffect, useRouter } from "expo-router";
+import { Stack, useRouter } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
@@ -72,39 +72,35 @@ export default function ShoppingListsHomeScreen() {
     await queryClient.invalidateQueries({ queryKey: shoppingListsQueryKey });
   }, [queryClient, shoppingListsQueryKey]);
 
-  useFocusEffect(
-    useCallback(() => {
-      void invalidateShoppingLists();
+  useEffect(() => {
+    if (!householdId) {
+      return () => {};
+    }
 
-      if (!householdId) {
-        return undefined;
-      }
+    let active = true;
+    let unsubscribeRealtime: (() => void) | null = null;
 
-      let active = true;
-      let unsubscribeRealtime: (() => void) | null = null;
-
-      const bindRealtime = async () => {
-        unsubscribeRealtime = await subscribeToHouseholdRealtime(householdId, (message) => {
-          if (!active) return;
-          if (message?.module !== "shopping_list") return;
-          void invalidateShoppingLists();
-        }, (error) => {
-          if (__DEV__) {
-            console.warn("[shopping-list home] realtime invalidation unavailable", error);
-          }
-        });
-      };
-
-      void bindRealtime();
-
-      return () => {
-        active = false;
-        if (unsubscribeRealtime) {
-          unsubscribeRealtime();
+    const bindRealtime = async () => {
+      unsubscribeRealtime = await subscribeToHouseholdRealtime(householdId, (message) => {
+        if (!active) return;
+        if (message?.module !== "shopping_list") return;
+        void invalidateShoppingLists();
+      }, (error) => {
+        if (__DEV__) {
+          console.warn("[shopping-list home] realtime invalidation unavailable", error);
         }
-      };
-    }, [householdId, invalidateShoppingLists])
-  );
+      });
+    };
+
+    void bindRealtime();
+
+    return () => {
+      active = false;
+      if (unsubscribeRealtime) {
+        unsubscribeRealtime();
+      }
+    };
+  }, [householdId, invalidateShoppingLists]);
 
   useEffect(() => {
     if (!shoppingListsQuery.error) {

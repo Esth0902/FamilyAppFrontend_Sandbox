@@ -1,4 +1,4 @@
-﻿import React, { useMemo } from "react";
+import React, { useMemo } from "react";
 import { Redirect, useLocalSearchParams } from "expo-router";
 
 type TaskModuleKey = "planned" | "schedule" | "routines";

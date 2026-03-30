@@ -1,6 +1,6 @@
-﻿import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Alert, FlatList, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
-import { Stack, useFocusEffect, useLocalSearchParams } from "expo-router";
+import { Stack, useLocalSearchParams } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
@@ -192,43 +192,39 @@ export default function ShoppingListDetailScreen() {
     Alert.alert("Liste de courses", error?.message || "Impossible de charger la liste.");
   }, [shoppingListQuery.error]);
 
-  useFocusEffect(
-    useCallback(() => {
-      void invalidateShoppingList();
+  useEffect(() => {
+    if (!householdId || !hasValidId) {
+      return () => {};
+    }
 
-      if (!householdId || !hasValidId) {
-        return undefined;
-      }
+    let active = true;
+    let unsubscribeRealtime: (() => void) | null = null;
 
-      let active = true;
-      let unsubscribeRealtime: (() => void) | null = null;
+    const bindRealtime = async () => {
+      unsubscribeRealtime = await subscribeToHouseholdRealtime(householdId, (message) => {
+        if (!active) return;
+        if (message?.module !== "shopping_list") return;
 
-      const bindRealtime = async () => {
-        unsubscribeRealtime = await subscribeToHouseholdRealtime(householdId, (message) => {
-          if (!active) return;
-          if (message?.module !== "shopping_list") return;
+        const payloadListId = Number((message?.payload as Record<string, unknown> | undefined)?.list_id ?? 0) || null;
+        if (payloadListId && payloadListId !== listId) return;
 
-          const payloadListId = Number((message?.payload as Record<string, unknown> | undefined)?.list_id ?? 0) || null;
-          if (payloadListId && payloadListId !== listId) return;
-
-          void invalidateShoppingList();
-        }, (error) => {
-          if (__DEV__) {
-            console.warn("[shopping-list detail] realtime invalidation unavailable", error);
-          }
-        });
-      };
-
-      void bindRealtime();
-
-      return () => {
-        active = false;
-        if (unsubscribeRealtime) {
-          unsubscribeRealtime();
+        void invalidateShoppingList();
+      }, (error) => {
+        if (__DEV__) {
+          console.warn("[shopping-list detail] realtime invalidation unavailable", error);
         }
-      };
-    }, [hasValidId, householdId, invalidateShoppingList, listId])
-  );
+      });
+    };
+
+    void bindRealtime();
+
+    return () => {
+      active = false;
+      if (unsubscribeRealtime) {
+        unsubscribeRealtime();
+      }
+    };
+  }, [hasValidId, householdId, invalidateShoppingList, listId]);
 
   const toggleCheckedMutation = useMutation({
     mutationFn: async (item: ShoppingListItem) => {

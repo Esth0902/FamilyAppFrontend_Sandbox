@@ -131,7 +131,7 @@ export const RoutineFormCard = memo(function RoutineFormCard({
 
       {templateRecurrence === "weekly" ? (
         <>
-          <Text style={[styles.label, { color: theme.text }]}>Jour d'exécution</Text>
+          <Text style={[styles.label, { color: theme.text }]}>Jour d&apos;exécution</Text>
           <View style={styles.recurrenceRow}>
             {WEEK_DAYS.map((day) => (
               <TouchableOpacity
