@@ -1,26 +1,13 @@
 import React, { useState } from "react";
-import { Alert, StyleSheet, useColorScheme, View } from "react-native";
+import { Alert, StyleSheet, TouchableOpacity, useColorScheme, View } from "react-native";
 import { useRouter } from "expo-router";
+import { useMutation } from "@tanstack/react-query";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
-import * as SecureStore from "expo-secure-store";
-import { TouchableOpacity } from "react-native";
 import { Colors } from "@/constants/theme";
-import { API_BASE_URL, apiFetch } from "@/src/api/client";
 import { AppButton } from "@/src/components/ui/AppButton";
 import { AppTextInput } from "@/src/components/ui/AppTextInput";
 import { ScreenHeader } from "@/src/components/ui/ScreenHeader";
-import { normalizeStoredUser, persistStoredUser, type StoredUser } from "@/src/session/user-cache";
-import { setAuthToken } from "@/src/store/useAuthStore";
-
-const parseJsonSafe = async (response: Response) => {
-  const text = await response.text();
-  if (!text) return null;
-  try {
-    return JSON.parse(text);
-  } catch {
-    return null;
-  }
-};
+import { login, toAuthServiceError, type LoginPayload } from "@/src/services/authService";
 
 export default function Login() {
   const router = useRouter();
@@ -30,88 +17,44 @@ export default function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [loading, setLoading] = useState(false);
 
-  const onLogin = async () => {
-    if (!email || !password) {
+  const navigateAfterAuthSuccess = (mustChangePassword: boolean) => {
+    if (mustChangePassword) {
+      router.replace("/change-credentials");
+      return;
+    }
+
+    router.replace("/(app)/(tabs)/home");
+  };
+
+  const loginMutation = useMutation({
+    mutationFn: async (payload: LoginPayload) => {
+      return await login(payload);
+    },
+    onSuccess: (result) => {
+      navigateAfterAuthSuccess(result.mustChangePassword);
+    },
+    onError: (error: unknown) => {
+      const authError = toAuthServiceError(error, "Connexion impossible.");
+      Alert.alert("Erreur", authError.message);
+    },
+  });
+
+  const onLogin = () => {
+    const trimmedEmail = email.trim();
+    if (!trimmedEmail || !password) {
       Alert.alert("Oups", "Merci de remplir tous les champs.");
       return;
     }
 
-    try {
-      setLoading(true);
-
-      if (!API_BASE_URL) {
-        Alert.alert("Erreur", "Configuration API manquante. Vérifie EXPO_PUBLIC_API_MODE et EXPO_PUBLIC_API_URL_*.");
-        return;
-      }
-
-      const response = await fetch(`${API_BASE_URL}/login`, {
-        method: "POST",
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ email, password }),
-      });
-
-      const data = await parseJsonSafe(response);
-
-      if (!response.ok) {
-        Alert.alert("Erreur", data?.message || "Identifiants incorrects");
-        return;
-      }
-
-      const accessToken =
-        typeof data?.access_token === "string" && data.access_token.trim().length > 0
-          ? data.access_token
-          : typeof data?.token === "string" && data.token.trim().length > 0
-            ? data.token
-            : null;
-
-      if (!accessToken) {
-        Alert.alert("Erreur", "Réponse d'authentification invalide (token manquant).");
-        return;
-      }
-
-      await SecureStore.setItemAsync("authToken", accessToken);
-      setAuthToken(accessToken);
-
-      let resolvedUser: StoredUser | null = data?.user ? (data.user as StoredUser) : null;
-
-      try {
-        const meResponse = await apiFetch("/me", {
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-          },
-          bypassCache: true,
-        });
-
-        if (meResponse?.user) {
-          resolvedUser = meResponse.user as StoredUser;
-        }
-      } catch (syncError) {
-        console.warn("Impossible de synchroniser /me après login:", syncError);
-      }
-
-      if (resolvedUser) {
-        const normalizedUser = normalizeStoredUser(resolvedUser);
-        if (normalizedUser) {
-          await persistStoredUser(normalizedUser);
-        }
-      }
-
-      if (resolvedUser?.must_change_password) {
-        router.replace("/change-credentials");
-      } else {
-        router.replace("/(app)/(tabs)/home");
-      }
-    } catch (error) {
-      console.error(error);
-      Alert.alert("Erreur réseau", "Impossible de contacter le serveur.");
-    } finally {
-      setLoading(false);
+    if (loginMutation.isPending) {
+      return;
     }
+
+    loginMutation.mutate({
+      email: trimmedEmail,
+      password,
+    });
   };
 
   return (
@@ -145,19 +88,19 @@ export default function Login() {
             value={password}
             onChangeText={setPassword}
             rightSlot={
-              <TouchableOpacity 
+              <TouchableOpacity
                 onPress={() => setShowPassword((prev) => !prev)}
                 accessibilityLabel={showPassword ? "Masquer le mot de passe" : "Afficher le mot de passe"}
-                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }} // Rend le bouton plus facile à toucher
-          >
-              <MaterialCommunityIcons
-                name={showPassword ? "eye-off-outline" : "eye-outline"}
-                size={20}
-                color={theme.textSecondary}
-              />
-        </TouchableOpacity>
-      }
-      />
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              >
+                <MaterialCommunityIcons
+                  name={showPassword ? "eye-off-outline" : "eye-outline"}
+                  size={20}
+                  color={theme.textSecondary}
+                />
+              </TouchableOpacity>
+            }
+          />
 
           <AppButton
             title="Mot de passe oublié ?"
@@ -170,7 +113,7 @@ export default function Login() {
           <AppButton
             title="Se connecter"
             variant="primary"
-            loading={loading}
+            loading={loginMutation.isPending}
             style={styles.loginButton}
             onPress={onLogin}
           />

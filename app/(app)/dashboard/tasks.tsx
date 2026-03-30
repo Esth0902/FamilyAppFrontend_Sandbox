@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -8,85 +8,17 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { Stack, useFocusEffect, useRouter } from "expo-router";
-import { MaterialCommunityIcons } from "@expo/vector-icons";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { Stack, useRouter } from "expo-router";
 
 import { Colors } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
-import { apiFetch } from "@/src/api/client";
-import { addDays, toIsoDate } from "@/src/utils/date";
-import { subscribeToHouseholdRealtime } from "@/src/realtime/client";
+import { ScreenHeader } from "@/src/components/ui/ScreenHeader";
+import { useRealtimeRefetch } from "@/src/hooks/useRealtimeRefetch";
+import { useTasksOverview } from "@/src/hooks/useTasksOverview";
 import { useStoredUserState } from "@/src/session/user-cache";
+import { isDoneStatus, isInstanceAssignedToUser, isTodoStatus, toPositiveInt } from "@/src/services/tasksService";
 
-type TaskStatus = "à faire" | "réalisée" | "annulée";
-
-type TaskInstance = {
-  id: number;
-  title: string;
-  due_date: string;
-  status: TaskStatus | string;
-  validated_by_parent: boolean;
-  assignee?: {
-    id: number;
-    name: string;
-  };
-  assignees?: {
-    id: number;
-    name: string;
-  }[];
-};
-
-type TaskBoardResponse = {
-  tasks_enabled: boolean;
-  range?: {
-    from: string;
-    to: string;
-  };
-  current_user?: {
-    id: number;
-    role: "parent" | "enfant";
-  };
-  instances: TaskInstance[];
-};
-
-const isoWeekDayFromDate = (date: Date): number => {
-  const day = date.getDay();
-  return day === 0 ? 7 : day;
-};
-
-const weekRange = () => {
-  const now = new Date();
-  const weekStart = addDays(now, 1 - isoWeekDayFromDate(now));
-  const weekEnd = addDays(weekStart, 6);
-
-  return {
-    from: toIsoDate(weekStart),
-    to: toIsoDate(weekEnd),
-  };
-};
-
-const isInstanceAssignedToUser = (instance: TaskInstance, userId: number): boolean => {
-  if (!Number.isInteger(userId) || userId <= 0) {
-    return false;
-  }
-
-  if (Array.isArray(instance.assignees) && instance.assignees.length > 0) {
-    return instance.assignees.some((assignee) => Number(assignee?.id ?? 0) === userId);
-  }
-
-  return Number(instance.assignee?.id ?? 0) === userId;
-};
-
-const isTodoStatus = (status: string): boolean => {
-  const normalized = status.toLowerCase();
-  return normalized.includes("faire");
-};
-
-const isDoneStatus = (status: string): boolean => {
-  const normalized = status.toLowerCase();
-  return normalized.includes("réalis") || normalized.includes("realis");
-};
+const BUTTON_TEXT_COLOR = "#FFFFFF";
 
 const statusLabel = (status: string): string => {
   if (isTodoStatus(status)) return "À faire";
@@ -102,80 +34,61 @@ const formatDueDate = (iso: string): string => {
 
 export default function DashboardTasksScreen() {
   const router = useRouter();
-  const insets = useSafeAreaInsets();
   const colorScheme = useColorScheme();
   const theme = Colors[colorScheme ?? "light"];
   const { householdId } = useStoredUserState();
 
-  const [loading, setLoading] = useState(true);
-  const [board, setBoard] = useState<TaskBoardResponse | null>(null);
+  const {
+    payload,
+    tasksEnabled,
+    currentUserRole,
+    stats,
+    isInitialLoading,
+    error,
+    refreshBoard,
+  } = useTasksOverview({ householdId });
 
-  const loadBoard = useCallback(async (options?: { silent?: boolean }) => {
-    const silent = options?.silent ?? false;
-    if (!silent) {
-      setLoading(true);
-    }
+  const refreshTasksBoard = useCallback(async (_options?: { silent?: boolean }) => {
+    await refreshBoard();
+  }, [refreshBoard]);
 
-    try {
-      const range = weekRange();
-      const payload = await apiFetch(`/tasks/board?from=${range.from}&to=${range.to}`);
-      setBoard((payload ?? null) as TaskBoardResponse | null);
-    } catch (error: any) {
-      Alert.alert("Tâches", error?.message || "Impossible de charger la vue tâches.");
-    } finally {
-      if (!silent) {
-        setLoading(false);
-      }
-    }
-  }, []);
-
-  useFocusEffect(
-    useCallback(() => {
-      void loadBoard({ silent: false });
-    }, [loadBoard])
-  );
+  useRealtimeRefetch({
+    householdId,
+    module: "tasks",
+    refresh: refreshTasksBoard,
+  });
 
   useEffect(() => {
-    if (!householdId) {
+    if (!error) {
       return;
     }
+    Alert.alert("Tâches", error.message || "Impossible de charger la vue tâches.");
+  }, [error]);
 
-    let unsubscribeRealtime: (() => void) | null = null;
-    let active = true;
-
-    const bindRealtime = async () => {
-      unsubscribeRealtime = await subscribeToHouseholdRealtime(householdId, (message) => {
-        if (!active) return;
-        if (message?.module !== "tasks") return;
-        void loadBoard({ silent: true });
-      });
-    };
-
-    void bindRealtime();
-
-    return () => {
-      active = false;
-      if (unsubscribeRealtime) {
-        unsubscribeRealtime();
-      }
-    };
-  }, [householdId, loadBoard]);
-
-  const isParent = board?.current_user?.role === "parent";
-  const currentUserId = Number(board?.current_user?.id ?? 0);
+  const currentUserId = toPositiveInt(payload?.current_user?.id);
   const visibleInstances = useMemo(() => {
-    const instances = Array.isArray(board?.instances) ? board?.instances : [];
-    if (isParent) {
+    const instances = Array.isArray(payload?.instances) ? payload.instances : [];
+    if (currentUserRole === "parent") {
       return instances;
     }
+    if (currentUserId === null) {
+      return [];
+    }
     return instances.filter((instance) => isInstanceAssignedToUser(instance, currentUserId));
-  }, [board?.instances, currentUserId, isParent]);
+  }, [currentUserId, currentUserRole, payload?.instances]);
+  const cardStyle = useMemo(
+    () => [styles.card, { backgroundColor: theme.card, borderColor: theme.icon }],
+    [theme.card, theme.icon]
+  );
+  const detailRowStyle = useMemo(() => [styles.detailRow, { borderColor: `${theme.icon}55` }], [theme.icon]);
+  const onBackPress = useCallback(() => {
+    router.replace("/dashboard");
+  }, [router]);
+  const onOpenTasksModule = useCallback(() => {
+    router.push("/(app)/(tabs)/tasks");
+  }, [router]);
 
-  const todoCount = visibleInstances.filter((instance) => isTodoStatus(String(instance.status ?? ""))).length;
-  const doneCount = visibleInstances.filter((instance) => isDoneStatus(String(instance.status ?? ""))).length;
-  const validatedCount = visibleInstances.filter((instance) => Boolean(instance.validated_by_parent)).length;
-
-  if (loading) {
+  if (isInitialLoading && !payload) {
     return (
       <View style={[styles.center, { backgroundColor: theme.background }]}> 
         <ActivityIndicator size="large" color={theme.tint} />
@@ -186,39 +99,45 @@ export default function DashboardTasksScreen() {
   return (
     <View style={[styles.container, { backgroundColor: theme.background }]}> 
       <Stack.Screen options={{ headerShown: false }} />
-
-      <View style={[styles.header, { borderBottomColor: theme.icon, paddingTop: Math.max(insets.top, 12) }]}> 
-        <TouchableOpacity onPress={() => router.replace("/dashboard")} style={[styles.backBtn, { borderColor: theme.icon }]}> 
-          <MaterialCommunityIcons name="arrow-left" size={20} color={theme.tint} />
-        </TouchableOpacity>
-        <Text style={[styles.headerTitle, { color: theme.text }]}>Détail tâches</Text>
-      </View>
+      <ScreenHeader
+        title="Détail tâches"
+        withBackButton
+        onBackPress={onBackPress}
+        showBorder
+        safeTop
+        bottomSpacing={0}
+      />
 
       <ScrollView contentContainerStyle={styles.content}>
-        {!board?.tasks_enabled ? (
-          <View style={[styles.card, { backgroundColor: theme.card, borderColor: theme.icon }]}> 
+        {!tasksEnabled ? (
+          <View style={cardStyle}> 
             <Text style={[styles.text, { color: theme.textSecondary }]}>Module tâches désactivé.</Text>
           </View>
         ) : (
           <>
-            <View style={[styles.card, { backgroundColor: theme.card, borderColor: theme.icon }]}> 
+            <View style={cardStyle}> 
               <Text style={[styles.title, { color: theme.text }]}>Résumé semaine</Text>
-              <Text style={[styles.text, { color: theme.textSecondary }]}>À faire: {todoCount}</Text>
-              <Text style={[styles.text, { color: theme.textSecondary }]}>Réalisées: {doneCount}</Text>
-              <Text style={[styles.text, { color: theme.textSecondary }]}>Validées: {validatedCount}</Text>
+              <Text style={[styles.text, { color: theme.textSecondary }]}>À faire: {stats.todo}</Text>
+              <Text style={[styles.text, { color: theme.textSecondary }]}>Réalisées: {stats.done}</Text>
+              <Text style={[styles.text, { color: theme.textSecondary }]}>Validées: {stats.validated}</Text>
             </View>
 
-            <View style={[styles.card, { backgroundColor: theme.card, borderColor: theme.icon }]}> 
+            <View style={cardStyle}> 
               <Text style={[styles.title, { color: theme.text }]}>Tâches de la semaine</Text>
               {visibleInstances.length > 0 ? visibleInstances.map((instance) => {
                 const assigneeNames = Array.isArray(instance.assignees) && instance.assignees.length > 0
                   ? instance.assignees.map((assignee) => assignee.name).join(", ")
                   : (instance.assignee?.name ?? "Membre");
+                const taskId = Number.isInteger(instance.id) ? instance.id : `${instance.due_date}-${instance.title}`;
+                const taskTitle = typeof instance.title === "string" && instance.title.trim().length > 0
+                  ? instance.title
+                  : "Tâche";
+                const taskDueDate = typeof instance.due_date === "string" ? instance.due_date : "";
 
                 return (
-                  <View key={`task-${instance.id}`} style={[styles.detailRow, { borderColor: `${theme.icon}55` }]}> 
-                    <Text style={[styles.detailTitle, { color: theme.text }]}>{instance.title}</Text>
-                    <Text style={[styles.text, { color: theme.textSecondary }]}>Échéance: {formatDueDate(instance.due_date)}</Text>
+                  <View key={`task-${taskId}`} style={detailRowStyle}> 
+                    <Text style={[styles.detailTitle, { color: theme.text }]}>{taskTitle}</Text>
+                    <Text style={[styles.text, { color: theme.textSecondary }]}>Échéance: {formatDueDate(taskDueDate)}</Text>
                     <Text style={[styles.text, { color: theme.textSecondary }]}>Statut: {statusLabel(String(instance.status ?? ""))}</Text>
                     <Text style={[styles.text, { color: theme.textSecondary }]}>Assigné à: {assigneeNames}</Text>
                     <Text style={[styles.text, { color: theme.textSecondary }]}>Validation parent: {instance.validated_by_parent ? "Oui" : "Non"}</Text>
@@ -233,7 +152,7 @@ export default function DashboardTasksScreen() {
 
         <TouchableOpacity
           style={[styles.primaryButton, { backgroundColor: theme.tint }]}
-          onPress={() => router.push("/(tabs)/tasks")}
+          onPress={onOpenTasksModule}
         >
           <Text style={styles.primaryButtonText}>Ouvrir le module Tâches</Text>
         </TouchableOpacity>
@@ -245,24 +164,6 @@ export default function DashboardTasksScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
-  header: {
-    minHeight: 60,
-    paddingHorizontal: 20,
-    paddingVertical: 8,
-    borderBottomWidth: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-  },
-  backBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    borderWidth: 1,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  headerTitle: { fontSize: 18, fontWeight: "700" },
   content: { padding: 16, paddingBottom: 40, gap: 10 },
   card: {
     borderWidth: 1,
@@ -285,5 +186,5 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  primaryButtonText: { color: "#FFF", fontWeight: "700", fontSize: 13 },
+  primaryButtonText: { color: BUTTON_TEXT_COLOR, fontWeight: "700", fontSize: 13 },
 });

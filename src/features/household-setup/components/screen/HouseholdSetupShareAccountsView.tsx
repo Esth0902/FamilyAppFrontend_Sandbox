@@ -1,24 +1,23 @@
 import React from "react";
 import { View, Text, StyleSheet, ScrollView, ActivityIndicator, KeyboardAvoidingView, Platform } from "react-native";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppButton } from "@/src/components/ui/AppButton";
+import { HouseholdSetupHeader } from "./HouseholdSetupHeader";
 
 export function HouseholdSetupShareAccountsView(state: any) {
   const { theme, ui, data, asyncState, actions } = state;
-  const insets = useSafeAreaInsets();
 
   return (
     <KeyboardAvoidingView
       behavior={Platform.OS === "ios" ? "padding" : "height"}
       style={{ flex: 1, backgroundColor: theme.background }}
     >
-      <View style={[styles.headerBar, { borderBottomColor: theme.icon, paddingTop: Math.max(insets.top, 12) }]}>
-        <AppButton onPress={actions.goBack} style={[styles.headerActionBtn, { borderColor: theme.icon }]}>
-          <MaterialCommunityIcons name="close" size={20} color={theme.tint} />
-        </AppButton>
-        <Text style={[styles.headerTitle, { color: theme.text }]}>Comptes créés</Text>
-      </View>
+      <HouseholdSetupHeader
+        title="Comptes créés"
+        subtitle="Envoie les identifiants temporaires à chaque membre."
+        backgroundColor={theme.background}
+        onBackPress={actions.goBack}
+      />
 
       <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
         <View style={styles.section}>
@@ -75,9 +74,6 @@ export function HouseholdSetupShareAccountsView(state: any) {
 }
 
 const styles = StyleSheet.create({
-  headerBar: { flexDirection: "row", alignItems: "center", paddingHorizontal: 20, paddingBottom: 12, borderBottomWidth: 1, gap: 12 },
-  headerActionBtn: { width: 36, height: 36, borderRadius: 18, borderWidth: 1, alignItems: "center", justifyContent: "center", marginTop: 2 },
-  headerTitle: { fontSize: 18, fontWeight: "700", flex: 1 },
   container: { padding: 20 },
   section: { marginBottom: 24 },
   sectionTitle: { fontSize: 16, fontWeight: "700", marginBottom: 12 },

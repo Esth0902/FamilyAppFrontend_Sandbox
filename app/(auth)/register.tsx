@@ -1,26 +1,13 @@
 import React, { useState } from "react";
-import { Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, useColorScheme, View } from "react-native";
+import { Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, useColorScheme, View } from "react-native";
 import { useRouter } from "expo-router";
+import { useMutation } from "@tanstack/react-query";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
-import * as SecureStore from "expo-secure-store";
-import { TouchableOpacity } from "react-native";
 import { Colors } from "@/constants/theme";
-import { API_BASE_URL, apiFetch } from "@/src/api/client";
 import { AppButton } from "@/src/components/ui/AppButton";
 import { AppTextInput } from "@/src/components/ui/AppTextInput";
 import { ScreenHeader } from "@/src/components/ui/ScreenHeader";
-import { normalizeStoredUser, persistStoredUser, type StoredUser } from "@/src/session/user-cache";
-import { setAuthToken } from "@/src/store/useAuthStore";
-
-const parseJsonSafe = async (response: Response) => {
-  const text = await response.text();
-  if (!text) return null;
-  try {
-    return JSON.parse(text);
-  } catch {
-    return null;
-  }
-};
+import { register, toAuthServiceError, type RegisterPayload } from "@/src/services/authService";
 
 export default function Register() {
   const router = useRouter();
@@ -33,101 +20,61 @@ export default function Register() {
   const [passwordConfirm, setPasswordConfirm] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [showPasswordConfirm, setShowPasswordConfirm] = useState(false);
-  const [loading, setLoading] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
-  const onRegister = async () => {
+  const navigateAfterAuthSuccess = (mustChangePassword: boolean) => {
+    if (mustChangePassword) {
+      router.replace("/change-credentials");
+      return;
+    }
+
+    router.replace("/(app)/(tabs)/home");
+  };
+
+  const registerMutation = useMutation({
+    mutationFn: async (payload: RegisterPayload) => {
+      return await register(payload);
+    },
+    onSuccess: (result) => {
+      navigateAfterAuthSuccess(result.mustChangePassword);
+    },
+    onError: (error: unknown) => {
+      const authError = toAuthServiceError(error, "Inscription impossible.");
+      if (authError.kind === "validation" && authError.fieldErrors) {
+        setFieldErrors(authError.fieldErrors);
+        return;
+      }
+
+      Alert.alert("Erreur", authError.message);
+    },
+  });
+
+  const onRegister = () => {
     setFieldErrors({});
+
+    const trimmedName = name.trim();
+    const trimmedEmail = email.trim();
+
+    if (!trimmedName || !trimmedEmail || !password || !passwordConfirm) {
+      Alert.alert("Oups", "Merci de remplir tous les champs.");
+      return;
+    }
 
     if (password !== passwordConfirm) {
       Alert.alert("Oups", "Les mots de passe ne correspondent pas.");
       return;
     }
 
-    try {
-      setLoading(true);
-
-      if (!API_BASE_URL) {
-        Alert.alert("Erreur", "Configuration API manquante. Vérifie EXPO_PUBLIC_API_MODE et EXPO_PUBLIC_API_URL_*.");
-        return;
-      }
-
-      const response = await fetch(`${API_BASE_URL}/register`, {
-        method: "POST",
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          name,
-          email,
-          password,
-          password_confirmation: passwordConfirm,
-        }),
-      });
-
-      const data = await parseJsonSafe(response);
-
-      if (!response.ok) {
-        if (data?.errors) {
-          const errors: Record<string, string> = {};
-          Object.keys(data.errors).forEach((key) => {
-            errors[key] = data.errors[key][0];
-          });
-          setFieldErrors(errors);
-        } else {
-          Alert.alert("Erreur", data?.message || "Erreur inconnue");
-        }
-        return;
-      }
-
-      const accessToken =
-        typeof data?.access_token === "string" && data.access_token.trim().length > 0
-          ? data.access_token
-          : typeof data?.token === "string" && data.token.trim().length > 0
-            ? data.token
-            : null;
-
-      if (!accessToken) {
-        Alert.alert("Erreur", "Réponse d'authentification invalide (token manquant).");
-        return;
-      }
-
-      await SecureStore.setItemAsync("authToken", accessToken);
-      setAuthToken(accessToken);
-
-      let resolvedUser: StoredUser | null = data?.user ? (data.user as StoredUser) : null;
-
-      try {
-        const meResponse = await apiFetch("/me", {
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-          },
-          bypassCache: true,
-        });
-
-        if (meResponse?.user) {
-          resolvedUser = meResponse.user as StoredUser;
-        }
-      } catch (syncError) {
-        console.warn("Impossible de synchroniser /me après inscription:", syncError);
-      }
-
-      if (resolvedUser) {
-        const normalizedUser = normalizeStoredUser(resolvedUser);
-        if (normalizedUser) {
-          await persistStoredUser(normalizedUser);
-        }
-      }
-
-      Alert.alert("Bienvenue !", "Compte créé avec succès.");
-      router.replace("/(app)/(tabs)/home");
-    } catch (error: unknown) {
-      console.error(error);
-      Alert.alert("Erreur", "Impossible de contacter le serveur.");
-    } finally {
-      setLoading(false);
+    if (registerMutation.isPending) {
+      return;
     }
+
+    registerMutation.mutate({
+      name: trimmedName,
+      email: trimmedEmail,
+      password,
+      passwordConfirmation: passwordConfirm,
+    });
   };
 
   return (
@@ -153,6 +100,7 @@ export default function Register() {
             placeholder="Ex: Sophie"
             value={name}
             onChangeText={setName}
+            error={fieldErrors.name}
           />
 
           <AppTextInput
@@ -197,6 +145,7 @@ export default function Register() {
             secureTextEntry={!showPasswordConfirm}
             value={passwordConfirm}
             onChangeText={setPasswordConfirm}
+            error={fieldErrors.password_confirmation}
             rightSlot={
               <TouchableOpacity
                 onPress={() => setShowPasswordConfirm((prev) => !prev)}
@@ -217,7 +166,7 @@ export default function Register() {
           <AppButton
             title="Créer mon compte"
             variant="primary"
-            loading={loading}
+            loading={registerMutation.isPending}
             style={styles.primaryButton}
             onPress={onRegister}
           />

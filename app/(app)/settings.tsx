@@ -29,7 +29,7 @@ export default function SettingsScreen() {
             style={[styles.container, { backgroundColor: theme.background }]}
             contentContainerStyle={styles.scrollContent}
         >
-            <View style={{ backgroundColor: theme.background, paddingHorizontal: 12 }}>
+            <View style={{ backgroundColor: theme.background, paddingHorizontal: 12, zIndex: 20, elevation: 20 }}>
                 <ScreenHeader
                     title="Paramètres utilisateur"
                     subtitle="Gère tes foyers, ton pseudo, ton e-mail et ton mot de passe."

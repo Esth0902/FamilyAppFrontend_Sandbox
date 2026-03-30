@@ -1,22 +1,23 @@
 import React, { useCallback, useState } from "react";
 import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { useRouter } from "expo-router";
-import { MaterialCommunityIcons } from "@expo/vector-icons";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useQueryClient } from "@tanstack/react-query";
 
 import { Colors } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import { apiFetch } from "@/src/api/client";
+import { ScreenHeader } from "@/src/components/ui/ScreenHeader";
 import { useRealtimeRefetch } from "@/src/hooks/useRealtimeRefetch";
 import { useStoredUserState } from "@/src/session/user-cache";
+import { invalidateBudgetAndDashboard } from "@/src/services/budgetService";
 import { BudgetBoardPayload, toNumber } from "@/src/budget/common";
 
 export default function BudgetRequestReimbursementScreen() {
   const router = useRouter();
-  const insets = useSafeAreaInsets();
   const colorScheme = useColorScheme();
   const theme = Colors[colorScheme ?? "light"];
   const { householdId } = useStoredUserState();
+  const queryClient = useQueryClient();
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -52,7 +53,7 @@ export default function BudgetRequestReimbursementScreen() {
       router.back();
       return;
     }
-    router.replace("/(tabs)/budget");
+    router.replace("/(app)/(tabs)/budget");
   }, [router]);
 
   const isParent = board?.current_user.role === "parent";
@@ -77,6 +78,7 @@ export default function BudgetRequestReimbursementScreen() {
       setAmountInput("");
       setCommentInput("");
       await loadBoard();
+      await invalidateBudgetAndDashboard(queryClient, householdId);
       Alert.alert("Budget", "Demande de remboursement envoyée.");
     } catch (error: unknown) {
       const message = (error as { message?: string })?.message || "Impossible d'envoyer la demande.";
@@ -104,14 +106,18 @@ export default function BudgetRequestReimbursementScreen() {
 
   return (
     <ScrollView stickyHeaderIndices={[0]} style={[styles.container, { backgroundColor: theme.background }]} contentContainerStyle={styles.content}>
-      <View style={[styles.headerRow, { borderBottomColor: theme.icon, paddingTop: Math.max(insets.top, 12), backgroundColor: theme.background }]}>
-        <TouchableOpacity onPress={onBackPress} style={[styles.backBtn, { borderColor: theme.icon }]}>
-          <MaterialCommunityIcons name="arrow-left" size={20} color={theme.tint} />
-        </TouchableOpacity>
-        <View style={{ flex: 1 }}>
-          <Text style={[styles.title, { color: theme.text }]}>Demande de remboursement</Text>
-          <Text style={[styles.subtitle, { color: theme.textSecondary }]}>Montant + justification</Text>
-        </View>
+      <View style={{ backgroundColor: theme.background, paddingHorizontal: 16, zIndex: 20, elevation: 20 }}>
+        <ScreenHeader
+          title="Demande de remboursement"
+          subtitle="Montant + justification"
+          withBackButton
+          onBackPress={onBackPress}
+          showBorder
+          safeTop
+          bottomSpacing={2}
+          containerStyle={{ paddingHorizontal: 0 }}
+          contentStyle={{ minHeight: 0 }}
+        />
       </View>
 
       <View style={[styles.card, { backgroundColor: theme.card, borderColor: theme.icon }]}>
@@ -148,25 +154,6 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   content: { paddingTop: 0, paddingHorizontal: 16, paddingBottom: 40, gap: 12 },
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
-  headerRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    paddingBottom: 12,
-    borderBottomWidth: 1,
-    marginBottom: 2,
-  },
-  backBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    borderWidth: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    marginTop: 2,
-  },
-  title: { fontSize: 18, fontWeight: "700" },
-  subtitle: { marginTop: 2, fontSize: 13, lineHeight: 18 },
   card: { borderWidth: 1, borderRadius: 14, padding: 12, gap: 8 },
   text: { fontSize: 13, lineHeight: 18 },
   label: { fontSize: 13, fontWeight: "600" },

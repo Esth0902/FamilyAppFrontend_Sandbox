@@ -2,6 +2,7 @@ import React from "react";
 import { Href, useRouter } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import {
+  useWindowDimensions,
   StyleProp,
   StyleSheet,
   Text,
@@ -23,9 +24,12 @@ type ScreenHeaderProps = {
   rightSlot?: React.ReactNode;
   safeTop?: boolean;
   showBorder?: boolean;
+  bottomSpacing?: number;
   containerStyle?: StyleProp<ViewStyle>;
   contentStyle?: StyleProp<ViewStyle>;
 };
+
+const BORDER_BOTTOM_SPACING = 8;
 
 export function ScreenHeader({
   title,
@@ -36,11 +40,13 @@ export function ScreenHeader({
   rightSlot,
   safeTop = false,
   showBorder = false,
+  bottomSpacing = 8,
   containerStyle,
   contentStyle,
 }: ScreenHeaderProps) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { width: screenWidth } = useWindowDimensions();
   const colorScheme = useColorScheme();
   const theme = Colors[colorScheme ?? "light"];
 
@@ -65,9 +71,8 @@ export function ScreenHeader({
       style={[
         styles.container,
         {
-          borderBottomColor: theme.icon,
-          borderBottomWidth: showBorder ? 1 : 0,
-          paddingTop: safeTop ? Math.max(insets.top + 10, 24) : 0, 
+          paddingTop: safeTop ? Math.max(insets.top + 10, 24) : 0,
+          marginBottom: showBorder ? BORDER_BOTTOM_SPACING : bottomSpacing,
         },
         containerStyle,
       ]}
@@ -91,15 +96,28 @@ export function ScreenHeader({
 
         {rightSlot ? <View style={styles.rightSlot}>{rightSlot}</View> : null}
       </View>
+      {showBorder ? (
+        <View
+          pointerEvents="none"
+          style={[
+            styles.fullBleedBorder,
+            {
+              backgroundColor: theme.icon,
+              left: -screenWidth,
+              right: -screenWidth,
+            },
+          ]}
+        />
+      ) : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
+    position: "relative",
     paddingHorizontal: 20,
     paddingBottom: 8,
-    marginBottom: 8,
   },
   row: {
     minHeight: 52,
@@ -130,6 +148,11 @@ const styles = StyleSheet.create({
   },
   rightSlot: {
     marginLeft: 4,
+  },
+  fullBleedBorder: {
+    position: "absolute",
+    bottom: 0,
+    height: 1,
   },
 });
 

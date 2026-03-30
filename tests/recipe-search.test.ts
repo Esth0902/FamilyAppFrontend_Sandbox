@@ -1,4 +1,4 @@
-﻿/* eslint-env jest */
+/* eslint-env jest */
 
 import { filterRecipesByTitleQuery } from "../src/features/recipes/recipe-search";
 

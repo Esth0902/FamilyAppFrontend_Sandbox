@@ -43,12 +43,25 @@ export const queryKeys = {
     budgetBoard: (householdId: number | null) => ["dashboard", householdId ?? 0, "budget-board"] as const,
     calendarBoard: (householdId: number | null, from: string, to: string) =>
       ["dashboard", householdId ?? 0, "calendar-board", from, to] as const,
+    tasksBoard: (householdId: number | null, from: string, to: string) =>
+      ["dashboard", householdId ?? 0, "tasks-board", from, to] as const,
+  },
+  household: {
+    config: (householdId: number | null) => ["household", "config", householdId ?? 0] as const,
   },
   budget: {
     board: (householdId: number | null) => ["budget", "board", householdId ?? 0] as const,
   },
   tasks: {
+    board: (householdId: number | null, from: string, to: string) =>
+      ["tasks", "board", householdId ?? 0, from, to] as const,
+    boardRoot: (householdId: number | null) =>
+      ["tasks", "board", householdId ?? 0] as const,
     overview: (householdId: number | null, weekStartIsoDay: number) =>
       ["tasks", "overview", householdId ?? 0, weekStartIsoDay] as const,
+    overviewCurrentWeek: (householdId: number | null) =>
+      ["tasks", "overview", householdId ?? 0, "current-week"] as const,
+    overviewRoot: (householdId: number | null) =>
+      ["tasks", "overview", householdId ?? 0] as const,
   },
 };

@@ -1187,7 +1187,6 @@ export function useSetupHouseholdScreen() {
     }
   }, [
     activeModules,
-    alreadyConfigured,
     authUser,
     budgetSettings,
     calendarSettings,
@@ -1195,6 +1194,8 @@ export function useSetupHouseholdScreen() {
     defaultServings,
     houseName,
     isEditMode,
+    managedMembers,
+    managedRoleDrafts,
     maxVotesPerUser,
     mealOptions,
     members,
@@ -1203,6 +1204,7 @@ export function useSetupHouseholdScreen() {
     pollTime,
     router,
     selectedMealDietaryTags,
+    shouldUseSetupWizard,
     tasksSettings,
   ]);
 
@@ -1491,7 +1493,9 @@ export function useSetupHouseholdScreen() {
             notes: typeof budget?.settings?.notes === "string" ? budget.settings.notes : "",
           });
 
-          await loadManagedMembers();
+          if (!isModuleScope) {
+            await loadManagedMembers();
+          }
 
           if (!isMealsScope && !isTasksScope && !isBudgetScope && !isCalendarScope) {
             await loadHouseholdConnection();
@@ -1523,6 +1527,7 @@ export function useSetupHouseholdScreen() {
     isCalendarScope,
     isEditMode,
     isMealsScope,
+    isModuleScope,
     isTasksScope,
     loadDietaryTags,
     loadHouseholdConnection,

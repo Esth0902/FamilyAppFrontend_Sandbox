@@ -1,4 +1,4 @@
-import { useCallback, useRef } from "react";
+import { useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { BudgetBoardPayload } from "@/src/budget/common";
 import { queryKeys } from "@/src/query/query-keys";
@@ -8,28 +8,18 @@ type UseBudgetBoardArgs = {
   householdId: number | null;
 };
 
-type RefreshOptions = {
-  bypassCache?: boolean;
-};
-
 export const useBudgetBoard = ({ householdId }: UseBudgetBoardArgs) => {
-  const bypassCacheRef = useRef(false);
-
   const query = useQuery({
     queryKey: queryKeys.budget.board(householdId),
     enabled: householdId !== null,
     staleTime: 20_000,
-    queryFn: () => fetchBudgetBoard({ bypassCache: bypassCacheRef.current }),
+    queryFn: fetchBudgetBoard,
   });
+  const { refetch } = query;
 
-  const refreshBoard = useCallback(async (options?: RefreshOptions) => {
-    bypassCacheRef.current = options?.bypassCache === true;
-    try {
-      await query.refetch();
-    } finally {
-      bypassCacheRef.current = false;
-    }
-  }, [query]);
+  const refreshBoard = useCallback(async (_options?: { silent?: boolean }) => {
+    await refetch();
+  }, [refetch]);
 
   return {
     board: (query.data ?? null) as BudgetBoardPayload | null,

@@ -1,16 +1,15 @@
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 import { useFocusEffect } from "expo-router";
 
 import { subscribeToHouseholdRealtime } from "@/src/realtime/client";
 
 type RefreshOptions = {
   silent?: boolean;
-  bypassCache?: boolean;
 };
 
 type UseRealtimeRefetchArgs = {
   householdId: number | null;
-  module: string;
+  module: string | string[];
   refresh: (options?: RefreshOptions) => Promise<unknown> | void;
   focusOptions?: RefreshOptions;
   realtimeOptions?: RefreshOptions;
@@ -25,18 +24,18 @@ export const useRealtimeRefetch = ({
   realtimeOptions,
   enabled = true,
 }: UseRealtimeRefetchArgs) => {
+  const modules = useMemo(() => (Array.isArray(module) ? module : [module]), [module]);
   const focusSilent = focusOptions?.silent;
-  const focusBypassCache = focusOptions?.bypassCache;
   const realtimeSilent = realtimeOptions?.silent;
-  const realtimeBypassCache = realtimeOptions?.bypassCache;
 
   useFocusEffect(
     useCallback(() => {
-      const options = focusSilent === undefined && focusBypassCache === undefined
-        ? undefined
-        : { silent: focusSilent, bypassCache: focusBypassCache };
+      if (!enabled) {
+        return;
+      }
+      const options = focusSilent === undefined ? undefined : { silent: focusSilent };
       void refresh(options);
-    }, [focusBypassCache, focusSilent, refresh])
+    }, [enabled, focusSilent, refresh])
   );
 
   useEffect(() => {
@@ -50,10 +49,9 @@ export const useRealtimeRefetch = ({
     const bindRealtime = async () => {
       unsubscribeRealtime = await subscribeToHouseholdRealtime(householdId, (message) => {
         if (!active) return;
-        if (message?.module !== module) return;
-        const options = realtimeSilent === undefined && realtimeBypassCache === undefined
-          ? undefined
-          : { silent: realtimeSilent, bypassCache: realtimeBypassCache };
+        const messageModule = String(message?.module ?? "");
+        if (!modules.includes(messageModule)) return;
+        const options = realtimeSilent === undefined ? undefined : { silent: realtimeSilent };
         void refresh(options);
       });
     };
@@ -66,5 +64,5 @@ export const useRealtimeRefetch = ({
         unsubscribeRealtime();
       }
     };
-  }, [enabled, householdId, module, realtimeBypassCache, realtimeSilent, refresh]);
+  }, [enabled, householdId, modules, realtimeSilent, refresh]);
 };

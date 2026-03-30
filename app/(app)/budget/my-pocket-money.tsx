@@ -1,12 +1,11 @@
 import React, { useCallback, useMemo, useState } from "react";
-import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useRouter } from "expo-router";
-import { MaterialCommunityIcons } from "@expo/vector-icons";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Colors } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import { apiFetch } from "@/src/api/client";
+import { ScreenHeader } from "@/src/components/ui/ScreenHeader";
 import { useRealtimeRefetch } from "@/src/hooks/useRealtimeRefetch";
 import { useStoredUserState } from "@/src/session/user-cache";
 import {
@@ -21,7 +20,6 @@ import {
 
 export default function BudgetMyPocketMoneyScreen() {
   const router = useRouter();
-  const insets = useSafeAreaInsets();
   const colorScheme = useColorScheme();
   const theme = Colors[colorScheme ?? "light"];
   const { householdId } = useStoredUserState();
@@ -57,7 +55,7 @@ export default function BudgetMyPocketMoneyScreen() {
       router.back();
       return;
     }
-    router.replace("/(tabs)/budget");
+    router.replace("/(app)/(tabs)/budget");
   }, [router]);
 
   const currency = useMemo(() => (board?.currency || "EUR").toUpperCase(), [board?.currency]);
@@ -82,14 +80,18 @@ export default function BudgetMyPocketMoneyScreen() {
 
   return (
     <ScrollView stickyHeaderIndices={[0]} style={[styles.container, { backgroundColor: theme.background }]} contentContainerStyle={styles.content}>
-      <View style={[styles.headerRow, { borderBottomColor: theme.icon, paddingTop: Math.max(insets.top, 12), backgroundColor: theme.background }]}>
-        <TouchableOpacity onPress={onBackPress} style={[styles.backBtn, { borderColor: theme.icon }]}>
-          <MaterialCommunityIcons name="arrow-left" size={20} color={theme.tint} />
-        </TouchableOpacity>
-        <View style={{ flex: 1 }}>
-          <Text style={[styles.title, { color: theme.text }]}>Mon argent de poche</Text>
-          <Text style={[styles.subtitle, { color: theme.textSecondary }]}>Résumé de ma période en cours</Text>
-        </View>
+      <View style={{ backgroundColor: theme.background, paddingHorizontal: 16, zIndex: 20, elevation: 20 }}>
+        <ScreenHeader
+          title="Mon argent de poche"
+          subtitle="Résumé de ma période en cours"
+          withBackButton
+          onBackPress={onBackPress}
+          showBorder
+          safeTop
+          bottomSpacing={2}
+          containerStyle={{ paddingHorizontal: 0 }}
+          contentStyle={{ minHeight: 0 }}
+        />
       </View>
 
       <View style={[styles.card, { backgroundColor: theme.card, borderColor: theme.icon }]}>
@@ -143,25 +145,6 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   content: { paddingTop: 0, paddingHorizontal: 16, paddingBottom: 40, gap: 12 },
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
-  headerRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    paddingBottom: 12,
-    borderBottomWidth: 1,
-    marginBottom: 2,
-  },
-  backBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    borderWidth: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    marginTop: 2,
-  },
-  title: { fontSize: 18, fontWeight: "700" },
-  subtitle: { marginTop: 2, fontSize: 13, lineHeight: 18 },
   card: { borderWidth: 1, borderRadius: 14, padding: 12, gap: 8 },
   text: { fontSize: 13, lineHeight: 18 },
   summaryGrid: { gap: 4, marginTop: 2 },

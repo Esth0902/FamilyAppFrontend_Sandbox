@@ -86,10 +86,6 @@ export function useSettings() {
             const normalizedUser = await persistUserCache(apiUser, preferredHouseholdId);
             hydrateFromUser(normalizedUser ?? apiUser);
         } catch (error: any) {
-            if (Number(error?.status) === 401) {
-                await logoutAuth();
-                return;
-            }
             Alert.alert("Erreur", error?.message || "Impossible de charger le profil.");
         } finally {
             setLoading(false);

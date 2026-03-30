@@ -21,7 +21,6 @@ import {
     toPositiveInt,
     type NotificationNavigationTarget,
 } from "@/src/notifications/navigation";
-import { subscribeToUserRealtime } from "@/src/realtime/client";
 import {
     persistStoredUser,
     switchStoredHousehold,
@@ -34,10 +33,13 @@ import {
     respondToNotification,
     type HomePendingNotification,
 } from "@/src/services/homeService";
-import { logoutAuthenticatedUser } from "@/src/services/authService";
+import { logout } from "@/src/services/authService";
 import { useAuthStore } from "@/src/store/useAuthStore";
 
 type PendingNotification = HomePendingNotification;
+type SwitchHouseholdOptions = {
+    skipAwaitProfileRefresh?: boolean;
+};
 
 const ACTION_REQUIRED_NOTIFICATION_TYPES = new Set([
     "household_invite",
@@ -96,16 +98,14 @@ export default function ConnectedHome() {
     const theme = Colors[colorScheme ?? "light"];
     const { user } = useStoredUserState();
     const token = useAuthStore((state) => state.token);
-    const logout = useAuthStore((state) => state.logout);
 
     const {
         pendingNotifications,
         isInitialLoading,
         profileError,
         notificationsError,
-        refreshAll,
+        refreshProfile,
         refreshNotifications,
-        invalidateNotifications,
     } = useHomeData({ token, user });
 
     const [processingNotificationId, setProcessingNotificationId] = useState<number | null>(null);
@@ -133,55 +133,22 @@ export default function ConnectedHome() {
         });
     }, [notificationsError, profileError]);
 
-    useEffect(() => {
-        if (!token) {
-            return;
-        }
-
-        let isActive = true;
-        let unsubscribeRealtime: (() => void) | null = null;
-
-        const subscribeRealtime = async () => {
-            const parsedUserId = Number(user?.id ?? 0);
-            if (!Number.isFinite(parsedUserId) || parsedUserId <= 0) {
-                return;
-            }
-
-            const unsubscribe = await subscribeToUserRealtime(parsedUserId, (message) => {
-                const module = String(message?.module ?? "");
-                if (module !== "notifications") {
-                    return;
-                }
-                void invalidateNotifications();
-            });
-
-            if (!isActive) {
-                unsubscribe();
-                return;
-            }
-
-            unsubscribeRealtime = unsubscribe;
-        };
-
-        void subscribeRealtime();
-
-        return () => {
-            isActive = false;
-            if (unsubscribeRealtime) {
-                unsubscribeRealtime();
-            }
-        };
-    }, [invalidateNotifications, token, user?.id]);
     const onSetupHouse = () => {
         router.push("/householdSetup");
     };
 
     const onSwitchHousehold = useCallback(
-        async (householdId: number): Promise<boolean> => {
+        async (
+            householdId: number,
+            options: SwitchHouseholdOptions = {}
+        ): Promise<boolean> => {
             setSwitchingHouseholdId(householdId);
             try {
                 await switchStoredHousehold(householdId);
-                await refreshAll();
+                if (!options.skipAwaitProfileRefresh) {
+                    await refreshProfile();
+                }
+                void refreshNotifications();
                 return true;
             } catch (error: any) {
                 Alert.alert("Foyer", error?.message || "Impossible de sélectionner ce foyer.");
@@ -190,13 +157,15 @@ export default function ConnectedHome() {
                 setSwitchingHouseholdId(null);
             }
         },
-        [refreshAll]
+        [refreshNotifications, refreshProfile]
     );
 
     const onOpenHouseholdDashboard = useCallback(
         async (householdId: number) => {
             if (householdId !== activeHouseholdId) {
-                const switched = await onSwitchHousehold(householdId);
+                const switched = await onSwitchHousehold(householdId, {
+                    skipAwaitProfileRefresh: true,
+                });
                 if (!switched) {
                     return;
                 }
@@ -718,13 +687,9 @@ export default function ConnectedHome() {
 
     const onLogout = async () => {
         try {
-            if (token) {
-                logoutAuthenticatedUser().catch((e) => console.log("Logout backend error:", e));
-            }
+            await logout();
         } catch (e) {
             console.error("Erreur logout:", e);
-        } finally {
-            await logout();
         }
     };
 

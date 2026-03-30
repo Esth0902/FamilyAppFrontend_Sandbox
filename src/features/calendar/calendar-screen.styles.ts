@@ -15,22 +15,12 @@ export const calendarStyles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  header: {
-    marginBottom: 4,
+  headerContainer: {
+    paddingHorizontal: 0,
+    paddingBottom: 0,
   },
-  headerRow: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    gap: 12,
-  },
-  headerTitle: {
-    fontSize: 26,
-    fontWeight: "700",
-  },
-  headerSubtitle: {
-    marginTop: 4,
-    fontSize: 14,
-    lineHeight: 20,
+  headerContent: {
+    minHeight: 0,
   },
   settingsBtn: {
     width: 36,

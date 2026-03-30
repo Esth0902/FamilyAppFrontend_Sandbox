@@ -1,5 +1,5 @@
 import { resolvePublicApiUrl } from "@/src/config/public-env";
-import { getAuthStateSnapshot, hydrateAuthState, logoutAuth } from "@/src/store/useAuthStore";
+import { getAuthStateSnapshot, hydrateAuthState } from "@/src/store/useAuthStore";
 
 const trimRightSlash = (value: string) => value.replace(/\/+$/, "");
 
@@ -22,11 +22,6 @@ const parseJsonSafe = async (response: Response) => {
 export type ApiFetchOptions = RequestInit & {
   cacheTtlMs?: number;
   bypassCache?: boolean;
-};
-
-type CachedApiResponse = {
-  expiresAt: number;
-  data: unknown;
 };
 
 export type ApiErrorCode =
@@ -74,11 +69,41 @@ export class ApiClientError extends Error {
   }
 }
 
+export class UnauthorizedApiError extends ApiClientError {
+  constructor(input: ApiErrorInput) {
+    super(input);
+    this.name = "UnauthorizedApiError";
+  }
+}
+
 export const isApiClientError = (error: unknown): error is ApiClientError =>
   error instanceof ApiClientError;
 
 export const isApiUnauthorizedError = (error: unknown): boolean =>
-  isApiClientError(error) && error.status === 401;
+  error instanceof UnauthorizedApiError || (isApiClientError(error) && error.status === 401);
+
+export type ApiUnauthorizedListener = (error: UnauthorizedApiError) => void | Promise<void>;
+
+const unauthorizedListeners = new Set<ApiUnauthorizedListener>();
+
+export const subscribeToApiUnauthorized = (listener: ApiUnauthorizedListener): (() => void) => {
+  unauthorizedListeners.add(listener);
+  return () => {
+    unauthorizedListeners.delete(listener);
+  };
+};
+
+const notifyApiUnauthorized = (error: UnauthorizedApiError): void => {
+  if (unauthorizedListeners.size === 0) {
+    return;
+  }
+
+  for (const listener of unauthorizedListeners) {
+    void Promise.resolve(listener(error)).catch((notificationError) => {
+      console.error("Erreur listener 401 API:", notificationError);
+    });
+  }
+};
 
 export const getApiErrorMessage = (error: unknown, fallback = "Une erreur est survenue."): string => {
   if (isApiClientError(error)) {
@@ -171,7 +196,7 @@ const normalizeApiError = (
   const status = Number.isFinite(context.status) ? Math.trunc(context.status) : 0;
   const code = mapStatusToCode(status);
   const message = extractApiMessage(status, context.data);
-  return new ApiClientError({
+  const commonInput: ApiErrorInput = {
     status,
     code,
     message,
@@ -180,52 +205,13 @@ const normalizeApiError = (
     endpoint: context.endpoint,
     retryable: isRetryableStatus(status),
     cause: input,
-  });
-};
+  };
 
-const apiResponseCache = new Map<string, CachedApiResponse>();
-const inFlightGetRequests = new Map<string, Promise<unknown>>();
-const MAX_CACHE_ENTRIES = 80;
-
-const buildCacheKey = (method: string, url: string, householdId: number | null) =>
-  `${method}:${url}:h${householdId ?? 0}`;
-
-const pruneApiCache = () => {
-  while (apiResponseCache.size > MAX_CACHE_ENTRIES) {
-    const firstKey = apiResponseCache.keys().next().value;
-    if (typeof firstKey !== "string") {
-      break;
-    }
-    apiResponseCache.delete(firstKey);
+  if (status === 401) {
+    return new UnauthorizedApiError(commonInput);
   }
-};
 
-const getCachedResponse = (cacheKey: string): { hit: boolean; data: unknown } => {
-  const cached = apiResponseCache.get(cacheKey);
-  if (!cached) {
-    return { hit: false, data: null };
-  }
-  if (cached.expiresAt <= Date.now()) {
-    apiResponseCache.delete(cacheKey);
-    return { hit: false, data: null };
-  }
-  return { hit: true, data: cached.data };
-};
-
-const setCachedResponse = (cacheKey: string, data: unknown, ttlMs: number) => {
-  if (!Number.isFinite(ttlMs) || ttlMs <= 0) {
-    return;
-  }
-  apiResponseCache.set(cacheKey, {
-    expiresAt: Date.now() + ttlMs,
-    data,
-  });
-  pruneApiCache();
-};
-
-const clearApiCache = () => {
-  apiResponseCache.clear();
-  inFlightGetRequests.clear();
+  return new ApiClientError(commonInput);
 };
 
 export const apiFetch = async (endpoint: string, options: ApiFetchOptions = {}) => {
@@ -257,27 +243,11 @@ export const apiFetch = async (endpoint: string, options: ApiFetchOptions = {}) 
   }
 
   const {
-    cacheTtlMs: rawCacheTtlMs,
-    bypassCache: rawBypassCache,
+    cacheTtlMs: _cacheTtlMs,
+    bypassCache: _bypassCache,
     ...requestOptions
   } = options;
-
   const method = String(requestOptions.method ?? "GET").toUpperCase();
-  const isGet = method === "GET";
-  const cacheTtlMs = Number.isFinite(rawCacheTtlMs) ? Number(rawCacheTtlMs) : 0;
-  const bypassCache = rawBypassCache === true;
-  const cacheKey = buildCacheKey(method, url, activeHouseholdId);
-
-  if (isGet && !bypassCache && cacheTtlMs > 0) {
-    const cached = getCachedResponse(cacheKey);
-    if (cached.hit) {
-      return cached.data;
-    }
-    const inFlight = inFlightGetRequests.get(cacheKey);
-    if (inFlight) {
-      return inFlight;
-    }
-  }
 
   const headers: Record<string, string> = {
     Accept: "application/json",
@@ -292,57 +262,37 @@ export const apiFetch = async (endpoint: string, options: ApiFetchOptions = {}) 
     headers["X-Household-Id"] = String(activeHouseholdId);
   }
 
-  const requestPromise = (async () => {
-    let response: Response;
-    try {
-      response = await fetch(url, {
-        ...requestOptions,
-        method,
-        headers,
-      });
-    } catch (networkError) {
-      throw normalizeApiError(networkError, {
-        status: 0,
-        method,
-        endpoint: cleanEndpoint,
-      });
-    }
-
-    const data = await parseJsonSafe(response);
-
-    if (!response.ok) {
-      const normalizedError = normalizeApiError(data, {
-        status: response.status,
-        data,
-        method,
-        endpoint: cleanEndpoint,
-      });
-
-      if (normalizedError.status === 401) {
-        clearApiCache();
-        await logoutAuth();
-      }
-
-      throw normalizedError;
-    }
-
-    if (!isGet) {
-      clearApiCache();
-    } else if (!bypassCache && cacheTtlMs > 0) {
-      setCachedResponse(cacheKey, data, cacheTtlMs);
-    }
-
-    return data;
-  })();
-
-  if (isGet && !bypassCache && cacheTtlMs > 0) {
-    inFlightGetRequests.set(cacheKey, requestPromise);
-    try {
-      return await requestPromise;
-    } finally {
-      inFlightGetRequests.delete(cacheKey);
-    }
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      ...requestOptions,
+      method,
+      headers,
+    });
+  } catch (networkError) {
+    throw normalizeApiError(networkError, {
+      status: 0,
+      method,
+      endpoint: cleanEndpoint,
+    });
   }
 
-  return requestPromise;
+  const data = await parseJsonSafe(response);
+
+  if (!response.ok) {
+    const normalizedError = normalizeApiError(data, {
+      status: response.status,
+      data,
+      method,
+      endpoint: cleanEndpoint,
+    });
+
+    if (isApiUnauthorizedError(normalizedError)) {
+      notifyApiUnauthorized(normalizedError);
+    }
+
+    throw normalizedError;
+  }
+
+  return data;
 };

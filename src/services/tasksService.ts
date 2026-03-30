@@ -17,8 +17,11 @@ export type TasksBoardPayload = {
     role: "parent" | "enfant";
   };
   instances: {
+    id?: number;
+    title?: string;
+    description?: string | null;
     due_date?: string;
-    status: TaskStatus;
+    status: TaskStatus | string;
     validated_by_parent: boolean;
     assignee?: {
       id: number;
@@ -36,13 +39,44 @@ type FetchTasksBoardResult = {
   resolvedWeekStartDay: number;
 };
 
-type FetchTasksBoardOptions = {
-  bypassCache?: boolean;
+type UnknownRecord = Record<string, unknown>;
+
+const isRecord = (value: unknown): value is UnknownRecord => {
+  return typeof value === "object" && value !== null;
 };
 
-type FetchTasksBoardForRangeOptions = {
-  cacheTtlMs?: number;
-  bypassCache?: boolean;
+const isTasksBoardPayload = (value: unknown): value is TasksBoardPayload => {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return (
+    typeof value.tasks_enabled === "boolean"
+    && typeof value.can_manage_templates === "boolean"
+    && typeof value.can_manage_instances === "boolean"
+    && Array.isArray(value.instances)
+  );
+};
+
+const parseTasksBoardPayload = (value: unknown, endpoint: string): TasksBoardPayload => {
+  if (!isTasksBoardPayload(value)) {
+    throw new Error(`Réponse invalide pour ${endpoint}.`);
+  }
+
+  return value;
+};
+
+const fetchTasksBoardPayload = async (
+  from: string,
+  to: string,
+  options: { bypassCache?: boolean } = {}
+): Promise<TasksBoardPayload> => {
+  const endpoint = `/tasks/board?from=${from}&to=${to}`;
+  const payload = await apiFetch(endpoint, {
+    cacheTtlMs: 12_000,
+    bypassCache: Boolean(options.bypassCache),
+  });
+  return parseTasksBoardPayload(payload, endpoint);
 };
 
 const isoWeekDayFromDate = (date: Date) => {
@@ -106,16 +140,12 @@ export const isInstanceAssignedToUser = (
 };
 
 export const fetchTasksBoardForCurrentWeek = async (
-  plannedWeekStartDay: number,
-  options?: FetchTasksBoardOptions
+  plannedWeekStartDay: number
 ): Promise<FetchTasksBoardResult> => {
   const weekStart = weekStartFromDateWithIsoDay(new Date(), plannedWeekStartDay);
   const rangeFrom = toIsoDate(weekStart);
   const rangeTo = toIsoDate(addDays(weekStart, 6));
-  let payload = await apiFetch(`/tasks/board?from=${rangeFrom}&to=${rangeTo}`, {
-    cacheTtlMs: 12_000,
-    bypassCache: options?.bypassCache === true,
-  }) as TasksBoardPayload;
+  let payload = await fetchTasksBoardPayload(rangeFrom, rangeTo);
 
   const isAlternatingCustodyEnabled = Boolean(payload?.settings?.alternating_custody_enabled);
   const homeWeekStartDay = resolveIsoWeekDayFromIsoDate(payload?.settings?.custody_home_week_start);
@@ -129,10 +159,9 @@ export const fetchTasksBoardForCurrentWeek = async (
     const correctedTo = toIsoDate(addDays(correctedWeekStart, 6));
 
     if (correctedFrom !== rangeFrom || correctedTo !== rangeTo) {
-      payload = await apiFetch(`/tasks/board?from=${correctedFrom}&to=${correctedTo}`, {
-        cacheTtlMs: 12_000,
+      payload = await fetchTasksBoardPayload(correctedFrom, correctedTo, {
         bypassCache: true,
-      }) as TasksBoardPayload;
+      });
     }
   }
 
@@ -144,13 +173,9 @@ export const fetchTasksBoardForCurrentWeek = async (
 
 export const fetchTasksBoardForRange = async <T = unknown>(
   from: string,
-  to: string,
-  options?: FetchTasksBoardForRangeOptions
+  to: string
 ): Promise<T> => {
-  return await apiFetch(`/tasks/board?from=${from}&to=${to}`, {
-    cacheTtlMs: options?.cacheTtlMs ?? 12_000,
-    bypassCache: options?.bypassCache === true,
-  }) as T;
+  return await apiFetch(`/tasks/board?from=${from}&to=${to}`) as T;
 };
 
 export const createTaskInstance = async (payload: {
@@ -159,6 +184,7 @@ export const createTaskInstance = async (payload: {
   due_date: string;
   end_date: string;
   user_id?: number;
+  user_ids?: number[];
 }): Promise<void> => {
   await apiFetch("/tasks/instances", {
     method: "POST",
@@ -181,5 +207,38 @@ export const updateTaskInstance = async (
 export const validateTaskInstance = async (instanceId: number): Promise<void> => {
   await apiFetch(`/tasks/instances/${instanceId}/validate`, {
     method: "POST",
+  });
+};
+
+export const requestTaskInstanceReassignment = async (payload: {
+  instanceId: number;
+  invitedUserId: number;
+}): Promise<void> => {
+  await apiFetch(`/tasks/instances/${payload.instanceId}/reassignment-request`, {
+    method: "POST",
+    body: JSON.stringify({ invited_user_id: payload.invitedUserId }),
+  });
+};
+
+export const createTaskTemplate = async (payload: Record<string, unknown>): Promise<void> => {
+  await apiFetch("/tasks/templates", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+};
+
+export const updateTaskTemplate = async (
+  templateId: number,
+  payload: Record<string, unknown>
+): Promise<void> => {
+  await apiFetch(`/tasks/templates/${templateId}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+};
+
+export const deleteTaskTemplate = async (templateId: number): Promise<void> => {
+  await apiFetch(`/tasks/templates/${templateId}`, {
+    method: "DELETE",
   });
 };

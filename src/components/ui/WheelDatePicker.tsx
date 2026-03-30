@@ -9,7 +9,7 @@ const WHEEL_CONTAINER_HEIGHT = WHEEL_ITEM_HEIGHT * WHEEL_VISIBLE_ROWS;
 const WHEEL_VERTICAL_PADDING = (WHEEL_CONTAINER_HEIGHT - WHEEL_ITEM_HEIGHT) / 2;
 const TIME_WHEEL_REPEAT = 8;
 const TIME_WHEEL_MIDDLE_CYCLE = Math.floor(TIME_WHEEL_REPEAT / 2);
-const MONTH_LABELS = ["jan", "fev", "mars", "avr", "mai", "juin", "juil", "aout", "sept", "oct", "nov", "dec"];
+const MONTH_LABELS = ["jan", "fév", "mars", "avr", "mai", "juin", "juil", "août", "sept", "oct", "nov", "déc"];
 const WEEK_DAY_SHORT = ["di", "lu", "ma", "me", "je", "ve", "sa"] as const;
 
 const pad = (value: number) => String(value).padStart(2, "0");
@@ -46,14 +46,31 @@ type WheelDatePickerProps = {
   visible: boolean;
   title: string;
   value: string;
+  minValue?: string;
+  maxValue?: string;
   onChange: (nextIsoDate: string) => void;
   theme: WheelPickerTheme;
+};
+
+const normalizeIsoWithinBounds = (value: string, minValue?: string, maxValue?: string) => {
+  let boundedValue = value;
+
+  if (typeof minValue === "string" && /^\d{4}-\d{2}-\d{2}$/.test(minValue) && boundedValue < minValue) {
+    boundedValue = minValue;
+  }
+  if (typeof maxValue === "string" && /^\d{4}-\d{2}-\d{2}$/.test(maxValue) && boundedValue > maxValue) {
+    boundedValue = maxValue;
+  }
+
+  return boundedValue;
 };
 
 export function WheelDatePicker({
   visible,
   title,
   value,
+  minValue,
+  maxValue,
   onChange,
   theme,
 }: WheelDatePickerProps) {
@@ -72,6 +89,7 @@ export function WheelDatePicker({
   const dateWheelMonthIndexRef = useRef(0);
   const dateWheelYearIndexRef = useRef(0);
   const lastEmittedDateRef = useRef<string | null>(null);
+  const suppressEmitRef = useRef(false);
 
   const dayOptions = useMemo(() => {
     const maxDay = new Date(wheelYear, wheelMonth, 0).getDate();
@@ -98,6 +116,7 @@ export function WheelDatePicker({
     const nextYear = yearOptions[yearIndex] ?? currentYear;
     const nextMonth = monthOptions[monthIndex] ?? 1;
 
+    suppressEmitRef.current = true;
     setWheelYear((prev) => (prev === nextYear ? prev : nextYear));
     setWheelMonth((prev) => (prev === nextMonth ? prev : nextMonth));
     setWheelDay((prev) => (prev === day ? prev : day));
@@ -110,6 +129,7 @@ export function WheelDatePicker({
       yearWheelRef.current?.scrollTo({ y: yearIndex * WHEEL_ITEM_HEIGHT, animated: false });
       monthWheelRef.current?.scrollTo({ y: monthIndex * WHEEL_ITEM_HEIGHT, animated: false });
       dayWheelRef.current?.scrollTo({ y: dayIndex * WHEEL_ITEM_HEIGHT, animated: false });
+      suppressEmitRef.current = false;
     });
   }, [currentYear, monthOptions, value, visible, yearOptions]);
 
@@ -122,6 +142,9 @@ export function WheelDatePicker({
     if (!visible) {
       return;
     }
+    if (suppressEmitRef.current) {
+      return;
+    }
 
     const maxDay = new Date(wheelYear, wheelMonth, 0).getDate();
     const normalizedDay = clamp(wheelDay, 1, maxDay);
@@ -131,13 +154,14 @@ export function WheelDatePicker({
     }
 
     const nextIsoDate = `${wheelYear}-${pad(wheelMonth)}-${pad(normalizedDay)}`;
-    if (nextIsoDate === value) {
+    const boundedIsoDate = normalizeIsoWithinBounds(nextIsoDate, minValue, maxValue);
+    if (boundedIsoDate === value) {
       return;
     }
 
-    lastEmittedDateRef.current = nextIsoDate;
-    onChange(nextIsoDate);
-  }, [onChange, value, visible, wheelDay, wheelMonth, wheelYear]);
+    lastEmittedDateRef.current = boundedIsoDate;
+    onChange(boundedIsoDate);
+  }, [maxValue, minValue, onChange, value, visible, wheelDay, wheelMonth, wheelYear]);
 
   if (!visible) {
     return null;

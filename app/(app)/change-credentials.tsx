@@ -13,14 +13,12 @@ import {
 } from "react-native";
 import { useRouter } from "expo-router";
 import { Colors } from "@/constants/theme";
-import { apiFetch } from "@/src/api/client";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
+import { useStoredUserState } from "@/src/session/user-cache";
 import {
-    normalizeStoredUser,
-    persistStoredUser,
-    useStoredUserState,
-    type StoredUser as CachedUser,
-} from "@/src/session/user-cache";
+    changePasswordIfRequired,
+    toAuthServiceError,
+} from "@/src/services/authService";
 
 export default function ChangeCredentialsScreen() {
     const router = useRouter();
@@ -54,35 +52,23 @@ export default function ChangeCredentialsScreen() {
 
         setLoading(true);
         try {
-            const response = await apiFetch("/auth/change-initial-credentials", {
-                method: "POST",
-                body: JSON.stringify({
-                    email: email.trim(),
-                    password,
-                    password_confirmation: passwordConfirm,
-                }),
+            const updatedUser = await changePasswordIfRequired({
+                email: email.trim(),
+                password,
+                passwordConfirmation: passwordConfirm,
             });
 
-            const updatedUser = response?.user as CachedUser | undefined;
             if (updatedUser) {
-                const normalizedUser = normalizeStoredUser({
-                    ...updatedUser,
-                    must_change_password: false,
-                } as CachedUser);
-
-                if (normalizedUser) {
-                    await persistStoredUser(normalizedUser);
-                }
-
                 const hasHousehold = Array.isArray(updatedUser.households) && updatedUser.households.length > 0;
-                router.replace(hasHousehold ? "/(tabs)/home" : "/householdSetup");
+                router.replace(hasHousehold ? "/(app)/(tabs)/home" : "/householdSetup");
                 return;
             }
 
             Alert.alert("Mise à jour", "Identifiants mis à jour.");
-            router.replace("/(tabs)/home");
-        } catch (error: any) {
-            Alert.alert("Erreur", error?.message || "Impossible de mettre à jour les identifiants.");
+            router.replace("/(app)/(tabs)/home");
+        } catch (error: unknown) {
+            const authError = toAuthServiceError(error, "Impossible de mettre à jour les identifiants.");
+            Alert.alert("Erreur", authError.message);
         } finally {
             setLoading(false);
         }

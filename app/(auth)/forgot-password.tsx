@@ -8,22 +8,12 @@ import {
     useColorScheme,
 } from "react-native";
 import { useRouter } from "expo-router";
-import { API_BASE_URL } from "@/src/api/client";
 import { Colors } from "@/constants/theme";
+import { forgotPassword, toAuthServiceError } from "@/src/services/authService";
 
 import { AppTextInput } from "@/src/components/ui/AppTextInput";
 import { AppButton } from "@/src/components/ui/AppButton";
 import { ScreenHeader } from "@/src/components/ui/ScreenHeader";
-
-const parseJsonSafe = async (response: Response) => {
-    const text = await response.text();
-    if (!text) return null;
-    try {
-        return JSON.parse(text);
-    } catch {
-        return null;
-    }
-};
 
 export default function ForgotPasswordScreen() {
     const router = useRouter();
@@ -39,37 +29,17 @@ export default function ForgotPasswordScreen() {
             return;
         }
 
-        if (!API_BASE_URL) {
-            Alert.alert("Erreur", "Configuration API manquante. Vérifie EXPO_PUBLIC_API_MODE et EXPO_PUBLIC_API_URL_*.");
-            return;
-        }
-
         setLoading(true);
         try {
-            const response = await fetch(`${API_BASE_URL}/auth/forgot-password`, {
-                method: "POST",
-                headers: {
-                    Accept: "application/json",
-                    "Content-Type": "application/json",
-                },
-                body: JSON.stringify({ email: email.trim() }),
+            const result = await forgotPassword({
+                email: email.trim(),
             });
 
-            const data = await parseJsonSafe(response);
-
-            if (!response.ok) {
-                Alert.alert("Erreur", data?.message || "Impossible d'envoyer la demande.");
-                return;
-            }
-
-            Alert.alert(
-                "Réinitialisation",
-                data?.message || "Si un compte existe, un e-mail de réinitialisation a été envoyé."
-            );
+            Alert.alert("Réinitialisation", result.message);
             router.replace("/login");
-        } catch (error) {
-            console.error("Erreur forgot password:", error);
-            Alert.alert("Erreur réseau", "Impossible de contacter le serveur.");
+        } catch (error: unknown) {
+            const authError = toAuthServiceError(error, "Impossible d'envoyer la demande.");
+            Alert.alert("Erreur", authError.message);
         } finally {
             setLoading(false);
         }
@@ -120,12 +90,12 @@ const styles = StyleSheet.create({
     },
     content: {
         flex: 1,
-        padding: 12, 
-        paddingTop: 56, 
+        padding: 12,
+        paddingTop: 56,
         justifyContent: "flex-start",
     },
     headerContainer: {
-        paddingHorizontal: 0, 
+        paddingHorizontal: 0,
         paddingBottom: 0,
     },
     headerContent: {

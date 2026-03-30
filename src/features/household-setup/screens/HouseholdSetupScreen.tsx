@@ -1,14 +1,13 @@
 // src/features/household-setup/screens/HouseholdSetupScreen.tsx
 import React from "react";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useSetupHouseholdScreen } from "@/src/features/household-setup/hooks/useSetupHouseholdScreen";
 
 import { HouseholdSetupLoadingView } from "../components/screen/HouseholdSetupLoadingView";
 import { HouseholdSetupShareAccountsView } from "../components/screen/HouseholdSetupShareAccountsView";
 import { HouseholdSetupMainView } from "../components/screen/HouseholdSetupMainView";
+import { HouseholdSetupModuleSettingsView } from "../components/screen/HouseholdSetupModuleSettingsView";
 
 export default function HouseholdSetupScreen() {
-  const insets = useSafeAreaInsets();
   const state = useSetupHouseholdScreen();
 
   if (state.ui.initialLoading) {
@@ -19,5 +18,9 @@ export default function HouseholdSetupScreen() {
     return <HouseholdSetupShareAccountsView {...state} />;
   }
 
-  return <HouseholdSetupMainView {...state} insets={insets} />;
+  if (state.ui.isEditMode && state.ui.isModuleScope) {
+    return <HouseholdSetupModuleSettingsView {...state} />;
+  }
+
+  return <HouseholdSetupMainView {...state} />;
 }
