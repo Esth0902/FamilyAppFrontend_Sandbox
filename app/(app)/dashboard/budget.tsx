@@ -8,7 +8,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { Stack, useFocusEffect, useRouter } from "expo-router";
+import { Stack, useRouter } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQuery } from "@tanstack/react-query";
@@ -22,8 +22,8 @@ import {
   computePaymentBreakdown,
   formatMoney,
 } from "@/src/budget/common";
+import { useRealtimeRefetch } from "@/src/hooks/useRealtimeRefetch";
 import { queryKeys } from "@/src/query/query-keys";
-import { subscribeToHouseholdRealtime } from "@/src/realtime/client";
 import { useStoredUserState } from "@/src/session/user-cache";
 import { fetchDashboardBudgetBoard } from "@/src/services/dashboardService";
 
@@ -99,6 +99,18 @@ const buildHistory = (children: ChildBudget[], limit: number): HistoryItem[] => 
     .slice(0, limit);
 };
 
+const countAdvanceStatuses = (transactions: BudgetTransaction[]) => {
+  return transactions.reduce(
+    (acc, transaction) => {
+      if (transaction.status === "pending") acc.pending += 1;
+      else if (transaction.status === "approved") acc.approved += 1;
+      else if (transaction.status === "rejected") acc.rejected += 1;
+      return acc;
+    },
+    { pending: 0, approved: 0, rejected: 0 }
+  );
+};
+
 export default function DashboardBudgetScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -117,11 +129,15 @@ export default function DashboardBudgetScreen() {
   const refetchBudgetBoard = budgetBoardQuery.refetch;
   const budgetBoardError = budgetBoardQuery.error;
 
-  useFocusEffect(
-    useCallback(() => {
-      void refetchBudgetBoard();
-    }, [refetchBudgetBoard])
-  );
+  const refreshBudgetBoard = useCallback(async () => {
+    await refetchBudgetBoard();
+  }, [refetchBudgetBoard]);
+
+  useRealtimeRefetch({
+    householdId,
+    module: "budget",
+    refresh: refreshBudgetBoard,
+  });
 
   useEffect(() => {
     if (!budgetBoardError) {
@@ -131,32 +147,6 @@ export default function DashboardBudgetScreen() {
     const error = budgetBoardError as { message?: string } | null;
     Alert.alert("Budget", error?.message || "Impossible de charger la vue budget.");
   }, [budgetBoardError]);
-
-  useEffect(() => {
-    if (!householdId) {
-      return;
-    }
-
-    let unsubscribeRealtime: (() => void) | null = null;
-    let active = true;
-
-    const bindRealtime = async () => {
-      unsubscribeRealtime = await subscribeToHouseholdRealtime(householdId, (message) => {
-        if (!active) return;
-        if (message?.module !== "budget") return;
-        void refetchBudgetBoard();
-      });
-    };
-
-    void bindRealtime();
-
-    return () => {
-      active = false;
-      if (unsubscribeRealtime) {
-        unsubscribeRealtime();
-      }
-    };
-  }, [householdId, refetchBudgetBoard]);
 
   const board = (budgetBoardQuery.data ?? null) as BudgetBoardPayload | null;
 
@@ -169,20 +159,23 @@ export default function DashboardBudgetScreen() {
   }, [board?.children]);
 
   const childBudget = board?.children?.[0] ?? null;
-  const childBreakdown = childBudget ? computePaymentBreakdown(childBudget) : null;
+  const childBreakdown = useMemo(() => {
+    return childBudget ? computePaymentBreakdown(childBudget) : null;
+  }, [childBudget]);
 
   const parentDetails = useMemo(() => {
     return (board?.children ?? []).map((child) => {
       const advanceTransactions = child.transactions.filter((transaction) => isAdvanceRequest(transaction));
+      const stats = countAdvanceStatuses(advanceTransactions);
       return {
         id: child.child.id,
         name: child.child.name,
         paidPeriod: Number(child.summary.allocation_total_period ?? 0),
         bonusPeriod: Number(child.summary.bonus_total_period ?? 0),
         penaltyPeriod: Math.abs(Number(child.summary.penalty_total_period ?? 0)),
-        pendingAdvance: advanceTransactions.filter((transaction) => transaction.status === "pending").length,
-        approvedAdvance: advanceTransactions.filter((transaction) => transaction.status === "approved").length,
-        rejectedAdvance: advanceTransactions.filter((transaction) => transaction.status === "rejected").length,
+        pendingAdvance: stats.pending,
+        approvedAdvance: stats.approved,
+        rejectedAdvance: stats.rejected,
       };
     });
   }, [board?.children]);
@@ -192,13 +185,29 @@ export default function DashboardBudgetScreen() {
     return childBudget.transactions.filter((transaction) => isAdvanceRequest(transaction));
   }, [childBudget]);
 
-  const childPendingAdvance = childAdvanceTransactions.filter((transaction) => transaction.status === "pending").length;
-  const childApprovedAdvance = childAdvanceTransactions.filter((transaction) => transaction.status === "approved").length;
-  const childRejectedAdvance = childAdvanceTransactions.filter((transaction) => transaction.status === "rejected").length;
+  const childAdvanceStats = useMemo(() => {
+    return countAdvanceStatuses(childAdvanceTransactions);
+  }, [childAdvanceTransactions]);
 
   const history = useMemo(() => {
     return buildHistory(board?.children ?? [], 12);
   }, [board?.children]);
+  const headerStyle = useMemo(
+    () => [styles.header, { borderBottomColor: theme.icon, paddingTop: Math.max(insets.top, 12) }],
+    [insets.top, theme.icon]
+  );
+  const backButtonStyle = useMemo(() => [styles.backBtn, { borderColor: theme.icon }], [theme.icon]);
+  const cardStyle = useMemo(
+    () => [styles.card, { backgroundColor: theme.card, borderColor: theme.icon }],
+    [theme.card, theme.icon]
+  );
+  const detailRowStyle = useMemo(() => [styles.detailRow, { borderColor: `${theme.icon}55` }], [theme.icon]);
+  const onBackPress = useCallback(() => {
+    router.replace("/dashboard");
+  }, [router]);
+  const onOpenBudgetModule = useCallback(() => {
+    router.push("/(app)/(tabs)/budget");
+  }, [router]);
 
   if (budgetBoardQuery.isPending && !board) {
     return (
@@ -212,8 +221,8 @@ export default function DashboardBudgetScreen() {
     <View style={[styles.container, { backgroundColor: theme.background }]}> 
       <Stack.Screen options={{ headerShown: false }} />
 
-      <View style={[styles.header, { borderBottomColor: theme.icon, paddingTop: Math.max(insets.top, 12) }]}> 
-        <TouchableOpacity onPress={() => router.replace("/dashboard")} style={[styles.backBtn, { borderColor: theme.icon }]}> 
+      <View style={headerStyle}> 
+        <TouchableOpacity onPress={onBackPress} style={backButtonStyle}> 
           <MaterialCommunityIcons name="arrow-left" size={20} color={theme.tint} />
         </TouchableOpacity>
         <Text style={[styles.headerTitle, { color: theme.text }]}>Détail budget</Text>
@@ -221,12 +230,12 @@ export default function DashboardBudgetScreen() {
 
       <ScrollView contentContainerStyle={styles.content}>
         {!budgetEnabled ? (
-          <View style={[styles.card, { backgroundColor: theme.card, borderColor: theme.icon }]}> 
+          <View style={cardStyle}> 
             <Text style={[styles.text, { color: theme.textSecondary }]}>Module budget désactivé.</Text>
           </View>
         ) : (
           <>
-            <View style={[styles.card, { backgroundColor: theme.card, borderColor: theme.icon }]}> 
+            <View style={cardStyle}> 
               <Text style={[styles.title, { color: theme.text }]}>Résumé</Text>
               {isParent ? (
                 <>
@@ -236,19 +245,19 @@ export default function DashboardBudgetScreen() {
               ) : (
                 <>
                   <Text style={[styles.text, { color: theme.textSecondary }]}>À recevoir: {formatMoney(childBreakdown?.remainingToPay ?? 0, currency)}</Text>
-                  <Text style={[styles.text, { color: theme.textSecondary }]}>Avances en attente: {childPendingAdvance}</Text>
+                  <Text style={[styles.text, { color: theme.textSecondary }]}>Avances en attente: {childAdvanceStats.pending}</Text>
                 </>
               )}
             </View>
 
-            <View style={[styles.card, { backgroundColor: theme.card, borderColor: theme.icon }]}> 
+            <View style={cardStyle}> 
               <Text style={[styles.title, { color: theme.text }]}>
                 {isParent ? "Par enfant" : "Mes stats"}
               </Text>
 
               {isParent ? (
                 parentDetails.map((item) => (
-                  <View key={`child-${item.id}`} style={[styles.detailRow, { borderColor: `${theme.icon}55` }]}> 
+                  <View key={`child-${item.id}`} style={detailRowStyle}> 
                     <Text style={[styles.detailTitle, { color: theme.text }]}>{item.name}</Text>
                     <Text style={[styles.text, { color: theme.textSecondary }]}>Payé période: {formatMoney(item.paidPeriod, currency)}</Text>
                     <Text style={[styles.text, { color: theme.textSecondary }]}>Avances - attente {item.pendingAdvance} | acceptées {item.approvedAdvance} | refusées {item.rejectedAdvance}</Text>
@@ -256,9 +265,9 @@ export default function DashboardBudgetScreen() {
                   </View>
                 ))
               ) : childBudget ? (
-                <View style={[styles.detailRow, { borderColor: `${theme.icon}55` }]}> 
+                <View style={detailRowStyle}> 
                   <Text style={[styles.text, { color: theme.textSecondary }]}>Payé période: {formatMoney(Number(childBudget.summary.allocation_total_period ?? 0), currency)}</Text>
-                  <Text style={[styles.text, { color: theme.textSecondary }]}>Avances - attente {childPendingAdvance} | acceptées {childApprovedAdvance} | refusées {childRejectedAdvance}</Text>
+                  <Text style={[styles.text, { color: theme.textSecondary }]}>Avances - attente {childAdvanceStats.pending} | acceptées {childAdvanceStats.approved} | refusées {childAdvanceStats.rejected}</Text>
                   <Text style={[styles.text, { color: theme.textSecondary }]}>Bonus {formatMoney(Number(childBudget.summary.bonus_total_period ?? 0), currency)} | Pénalités {formatMoney(Math.abs(Number(childBudget.summary.penalty_total_period ?? 0)), currency)}</Text>
                 </View>
               ) : (
@@ -266,7 +275,7 @@ export default function DashboardBudgetScreen() {
               )}
             </View>
 
-            <View style={[styles.card, { backgroundColor: theme.card, borderColor: theme.icon }]}> 
+            <View style={cardStyle}> 
               <Text style={[styles.title, { color: theme.text }]}>Historique récent</Text>
               {history.length > 0 ? history.map((item) => (
                 <View key={item.id} style={[styles.historyRow, { borderTopColor: `${theme.icon}55` }]}> 
@@ -294,7 +303,7 @@ export default function DashboardBudgetScreen() {
 
         <TouchableOpacity
           style={[styles.primaryButton, { backgroundColor: theme.tint }]}
-          onPress={() => router.push("/(app)/(tabs)/budget")}
+          onPress={onOpenBudgetModule}
         >
           <Text style={styles.primaryButtonText}>Ouvrir le module Budget</Text>
         </TouchableOpacity>

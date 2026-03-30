@@ -78,6 +78,22 @@ export default function DashboardTasksScreen() {
     }
     return instances.filter((instance) => isInstanceAssignedToUser(instance, currentUserId));
   }, [currentUserId, currentUserRole, payload?.instances]);
+  const headerStyle = useMemo(
+    () => [styles.header, { borderBottomColor: theme.icon, paddingTop: Math.max(insets.top, 12) }],
+    [insets.top, theme.icon]
+  );
+  const backButtonStyle = useMemo(() => [styles.backBtn, { borderColor: theme.icon }], [theme.icon]);
+  const cardStyle = useMemo(
+    () => [styles.card, { backgroundColor: theme.card, borderColor: theme.icon }],
+    [theme.card, theme.icon]
+  );
+  const detailRowStyle = useMemo(() => [styles.detailRow, { borderColor: `${theme.icon}55` }], [theme.icon]);
+  const onBackPress = useCallback(() => {
+    router.replace("/dashboard");
+  }, [router]);
+  const onOpenTasksModule = useCallback(() => {
+    router.push("/(app)/(tabs)/tasks");
+  }, [router]);
 
   if (isInitialLoading && !payload) {
     return (
@@ -91,8 +107,8 @@ export default function DashboardTasksScreen() {
     <View style={[styles.container, { backgroundColor: theme.background }]}> 
       <Stack.Screen options={{ headerShown: false }} />
 
-      <View style={[styles.header, { borderBottomColor: theme.icon, paddingTop: Math.max(insets.top, 12) }]}> 
-        <TouchableOpacity onPress={() => router.replace("/dashboard")} style={[styles.backBtn, { borderColor: theme.icon }]}> 
+      <View style={headerStyle}> 
+        <TouchableOpacity onPress={onBackPress} style={backButtonStyle}> 
           <MaterialCommunityIcons name="arrow-left" size={20} color={theme.tint} />
         </TouchableOpacity>
         <Text style={[styles.headerTitle, { color: theme.text }]}>Détail tâches</Text>
@@ -100,19 +116,19 @@ export default function DashboardTasksScreen() {
 
       <ScrollView contentContainerStyle={styles.content}>
         {!tasksEnabled ? (
-          <View style={[styles.card, { backgroundColor: theme.card, borderColor: theme.icon }]}> 
+          <View style={cardStyle}> 
             <Text style={[styles.text, { color: theme.textSecondary }]}>Module tâches désactivé.</Text>
           </View>
         ) : (
           <>
-            <View style={[styles.card, { backgroundColor: theme.card, borderColor: theme.icon }]}> 
+            <View style={cardStyle}> 
               <Text style={[styles.title, { color: theme.text }]}>Résumé semaine</Text>
               <Text style={[styles.text, { color: theme.textSecondary }]}>À faire: {stats.todo}</Text>
               <Text style={[styles.text, { color: theme.textSecondary }]}>Réalisées: {stats.done}</Text>
               <Text style={[styles.text, { color: theme.textSecondary }]}>Validées: {stats.validated}</Text>
             </View>
 
-            <View style={[styles.card, { backgroundColor: theme.card, borderColor: theme.icon }]}> 
+            <View style={cardStyle}> 
               <Text style={[styles.title, { color: theme.text }]}>Tâches de la semaine</Text>
               {visibleInstances.length > 0 ? visibleInstances.map((instance) => {
                 const assigneeNames = Array.isArray(instance.assignees) && instance.assignees.length > 0
@@ -125,7 +141,7 @@ export default function DashboardTasksScreen() {
                 const taskDueDate = typeof instance.due_date === "string" ? instance.due_date : "";
 
                 return (
-                  <View key={`task-${taskId}`} style={[styles.detailRow, { borderColor: `${theme.icon}55` }]}> 
+                  <View key={`task-${taskId}`} style={detailRowStyle}> 
                     <Text style={[styles.detailTitle, { color: theme.text }]}>{taskTitle}</Text>
                     <Text style={[styles.text, { color: theme.textSecondary }]}>Échéance: {formatDueDate(taskDueDate)}</Text>
                     <Text style={[styles.text, { color: theme.textSecondary }]}>Statut: {statusLabel(String(instance.status ?? ""))}</Text>
@@ -142,7 +158,7 @@ export default function DashboardTasksScreen() {
 
         <TouchableOpacity
           style={[styles.primaryButton, { backgroundColor: theme.tint }]}
-          onPress={() => router.push("/(app)/(tabs)/tasks")}
+          onPress={onOpenTasksModule}
         >
           <Text style={styles.primaryButtonText}>Ouvrir le module Tâches</Text>
         </TouchableOpacity>

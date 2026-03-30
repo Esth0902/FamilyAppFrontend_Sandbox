@@ -9,6 +9,7 @@ import {
     type HomePendingNotification,
 } from "@/src/services/homeService";
 import {
+    getStoredUserStateSnapshot,
     persistStoredUser,
     refreshStoredUserFromStorage,
     type StoredUser,
@@ -34,7 +35,8 @@ export const useHomeData = ({ token, user }: UseHomeDataArgs) => {
             }
 
             const householdsFromApi = normalizeHouseholds(apiUser.households);
-            const currentHouseholdId = toPositiveInt(user?.household_id);
+            const storeHouseholdId = toPositiveInt(getStoredUserStateSnapshot().householdId);
+            const currentHouseholdId = storeHouseholdId ?? toPositiveInt(user?.household_id);
             const resolvedHouseholdId = currentHouseholdId
                 && householdsFromApi.some((household) => household.id === currentHouseholdId)
                 ? currentHouseholdId
@@ -65,6 +67,10 @@ export const useHomeData = ({ token, user }: UseHomeDataArgs) => {
         }
     }, [token]);
 
+    const refreshProfile = useCallback(async () => {
+        await profileQuery.refetch();
+    }, [profileQuery]);
+
     const refreshAll = useCallback(async () => {
         await Promise.all([
             profileQuery.refetch(),
@@ -82,6 +88,7 @@ export const useHomeData = ({ token, user }: UseHomeDataArgs) => {
         isRefreshing: profileQuery.isRefetching || notificationsQuery.isRefetching,
         profileError: profileQuery.error as Error | null,
         notificationsError: notificationsQuery.error as Error | null,
+        refreshProfile,
         refreshAll,
         refreshNotifications,
     };

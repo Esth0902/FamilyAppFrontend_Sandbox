@@ -8,16 +8,16 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { Stack, useFocusEffect, useRouter } from "expo-router";
+import { Stack, useRouter } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQuery } from "@tanstack/react-query";
 
 import { Colors } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
+import { useRealtimeRefetch } from "@/src/hooks/useRealtimeRefetch";
 import { queryKeys } from "@/src/query/query-keys";
 import { addDays, toIsoDate } from "@/src/utils/date";
-import { subscribeToHouseholdRealtime } from "@/src/realtime/client";
 import { useStoredUserState } from "@/src/session/user-cache";
 import { fetchCalendarBoardForRange } from "@/src/services/calendarService";
 
@@ -127,11 +127,15 @@ export default function DashboardCalendarScreen() {
   const refetchCalendarBoard = calendarBoardQuery.refetch;
   const calendarBoardError = calendarBoardQuery.error;
 
-  useFocusEffect(
-    useCallback(() => {
-      void refetchCalendarBoard();
-    }, [refetchCalendarBoard])
-  );
+  const refreshCalendarBoard = useCallback(async () => {
+    await refetchCalendarBoard();
+  }, [refetchCalendarBoard]);
+
+  useRealtimeRefetch({
+    householdId,
+    module: "calendar",
+    refresh: refreshCalendarBoard,
+  });
 
   useEffect(() => {
     if (!calendarBoardError) {
@@ -140,32 +144,6 @@ export default function DashboardCalendarScreen() {
     const error = calendarBoardError as { message?: string } | null;
     Alert.alert("Calendrier", error?.message || "Impossible de charger la vue calendrier.");
   }, [calendarBoardError]);
-
-  useEffect(() => {
-    if (!householdId) {
-      return;
-    }
-
-    let unsubscribeRealtime: (() => void) | null = null;
-    let active = true;
-
-    const bindRealtime = async () => {
-      unsubscribeRealtime = await subscribeToHouseholdRealtime(householdId, (message) => {
-        if (!active) return;
-        if (message?.module !== "calendar") return;
-        void refetchCalendarBoard();
-      });
-    };
-
-    void bindRealtime();
-
-    return () => {
-      active = false;
-      if (unsubscribeRealtime) {
-        unsubscribeRealtime();
-      }
-    };
-  }, [householdId, refetchCalendarBoard]);
 
   const board = (calendarBoardQuery.data ?? null) as CalendarBoardResponse | null;
 
@@ -178,16 +156,21 @@ export default function DashboardCalendarScreen() {
     return Array.isArray(board?.meal_plan) ? board.meal_plan : [];
   }, [board?.meal_plan]);
 
-  const unansweredEvents = events.reduce((sum, event) => {
-    return sum + (event.participation_overview?.unanswered?.length ?? 0);
-  }, 0);
+  const unansweredEvents = useMemo(() => {
+    return events.reduce((sum, event) => sum + (event.participation_overview?.unanswered?.length ?? 0), 0);
+  }, [events]);
 
-  const unansweredMeals = meals.reduce((sum, meal) => {
-    return sum + (meal.presence_overview?.unanswered?.length ?? 0);
-  }, 0);
+  const unansweredMeals = useMemo(() => {
+    return meals.reduce((sum, meal) => sum + (meal.presence_overview?.unanswered?.length ?? 0), 0);
+  }, [meals]);
 
-  const childMissingEventResponses = events.filter((event) => !event.my_participation).length;
-  const childMissingMealResponses = meals.filter((meal) => !meal.my_presence).length;
+  const childMissingEventResponses = useMemo(() => {
+    return events.filter((event) => !event.my_participation).length;
+  }, [events]);
+
+  const childMissingMealResponses = useMemo(() => {
+    return meals.filter((meal) => !meal.my_presence).length;
+  }, [meals]);
 
   const upcomingEvents = useMemo(() => {
     return [...events]
@@ -205,6 +188,25 @@ export default function DashboardCalendarScreen() {
       .slice(0, 8);
   }, [meals]);
   const compactCardBackground = colorScheme === "dark" ? `${theme.icon}22` : theme.background;
+  const headerStyle = useMemo(
+    () => [styles.header, { borderBottomColor: theme.icon, paddingTop: Math.max(insets.top, 12) }],
+    [insets.top, theme.icon]
+  );
+  const backButtonStyle = useMemo(() => [styles.backBtn, { borderColor: theme.icon }], [theme.icon]);
+  const cardStyle = useMemo(
+    () => [styles.card, { backgroundColor: theme.card, borderColor: theme.icon }],
+    [theme.card, theme.icon]
+  );
+  const detailRowStyle = useMemo(
+    () => [styles.detailRow, { borderColor: `${theme.icon}55`, backgroundColor: compactCardBackground }],
+    [compactCardBackground, theme.icon]
+  );
+  const onBackPress = useCallback(() => {
+    router.replace("/dashboard");
+  }, [router]);
+  const onOpenCalendarModule = useCallback(() => {
+    router.push("/(app)/(tabs)/calendar");
+  }, [router]);
 
   if (calendarBoardQuery.isPending && !board) {
     return (
@@ -218,8 +220,8 @@ export default function DashboardCalendarScreen() {
     <View style={[styles.container, { backgroundColor: theme.background }]}> 
       <Stack.Screen options={{ headerShown: false }} />
 
-      <View style={[styles.header, { borderBottomColor: theme.icon, paddingTop: Math.max(insets.top, 12) }]}> 
-        <TouchableOpacity onPress={() => router.replace("/dashboard")} style={[styles.backBtn, { borderColor: theme.icon }]}> 
+      <View style={headerStyle}> 
+        <TouchableOpacity onPress={onBackPress} style={backButtonStyle}> 
           <MaterialCommunityIcons name="arrow-left" size={20} color={theme.tint} />
         </TouchableOpacity>
         <Text style={[styles.headerTitle, { color: theme.text }]}>Détail calendrier</Text>
@@ -227,12 +229,12 @@ export default function DashboardCalendarScreen() {
 
       <ScrollView contentContainerStyle={styles.content}>
         {!board?.calendar_enabled ? (
-          <View style={[styles.card, { backgroundColor: theme.card, borderColor: theme.icon }]}> 
+          <View style={cardStyle}> 
             <Text style={[styles.text, { color: theme.textSecondary }]}>Module calendrier désactivé.</Text>
           </View>
         ) : (
           <>
-            <View style={[styles.card, { backgroundColor: theme.card, borderColor: theme.icon }]}> 
+            <View style={cardStyle}> 
               <Text style={[styles.title, { color: theme.text }]}>Résumé 30 jours</Text>
               <Text style={[styles.text, { color: theme.textSecondary }]}>Événements: {events.length}</Text>
               <Text style={[styles.text, { color: theme.textSecondary }]}>Repas planifiés: {meals.length}</Text>
@@ -249,12 +251,12 @@ export default function DashboardCalendarScreen() {
               )}
             </View>
 
-            <View style={[styles.card, { backgroundColor: theme.card, borderColor: theme.icon }]}> 
+            <View style={cardStyle}> 
               <Text style={[styles.title, { color: theme.text }]}>Prochains événements</Text>
               {upcomingEvents.length > 0 ? upcomingEvents.map((event) => (
                 <View
                   key={`event-${event.id}`}
-                  style={[styles.detailRow, { borderColor: `${theme.icon}55`, backgroundColor: compactCardBackground }]}
+                  style={detailRowStyle}
                 > 
                   <Text style={[styles.detailTitle, { color: theme.text }]}>{event.title}</Text>
                   <Text style={[styles.text, { color: theme.textSecondary }]}>Début: {formatDateTime(event.start_at)}</Text>
@@ -270,12 +272,12 @@ export default function DashboardCalendarScreen() {
               )}
             </View>
 
-            <View style={[styles.card, { backgroundColor: theme.card, borderColor: theme.icon }]}> 
+            <View style={cardStyle}> 
               <Text style={[styles.title, { color: theme.text }]}>Prochains repas</Text>
               {upcomingMeals.length > 0 ? upcomingMeals.map((meal) => (
                 <View
                   key={`meal-${meal.id}`}
-                  style={[styles.detailRow, { borderColor: `${theme.icon}55`, backgroundColor: compactCardBackground }]}
+                  style={detailRowStyle}
                 > 
                   <Text style={[styles.detailTitle, { color: theme.text }]}>
                     {resolveMealTitle(meal)}
@@ -292,7 +294,7 @@ export default function DashboardCalendarScreen() {
 
         <TouchableOpacity
           style={[styles.primaryButton, { backgroundColor: theme.tint }]}
-          onPress={() => router.push("/(app)/(tabs)/calendar")}
+          onPress={onOpenCalendarModule}
         >
           <Text style={styles.primaryButtonText}>Ouvrir le module Calendrier</Text>
         </TouchableOpacity>

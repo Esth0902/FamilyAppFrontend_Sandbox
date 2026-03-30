@@ -37,6 +37,9 @@ import { logout } from "@/src/services/authService";
 import { useAuthStore } from "@/src/store/useAuthStore";
 
 type PendingNotification = HomePendingNotification;
+type SwitchHouseholdOptions = {
+    skipAwaitProfileRefresh?: boolean;
+};
 
 const ACTION_REQUIRED_NOTIFICATION_TYPES = new Set([
     "household_invite",
@@ -101,7 +104,7 @@ export default function ConnectedHome() {
         isInitialLoading,
         profileError,
         notificationsError,
-        refreshAll,
+        refreshProfile,
         refreshNotifications,
     } = useHomeData({ token, user });
 
@@ -135,11 +138,17 @@ export default function ConnectedHome() {
     };
 
     const onSwitchHousehold = useCallback(
-        async (householdId: number): Promise<boolean> => {
+        async (
+            householdId: number,
+            options: SwitchHouseholdOptions = {}
+        ): Promise<boolean> => {
             setSwitchingHouseholdId(householdId);
             try {
                 await switchStoredHousehold(householdId);
-                await refreshAll();
+                if (!options.skipAwaitProfileRefresh) {
+                    await refreshProfile();
+                }
+                void refreshNotifications();
                 return true;
             } catch (error: any) {
                 Alert.alert("Foyer", error?.message || "Impossible de sélectionner ce foyer.");
@@ -148,13 +157,15 @@ export default function ConnectedHome() {
                 setSwitchingHouseholdId(null);
             }
         },
-        [refreshAll]
+        [refreshNotifications, refreshProfile]
     );
 
     const onOpenHouseholdDashboard = useCallback(
         async (householdId: number) => {
             if (householdId !== activeHouseholdId) {
-                const switched = await onSwitchHousehold(householdId);
+                const switched = await onSwitchHousehold(householdId, {
+                    skipAwaitProfileRefresh: true,
+                });
                 if (!switched) {
                     return;
                 }
