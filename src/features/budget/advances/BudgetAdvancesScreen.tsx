@@ -168,7 +168,7 @@ export default function BudgetAdvancesScreen() {
       style={[styles.container, { backgroundColor: theme.background }]}
       contentContainerStyle={styles.content}
     >
-      <View style={{ backgroundColor: theme.background, paddingHorizontal: 16 }}>
+      <View style={{ backgroundColor: theme.background, paddingHorizontal: 16, zIndex: 20, elevation: 20 }}>
         <ScreenHeader
           title="Demandes d'avance"
           subtitle="Avances et remboursements enfants"

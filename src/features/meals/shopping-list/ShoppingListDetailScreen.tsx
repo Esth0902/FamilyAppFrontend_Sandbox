@@ -532,7 +532,7 @@ export default function ShoppingListDetailScreen() {
           {item.is_checked && item.checked_by?.name ? (
             <View style={[styles.checkedByTag, { backgroundColor: `${theme.tint}22`, borderColor: theme.tint }]}>
               <Text style={[styles.checkedByTagText, { color: theme.tint }]}>
-                Coche par {item.checked_by.name}
+                Coché par {item.checked_by.name}
               </Text>
             </View>
           ) : null}

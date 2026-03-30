@@ -1,2 +1,8 @@
-export { default } from "@/src/features/home/HomeScreenContainer";
+import React from "react";
+
+import HomeScreenView from "@/src/features/home/HomeScreenView";
+
+export default function HomeRoute() {
+  return <HomeScreenView />;
+}
 
