@@ -1,65 +1,33 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from "react-native";
-import { Stack, useFocusEffect, useRouter } from "expo-router";
+import { Stack, useRouter } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 
 import { Colors } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
-import { queryKeys } from "@/src/query/query-keys";
-import { subscribeToHouseholdRealtime } from "@/src/realtime/client";
+import { ScreenHeader } from "@/src/components/ui/ScreenHeader";
+import { useRealtimeRefetch } from "@/src/hooks/useRealtimeRefetch";
 import { useStoredUserState } from "@/src/session/user-cache";
-import { fetchDashboardSummary } from "@/src/services/dashboardService";
+import {
+  buildFavoriteRecipesFromPolls,
+  fetchActiveMealPoll,
+  fetchMealPollHistoryPage,
+  type DashboardFavoriteRecipe,
+  type DashboardPoll,
+} from "@/src/services/dashboardService";
 
-type DashboardPollOption = {
-  id: number;
-  recipe_id: number;
-  title: string;
-  votes_count: number;
-};
-
-type DashboardVoterSummary = {
-  user_id: number;
-  name: string;
-  votes_count: number;
-};
-
-type DashboardPoll = {
-  id: number;
-  title?: string | null;
-  status: "open" | "closed" | "validated";
-  starts_at?: string | null;
-  ends_at?: string | null;
-  planning_start_date?: string | null;
-  planning_end_date?: string | null;
-  max_votes_per_user: number;
-  total_votes: number;
-  options: DashboardPollOption[];
-  voters_summary: DashboardVoterSummary[];
-};
-
-type FavoriteRecipe = {
-  recipe_id: number;
-  title: string;
-  votes_count: number;
-  polls_count: number;
-};
-
-type DashboardResponse = {
-  polls_open?: DashboardPoll[];
-  polls_closed?: DashboardPoll[];
-  polls?: DashboardPoll[];
-  favorite_recipes?: FavoriteRecipe[];
-};
+const EMPTY_POLLS: DashboardPoll[] = [];
+const EMPTY_FAVORITE_RECIPES: DashboardFavoriteRecipe[] = [];
+const INITIAL_ALL_POLLS_VISIBLE = 12;
+const HISTORY_PAGE_SIZE = 20;
 
 const formatDateTime = (iso?: string | null) => {
   if (!iso) return "-";
@@ -83,93 +51,187 @@ const formatDate = (iso?: string | null) => {
 
 const statusLabel = (status: DashboardPoll["status"]) => {
   if (status === "open") return "Ouvert";
-  if (status === "closed") return "Cloturé";
-  return "Valide";
+  if (status === "closed") return "Clôturé";
+  return "Validé";
 };
 
 export default function DashboardPollsScreen() {
   const router = useRouter();
-  const insets = useSafeAreaInsets();
   const colorScheme = useColorScheme();
   const theme = Colors[colorScheme ?? "light"];
   const { householdId } = useStoredUserState();
 
-  const [openOpenPolls, setOpenOpenPolls] = useState(false);
-  const [openClosedPolls, setOpenClosedPolls] = useState(false);
+  const [openOpenPoll, setOpenOpenPoll] = useState(true);
   const [openAllPolls, setOpenAllPolls] = useState(false);
   const [openFavoriteRecipes, setOpenFavoriteRecipes] = useState(false);
+  const [allPollsVisibleCount, setAllPollsVisibleCount] = useState(INITIAL_ALL_POLLS_VISIBLE);
+  const historyQueryEnabled = householdId !== null && (openAllPolls || openFavoriteRecipes);
 
-  const dashboardQuery = useQuery({
-    queryKey: queryKeys.dashboard.summary(householdId),
+  const activePollQueryKey = useMemo(
+    () => ["dashboard", householdId ?? 0, "meal-poll", "active"] as const,
+    [householdId]
+  );
+  const pollHistoryQueryKey = useMemo(
+    () => ["dashboard", householdId ?? 0, "meal-poll", "history", HISTORY_PAGE_SIZE] as const,
+    [householdId]
+  );
+
+  const activePollQuery = useQuery({
+    queryKey: activePollQueryKey,
     enabled: householdId !== null,
+    staleTime: 12_000,
+    gcTime: 10 * 60_000,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
+    queryFn: () => fetchActiveMealPoll(),
+  });
+
+  const pollHistoryQuery = useInfiniteQuery({
+    queryKey: pollHistoryQueryKey,
+    enabled: historyQueryEnabled,
     staleTime: 20_000,
     gcTime: 10 * 60_000,
     refetchOnMount: false,
     refetchOnWindowFocus: false,
-    queryFn: () => fetchDashboardSummary(),
+    initialPageParam: 1,
+    queryFn: ({ pageParam }) =>
+      fetchMealPollHistoryPage({
+        page: Number(pageParam),
+        limit: HISTORY_PAGE_SIZE,
+      }),
+    getNextPageParam: (lastPage) => {
+      return lastPage.meta.has_more ? lastPage.meta.current_page + 1 : undefined;
+    },
   });
-  const refetchDashboard = dashboardQuery.refetch;
-  const dashboardError = dashboardQuery.error;
 
-  useFocusEffect(
-    useCallback(() => {
-      void refetchDashboard();
-    }, [refetchDashboard])
+  const refetchActivePoll = activePollQuery.refetch;
+  const refetchPollHistory = pollHistoryQuery.refetch;
+  const hasNextPollHistoryPage = Boolean(pollHistoryQuery.hasNextPage);
+  const isFetchingNextPollHistoryPage = pollHistoryQuery.isFetchingNextPage;
+  const fetchNextPollHistoryPage = pollHistoryQuery.fetchNextPage;
+
+  const refreshPollsData = useCallback(async () => {
+    await refetchActivePoll();
+    if (historyQueryEnabled) {
+      await refetchPollHistory();
+    }
+  }, [historyQueryEnabled, refetchActivePoll, refetchPollHistory]);
+
+  useRealtimeRefetch({
+    householdId,
+    module: "meal_poll",
+    refresh: refreshPollsData,
+  });
+
+  const activePoll = (activePollQuery.data ?? null) as DashboardPoll | null;
+  const pollHistoryPages = useMemo(
+    () => pollHistoryQuery.data?.pages ?? [],
+    [pollHistoryQuery.data?.pages]
   );
 
-  useEffect(() => {
-    if (!dashboardError) {
-      return;
+  const historyPolls = useMemo(() => {
+    return pollHistoryPages.flatMap((page) => page.data);
+  }, [pollHistoryPages]);
+
+  const openPolls = useMemo(() => {
+    if (activePoll?.status === "open") {
+      return [activePoll];
     }
+    return EMPTY_POLLS;
+  }, [activePoll]);
 
-    const error = dashboardError as { message?: string } | null;
-    Alert.alert("Dashboard", error?.message || "Impossible de charger le dashboard.");
-  }, [dashboardError]);
-
-  useEffect(() => {
-    if (!householdId) {
-      return;
-    }
-
-    let unsubscribeRealtime: (() => void) | null = null;
-    let active = true;
-
-    const bindRealtime = async () => {
-      unsubscribeRealtime = await subscribeToHouseholdRealtime(householdId, (message) => {
-        if (!active) return;
-        const module = String(message?.module ?? "");
-        if (module !== "meal_poll" && module !== "tasks" && module !== "budget" && module !== "calendar") {
-          return;
-        }
-        void refetchDashboard();
-      });
-    };
-
-    void bindRealtime();
-
-    return () => {
-      active = false;
-      if (unsubscribeRealtime) {
-        unsubscribeRealtime();
+  const allPolls = useMemo(() => {
+    const merged = [...historyPolls];
+    if (activePoll) {
+      const alreadyInHistory = merged.some((poll) => poll.id === activePoll.id);
+      if (!alreadyInHistory) {
+        merged.unshift(activePoll);
       }
-    };
-  }, [householdId, refetchDashboard]);
+    }
+    return merged;
+  }, [activePoll, historyPolls]);
 
-  const data = (dashboardQuery.data ?? null) as DashboardResponse | null;
+  const visibleAllPolls = useMemo(
+    () => allPolls.slice(0, allPollsVisibleCount),
+    [allPolls, allPollsVisibleCount]
+  );
 
-  const pollsOpen = data?.polls_open ?? [];
-  const pollsClosed = data?.polls_closed ?? [];
-  const allPolls = data?.polls ?? [];
-  const favoriteRecipes = data?.favorite_recipes ?? [];
+  const favoriteRecipes = useMemo(() => {
+    if (allPolls.length === 0) {
+      return EMPTY_FAVORITE_RECIPES;
+    }
+    return buildFavoriteRecipesFromPolls(allPolls, 20);
+  }, [allPolls]);
+
+  const screenError = activePollQuery.error || pollHistoryQuery.error;
+
+  useEffect(() => {
+    if (!screenError) {
+      return;
+    }
+    const error = screenError as { message?: string } | null;
+    const message = error?.message || "Impossible de charger les sondages.";
+    console.error("Dashboard sondages:", message);
+  }, [screenError]);
+
   const compactCardBackground = colorScheme === "dark" ? `${theme.icon}22` : theme.background;
+  const sectionCardStyle = useMemo(
+    () => [styles.sectionCard, { backgroundColor: theme.card, borderColor: theme.icon }],
+    [theme.card, theme.icon]
+  );
+  const pollCardStyle = useMemo(
+    () => [styles.pollCard, { borderColor: `${theme.icon}88`, backgroundColor: compactCardBackground }],
+    [compactCardBackground, theme.icon]
+  );
+  const favoriteRowStyle = useMemo(
+    () => [styles.favoriteRow, { borderColor: `${theme.icon}88`, backgroundColor: compactCardBackground }],
+    [compactCardBackground, theme.icon]
+  );
 
-  const renderSectionHeader = (
+  const onBackPress = useCallback(() => {
+    router.replace("/dashboard");
+  }, [router]);
+  const onToggleOpenPoll = useCallback(() => setOpenOpenPoll((prev) => !prev), []);
+  const onToggleAllPolls = useCallback(() => {
+    setOpenAllPolls((prev) => {
+      const next = !prev;
+      if (next) {
+        setAllPollsVisibleCount(INITIAL_ALL_POLLS_VISIBLE);
+      }
+      return next;
+    });
+  }, []);
+  const onToggleFavoriteRecipes = useCallback(() => setOpenFavoriteRecipes((prev) => !prev), []);
+
+  const canLoadMoreAllPolls =
+    allPollsVisibleCount < allPolls.length || hasNextPollHistoryPage;
+
+  const onLoadMoreAllPolls = useCallback(() => {
+    if (allPollsVisibleCount < allPolls.length) {
+      setAllPollsVisibleCount((prev) => prev + INITIAL_ALL_POLLS_VISIBLE);
+      return;
+    }
+
+    if (!hasNextPollHistoryPage || isFetchingNextPollHistoryPage) {
+      return;
+    }
+
+    void fetchNextPollHistoryPage();
+  }, [
+    allPolls.length,
+    allPollsVisibleCount,
+    fetchNextPollHistoryPage,
+    hasNextPollHistoryPage,
+    isFetchingNextPollHistoryPage,
+  ]);
+
+  const renderSectionHeader = useCallback((
     title: string,
-    hasContent: boolean,
     opened: boolean,
-    onToggle: () => void
+    onToggle: () => void,
+    expandable = true
   ) => {
-    if (!hasContent) {
+    if (!expandable) {
       return <Text style={[styles.sectionTitle, { color: theme.text }]}>{title}</Text>;
     }
 
@@ -183,10 +245,10 @@ export default function DashboardPollsScreen() {
         />
       </TouchableOpacity>
     );
-  };
+  }, [theme.text, theme.textSecondary]);
 
-  const renderPollCard = (poll: DashboardPoll, showOptions: boolean) => (
-    <View key={`poll-${poll.id}`} style={[styles.pollCard, { borderColor: `${theme.icon}88`, backgroundColor: compactCardBackground }]}>
+  const renderPollCard = useCallback((poll: DashboardPoll) => (
+    <View key={`poll-${poll.id}`} style={pollCardStyle}>
       <View style={styles.pollTitleRow}>
         <Text style={[styles.pollTitle, { color: theme.text }]} numberOfLines={2}>
           {poll.title || `Sondage #${poll.id}`}
@@ -201,40 +263,72 @@ export default function DashboardPollsScreen() {
       </Text>
       <Text style={[styles.pollMeta, { color: theme.textSecondary }]}>Votes totaux {poll.total_votes}</Text>
 
-      {showOptions ? (
-        <View style={styles.pollDetailsWrap}>
-          {Array.isArray(poll.options) && poll.options.length > 0 ? (
-            poll.options.map((option) => (
-              <View key={`poll-${poll.id}-opt-${option.id}`} style={styles.optionRow}>
-                <Text style={[styles.optionTitle, { color: theme.text }]} numberOfLines={1}>
-                  {option.title}
-                </Text>
-                <Text style={[styles.optionVotes, { color: theme.textSecondary }]}>{option.votes_count} vote(s)</Text>
+      <View style={styles.pollDetailsWrap}>
+        {poll.options.length > 0 ? (
+          poll.options.map((option) => (
+            <View key={`poll-${poll.id}-opt-${option.id}`} style={styles.optionRow}>
+              <Text style={[styles.optionTitle, { color: theme.text }]} numberOfLines={1}>
+                {option.title}
+              </Text>
+              <Text style={[styles.optionVotes, { color: theme.textSecondary }]}>{option.votes_count} vote(s)</Text>
+            </View>
+          ))
+        ) : (
+          <Text style={[styles.emptyText, { color: theme.textSecondary }]}>Aucune option.</Text>
+        )}
+
+        <View style={[styles.votersWrap, { borderTopColor: `${theme.icon}88` }]}>
+          <Text style={[styles.votersTitle, { color: theme.text }]}>Votes par membre</Text>
+          {poll.voters_summary.length > 0 ? (
+            poll.voters_summary.map((voter) => (
+              <View key={`poll-${poll.id}-voter-${voter.user_id}`} style={styles.voterRow}>
+                <Text style={{ color: theme.text }}>{voter.name}</Text>
+                <Text style={{ color: theme.textSecondary }}>{voter.votes_count}</Text>
               </View>
             ))
           ) : (
-            <Text style={[styles.emptyText, { color: theme.textSecondary }]}>Aucune option.</Text>
+            <Text style={[styles.emptyText, { color: theme.textSecondary }]}>Aucun vote.</Text>
           )}
-
-          <View style={[styles.votersWrap, { borderTopColor: `${theme.icon}88` }]}>
-            <Text style={[styles.votersTitle, { color: theme.text }]}>Votes par membre</Text>
-            {Array.isArray(poll.voters_summary) && poll.voters_summary.length > 0 ? (
-              poll.voters_summary.map((voter) => (
-                <View key={`poll-${poll.id}-voter-${voter.user_id}`} style={styles.voterRow}>
-                  <Text style={{ color: theme.text }}>{voter.name}</Text>
-                  <Text style={{ color: theme.textSecondary }}>{voter.votes_count}</Text>
-                </View>
-              ))
-            ) : (
-              <Text style={[styles.emptyText, { color: theme.textSecondary }]}>Aucun vote.</Text>
-            )}
-          </View>
         </View>
-      ) : null}
+      </View>
     </View>
-  );
+  ), [pollCardStyle, theme.icon, theme.text, theme.textSecondary]);
 
-  if (dashboardQuery.isPending && !data) {
+  const openPollCards = useMemo(() => {
+    if (!openOpenPoll) {
+      return null;
+    }
+    return openPolls.map((poll) => renderPollCard(poll));
+  }, [openOpenPoll, openPolls, renderPollCard]);
+
+  const allPollCards = useMemo(() => {
+    if (!openAllPolls) {
+      return null;
+    }
+    return visibleAllPolls.map((poll) => renderPollCard(poll));
+  }, [openAllPolls, renderPollCard, visibleAllPolls]);
+
+  const favoriteRecipeCards = useMemo(() => {
+    if (!openFavoriteRecipes) {
+      return null;
+    }
+
+    return favoriteRecipes.map((recipe, index) => (
+      <View key={`fav-${recipe.recipe_id}`} style={favoriteRowStyle}>
+        <Text style={[styles.favoriteRank, { color: theme.tint }]}>{index + 1}.</Text>
+        <View style={styles.favoriteTextWrap}>
+          <Text style={[styles.favoriteTitle, { color: theme.text }]} numberOfLines={1}>
+            {recipe.title}
+          </Text>
+          <Text style={[styles.favoriteMeta, { color: theme.textSecondary }]}>
+            {recipe.votes_count} vote(s) sur {recipe.polls_count} sondage(s)
+          </Text>
+        </View>
+      </View>
+    ));
+  }, [favoriteRecipes, favoriteRowStyle, openFavoriteRecipes, theme.text, theme.textSecondary, theme.tint]);
+
+  if (activePollQuery.isPending && !activePoll) {
     return (
       <View style={[styles.center, { backgroundColor: theme.background }]}>
         <ActivityIndicator size="large" color={theme.tint} />
@@ -246,63 +340,58 @@ export default function DashboardPollsScreen() {
     <View style={[styles.container, { backgroundColor: theme.background }]}>
       <Stack.Screen options={{ headerShown: false }} />
 
-      <View style={[styles.header, { borderBottomColor: theme.icon, paddingTop: Math.max(insets.top, 12) }]}>
-        <TouchableOpacity activeOpacity={0.7} onPress={() => router.replace("/dashboard")} style={[styles.backBtn, { borderColor: theme.icon }]}>
-          <MaterialCommunityIcons name="arrow-left" size={20} color={theme.tint} />
-        </TouchableOpacity>
-        <Text style={[styles.headerTitle, { color: theme.text }]}>Sondages</Text>
-      </View>
+      <ScreenHeader
+        title="Sondages"
+        withBackButton
+        onBackPress={onBackPress}
+        safeTop
+        showBorder
+      />
 
       <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
-        <View style={[styles.sectionCard, { backgroundColor: theme.card, borderColor: theme.icon }]}>
-          {renderSectionHeader("Sondages ouverts", pollsOpen.length > 0, openOpenPolls, () =>
-            setOpenOpenPolls((prev) => !prev)
-          )}
-          {pollsOpen.length > 0 ? openOpenPolls ? pollsOpen.map((poll) => renderPollCard(poll, false)) : null : (
+        <View style={sectionCardStyle}>
+          {renderSectionHeader("Sondage ouvert", openOpenPoll, onToggleOpenPoll, openPolls.length > 0)}
+          {openPolls.length > 0 ? openPollCards : (
             <Text style={[styles.emptyText, { color: theme.textSecondary }]}>Aucun sondage ouvert.</Text>
           )}
         </View>
 
-        <View style={[styles.sectionCard, { backgroundColor: theme.card, borderColor: theme.icon }]}>
-          {renderSectionHeader("Sondages clôturés", pollsClosed.length > 0, openClosedPolls, () =>
-            setOpenClosedPolls((prev) => !prev)
-          )}
-          {pollsClosed.length > 0 ? openClosedPolls ? pollsClosed.map((poll) => renderPollCard(poll, false)) : null : (
-            <Text style={[styles.emptyText, { color: theme.textSecondary }]}>Aucun sondage cloturé.</Text>
-          )}
-        </View>
-
-        <View style={[styles.sectionCard, { backgroundColor: theme.card, borderColor: theme.icon }]}>
-          {renderSectionHeader("Tous les sondages et votes", allPolls.length > 0, openAllPolls, () =>
-            setOpenAllPolls((prev) => !prev)
-          )}
-          {allPolls.length > 0 ? openAllPolls ? allPolls.map((poll) => renderPollCard(poll, true)) : null : (
+        <View style={sectionCardStyle}>
+          {renderSectionHeader("Tous les sondages et votes", openAllPolls, onToggleAllPolls)}
+          {allPolls.length > 0 ? allPollCards : openAllPolls && pollHistoryQuery.isPending ? (
+            <View style={styles.inlineLoader}>
+              <ActivityIndicator size="small" color={theme.tint} />
+            </View>
+          ) : (
             <Text style={[styles.emptyText, { color: theme.textSecondary }]}>Aucun sondage.</Text>
           )}
+          {openAllPolls && canLoadMoreAllPolls ? (
+            <TouchableOpacity
+              style={[styles.loadMoreButton, { borderColor: theme.icon }]}
+              onPress={onLoadMoreAllPolls}
+              activeOpacity={0.8}
+              disabled={isFetchingNextPollHistoryPage}
+            >
+              {isFetchingNextPollHistoryPage ? (
+                <ActivityIndicator size="small" color={theme.tint} />
+              ) : (
+                <Text style={[styles.loadMoreText, { color: theme.text }]}>Charger plus</Text>
+              )}
+            </TouchableOpacity>
+          ) : null}
         </View>
 
-        <View style={[styles.sectionCard, { backgroundColor: theme.card, borderColor: theme.icon }]}>
-          {renderSectionHeader("Recettes preferées des sondages", favoriteRecipes.length > 0, openFavoriteRecipes, () =>
-            setOpenFavoriteRecipes((prev) => !prev)
+        <View style={sectionCardStyle}>
+          {renderSectionHeader(
+            "Recettes préférées des sondages",
+            openFavoriteRecipes,
+            onToggleFavoriteRecipes
           )}
-          {favoriteRecipes.length > 0 ? openFavoriteRecipes ? (
-            favoriteRecipes.map((recipe, index) => (
-              <View
-                key={`fav-${recipe.recipe_id}`}
-                style={[styles.favoriteRow, { borderColor: `${theme.icon}88`, backgroundColor: compactCardBackground }]}
-              >
-                <Text style={[styles.favoriteRank, { color: theme.tint }]}>{index + 1}.</Text>
-                <View style={styles.favoriteTextWrap}>
-                  <Text style={[styles.favoriteTitle, { color: theme.text }]} numberOfLines={1}>
-                    {recipe.title}
-                  </Text>
-                  <Text style={[styles.favoriteMeta, { color: theme.textSecondary }]}>
-                    {recipe.votes_count} vote(s) sur {recipe.polls_count} sondage(s)
-                  </Text>
-                </View>
-              </View>
-            ))
-          ) : null : (
+          {favoriteRecipes.length > 0 ? favoriteRecipeCards : openFavoriteRecipes && pollHistoryQuery.isPending ? (
+            <View style={styles.inlineLoader}>
+              <ActivityIndicator size="small" color={theme.tint} />
+            </View>
+          ) : (
             <Text style={[styles.emptyText, { color: theme.textSecondary }]}>Aucune recette n&apos;a reçu de vote.</Text>
           )}
         </View>
@@ -318,25 +407,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   container: { flex: 1 },
-  header: {
-    minHeight: 60,
-    paddingHorizontal: 20,
-    paddingVertical: 8,
-    borderBottomWidth: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-  },
-  backBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    borderWidth: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    marginTop: 2,
-  },
-  headerTitle: { fontSize: 18, fontWeight: "700" },
   content: { padding: 16, paddingBottom: 40, gap: 12 },
   sectionCard: { borderRadius: 14, padding: 12, borderWidth: 1 },
   sectionTitle: { fontSize: 15, fontWeight: "700", marginBottom: 8 },
@@ -373,6 +443,23 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
   emptyText: { fontSize: 13 },
+  loadMoreButton: {
+    marginTop: 10,
+    borderWidth: 1,
+    borderRadius: 10,
+    height: 40,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  loadMoreText: {
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  inlineLoader: {
+    marginTop: 10,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   favoriteRow: {
     flexDirection: "row",
     alignItems: "center",
