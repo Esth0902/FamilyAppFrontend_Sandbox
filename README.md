@@ -1,65 +1,175 @@
-# Welcome to your Expo app 👋
+﻿# Family App Frontend
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+Application mobile nommée provisoirement **Family Flow** développée avec **Expo / React Native**.
 
-## Get started
+Ce projet consomme l’API Laravel du backend pour proposer une expérience mobile complète autour de la vie d’un foyer : tableau de bord, tâches, calendrier, budget, repas, recettes, listes de courses et notifications.
 
-1. Install dependencies
+---
 
-   ```bash
-   npm install
-   ```
+## À propos
 
-2. Start the app
+**Family App Frontend** est la partie mobile du projet.
 
-   ```bash
-   npx expo start
-   ```
+Objectifs principaux :
 
-## Configuration API (local / en ligne)
+- offrir une interface mobile claire et rapide pour les parents et les enfants ;
+- respecter le contexte de foyer actif (multi-foyer) ;
+- refléter les règles métier exposées par l’API ;
+- fournir une base maintenable et testable pour les évolutions du TFE.
 
-1. Créer `frontend/.env` à partir de `frontend/.env.example`.
-2. Renseigner les URLs locales et en ligne.
-3. Démarrer en mode local ou en ligne :
+L’application est pensée dans une logique **mobile-first** avec navigation typée via Expo Router.
 
-   ```bash
-   npm run start:local
-   npm run start:online
-   ```
+---
 
-Le mode actif est piloté par `EXPO_PUBLIC_API_MODE` et résout automatiquement :
-- `EXPO_PUBLIC_API_URL_LOCAL` / `EXPO_PUBLIC_API_URL_ONLINE`
-- `EXPO_PUBLIC_REVERB_*_LOCAL` / `EXPO_PUBLIC_REVERB_*_ONLINE` (si définis)
+## Stack technique
 
-In the output, you'll find options to open the app in a
+- **TypeScript**
+- **React Native 0.81**
+- **Expo SDK 54**
+- **Expo Router**
+- **TanStack React Query**
+- **Zustand**
+- **Jest + Testing Library**
+- **Maestro** (smoke e2e)
+- **Pusher JS (Reverb compatible)** pour le temps réel
 
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
+---
 
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
+## Architecture du projet
 
-## Get a fresh project
+### Structure principale
 
-When you're ready, run:
+- `app/` : routes Expo Router (auth, tabs, écrans applicatifs)
+- `src/features/` : logique par domaine métier (`tasks`, `budget`, `calendar`, `meals`, etc.)
+- `src/services/` : accès API par module
+- `src/api/client.ts` : client HTTP partagé, gestion erreurs + token + `X-Household-Id`
+- `src/store/` : état global (auth/session)
+- `src/realtime/` : abonnement aux canaux temps réel (foyer/utilisateur)
+- `tests/` : tests unitaires et d’intégration front
+
+### Principes de structuration
+
+- les écrans restent focalisés sur l’UI et la composition ;
+- la logique métier front est regroupée par feature ;
+- les appels réseau passent par des services dédiés ;
+- les états serveur sont gérés via React Query ;
+- les états client persistants transitent par le store session/auth.
+
+---
+
+## Configuration API (local / online)
+
+Créer le fichier `.env` à partir de `.env.example` :
 
 ```bash
-npm run reset-project
+cp .env.example .env
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+Variables publiques principales :
 
-## Learn more
+- `EXPO_PUBLIC_API_MODE` (`local` ou `online`)
+- `EXPO_PUBLIC_API_URL_LOCAL`
+- `EXPO_PUBLIC_API_URL_ONLINE`
+- `EXPO_PUBLIC_REVERB_HOST_LOCAL` / `EXPO_PUBLIC_REVERB_HOST_ONLINE`
+- `EXPO_PUBLIC_REVERB_PORT_LOCAL` / `EXPO_PUBLIC_REVERB_PORT_ONLINE`
+- `EXPO_PUBLIC_REVERB_SCHEME_LOCAL` / `EXPO_PUBLIC_REVERB_SCHEME_ONLINE`
+- `EXPO_PUBLIC_REVERB_KEY_LOCAL` / `EXPO_PUBLIC_REVERB_KEY_ONLINE`
+- `EXPO_PUBLIC_PUSHER_APP_CLUSTER`
 
-To learn more about developing your project with Expo, look at the following resources:
+Le mode actif détermine automatiquement quelle URL API et quels paramètres realtime sont utilisés.
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+---
 
-## Join the community
+## Installation
 
-Join our community of developers creating universal apps.
+Depuis `frontend/` :
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+```bash
+npm install
+```
+
+---
+
+## Lancement en local
+
+### Démarrage standard
+
+```bash
+npm run start
+```
+
+### Démarrage avec mode explicite
+
+```bash
+npm run start:local
+npm run start:online
+```
+
+### Plateformes
+
+```bash
+npm run android
+npm run ios
+npm run web
+```
+
+---
+
+## Qualité et tests
+
+### Vérifications qualité
+
+```bash
+npm run typecheck
+npm run lint
+npm run quality:check
+```
+
+### Tests
+
+```bash
+npm run test
+npm run test:unit
+npm run test:legacy
+npm run test:e2e:smoke
+```
+
+---
+
+## Domaines couverts côté frontend
+
+Le frontend expose actuellement des écrans et flux pour :
+
+- **Auth / Session**
+- **Home / Dashboard**
+- **Household Setup**
+- **Tasks**
+- **Calendar**
+- **Budget**
+- **Meals / Polls**
+- **Recipes**
+- **Shopping List**
+- **Notifications**
+
+---
+
+## Temps réel
+
+Les mises à jour temps réel s’appuient sur des canaux privés :
+
+- foyer (`private-household.{householdId}`)
+- utilisateur (`private-App.Models.User.{userId}`)
+
+Le token d’authentification est injecté côté client pour autoriser les abonnements.
+
+---
+
+## État actuel du projet
+
+Le frontend est organisé pour rester aligné avec l’API backend et les contraintes métier (rôles parent/enfant, contexte de foyer actif, modules fonctionnels).
+
+Axes de consolidation en continu :
+
+- homogénéisation UI sur certains écrans ;
+- réduction des styles inline signalés par le lint ;
+- extension de la couverture de tests sur les parcours critiques.
