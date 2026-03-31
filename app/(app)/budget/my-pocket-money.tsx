@@ -80,7 +80,7 @@ export default function BudgetMyPocketMoneyScreen() {
 
   return (
     <ScrollView stickyHeaderIndices={[0]} style={[styles.container, { backgroundColor: theme.background }]} contentContainerStyle={styles.content}>
-      <View style={{ backgroundColor: theme.background, paddingHorizontal: 16, zIndex: 20, elevation: 20 }}>
+      <View style={{ paddingHorizontal: 16, zIndex: 20, elevation: 20 }}>
         <ScreenHeader
           title="Mon argent de poche"
           subtitle="Résumé de ma période en cours"

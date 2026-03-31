@@ -985,8 +985,12 @@ export function useSetupHouseholdScreen() {
       router.replace(scopedBackRoute);
       return;
     }
+    if (isEditMode || alreadyConfigured) {
+      router.replace("/(app)/(tabs)/home");
+      return;
+    }
     router.back();
-  }, [router, scopedBackRoute]);
+  }, [alreadyConfigured, isEditMode, router, scopedBackRoute]);
 
   const handleSave = useCallback(async () => {
     // 1. Si on est sur l'écran final de partage des accès et qu'on clique sur Terminer

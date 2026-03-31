@@ -13,7 +13,7 @@ export function MealRecipesSection({ state }: MealRecipesSectionProps) {
 
   return (
     <View style={[styles.mealSectionBox, { backgroundColor: theme.background }]}>
-      <Text style={[styles.label, { color: theme.text, marginTop: 4 }]}>
+      <Text style={[styles.label, { color: theme.text}]}>
         Portions par défaut du foyer
       </Text>
       <AppTextInput
@@ -71,7 +71,7 @@ export function MealRecipesSection({ state }: MealRecipesSectionProps) {
       )}
 
       <AppTextInput
-        style={[styles.input, styles.inputWithSmallBottomSpacing]}
+        style={[styles.input, styles.inputWithSmallBottomSpacing,]}
         value={form.dietaryTagSearch}
         onChangeText={form.setDietaryTagSearch}
         placeholder="Rechercher un tag..."
@@ -98,7 +98,7 @@ export function MealRecipesSection({ state }: MealRecipesSectionProps) {
                 onPress={() => actions.toggleMealDietaryTag(tag.key)}
                 style={[
                   styles.tagChip,
-                  { borderColor: theme.icon, backgroundColor: theme.card },
+                  { borderColor: theme.icon, backgroundColor: theme.card, marginTop: 4 },
                   isSelected && { borderColor: theme.tint, backgroundColor: `${theme.tint}25` },
                 ]}
               >
@@ -148,18 +148,18 @@ export function MealRecipesSection({ state }: MealRecipesSectionProps) {
 }
 
 const styles = StyleSheet.create({
-  mealSectionBox: { borderRadius: 12, padding: 10, marginBottom: 12 },
+  mealSectionBox: { borderRadius: 12, padding: 10, marginBottom: 8 },
   label: { fontSize: 14, fontWeight: "600", marginBottom: 8 },
-  input: { height: 50, borderRadius: 12, paddingHorizontal: 16, fontSize: 16, marginBottom: 16 },
+  input: { height: 40, borderRadius: 12, paddingHorizontal: 16, fontSize: 16},
   inputNoMargin: { marginBottom: 0 },
-  inputWithSmallBottomSpacing: { marginBottom: 10 },
-  categoryFilterWrap: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 10 },
+  inputWithSmallBottomSpacing: { marginBottom: 0 },
+  categoryFilterWrap: { flexDirection: "row", flexWrap: "wrap", gap: 4, marginBottom: 10 },
   categoryFilterChip: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 7 },
   selectedHint: { fontSize: 12 },
   selectedValues: { fontSize: 13, fontWeight: "600", marginTop: 2 },
-  tagsLoadingRow: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 4 },
-  tagsWrap: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  tagChip: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8, minWidth: 120 },
+  tagsLoadingRow: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 4 },
+  tagsWrap: { flexDirection: "row", flexWrap: "wrap", gap: 4 },
+  tagChip: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 5, minWidth: 80 },
   tagChipText: { fontSize: 13, fontWeight: "700" },
   tagChipType: { fontSize: 11, marginTop: 2 },
   createTagBox: { borderWidth: 1, borderRadius: 12, padding: 10, marginTop: 12 },

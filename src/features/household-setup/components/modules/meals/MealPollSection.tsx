@@ -88,8 +88,8 @@ const styles = StyleSheet.create({
   label: { fontSize: 14, fontWeight: "600", marginBottom: 8 },
   daysContainer: { flexDirection: "row", justifyContent: "space-between", marginBottom: 8 },
   dayChip: { width: 40, height: 40, borderRadius: 20, justifyContent: "center", alignItems: "center", borderWidth: 1 },
-  input: { height: 50, borderRadius: 12, paddingHorizontal: 16, fontSize: 16, marginBottom: 16 },
+  input: { height: 40, borderRadius: 12, paddingHorizontal: 16, fontSize: 16, marginBottom: 16 },
   inputNoMargin: { marginBottom: 0 },
   inputCentered: { textAlign: "center" },
-  durationBtn: { flex: 1, height: 42, borderRadius: 10, justifyContent: "center", alignItems: "center" },
+  durationBtn: { flex: 1, height: 50, borderRadius: 10, justifyContent: "center", alignItems: "center" },
 });
