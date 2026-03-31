@@ -51,7 +51,7 @@ export function Chip({
   const toneStyles = resolveTone(tone, theme);
   const containerStyle = [
     styles.chip,
-    { backgroundColor: toneStyles.backgroundColor },
+
     selected ? { borderColor: toneStyles.color, borderWidth: 1 } : null,
     style,
   ];
@@ -76,16 +76,12 @@ export function Chip({
 
 const styles = StyleSheet.create({
   chip: {
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    alignSelf: "flex-start",
+    alignSelf: "center",
     flexDirection: "row",
     alignItems: "center",
-    gap: 4,
   },
   label: {
-    fontSize: 11,
+    fontSize: 14,
     fontWeight: "700",
   },
 });

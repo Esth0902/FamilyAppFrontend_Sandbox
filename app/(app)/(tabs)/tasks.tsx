@@ -189,11 +189,11 @@ export default function TasksTabScreen() {
             </AppCard>
             <AppCard pressable={false} style={[styles.statCard, statCardStyle]} contentStyle={styles.statCardContent}>
               <Text style={[styles.statValue, { color: theme.text }]}>{stats.done}</Text>
-              <Chip label="Réalisées" tone="info" />
+              <Chip label="Réalisées" tone="neutral"  />
             </AppCard>
             <AppCard pressable={false} style={[styles.statCard, statCardStyle]} contentStyle={styles.statCardContent}>
               <Text style={[styles.statValue, { color: theme.text }]}>{stats.validated}</Text>
-              <Chip label="Validées" tone="success" />
+              <Chip label="Validées" tone="info"  />
             </AppCard>
           </View>
 
@@ -253,7 +253,7 @@ const styles = StyleSheet.create({
   statCard: {
     flex: 1,
     borderRadius: 12,
-    minHeight: 94,
+    minHeight: 80,
   },
   statCardContent: {
     flexDirection: "column",

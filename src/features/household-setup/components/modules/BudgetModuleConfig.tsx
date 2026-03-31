@@ -44,7 +44,7 @@ export function BudgetModuleConfig({ state }: BudgetModuleConfigProps) {
 }
 
 const styles = StyleSheet.create({
-  subConfigBox: { paddingHorizontal: 12, paddingBottom: 12, paddingTop: 2 },
+  subConfigBox: { paddingHorizontal: 12, paddingBottom: 5, paddingTop: 2 },
   label: { fontSize: 14, fontWeight: "600", marginBottom: 8 },
   memberMeta: { fontSize: 11, color: "gray" },
 });

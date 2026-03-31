@@ -18,7 +18,7 @@ export function BudgetChildCard({ state, draft }: BudgetChildCardProps) {
       style={[styles.budgetChildCard, { backgroundColor: theme.background, borderColor: theme.icon }]}
     >
       <Text style={[styles.memberName, { color: theme.text }]}>{draft.childName}</Text>
-      <Text style={[styles.label, { color: theme.text, marginBottom: 4 }]}>Montant de base</Text>
+      <Text style={[styles.label, { color: theme.text }]}>Montant de base</Text>
       <AppTextInput
         style={styles.budgetCompactInput}
         keyboardType="decimal-pad"
@@ -27,7 +27,7 @@ export function BudgetChildCard({ state, draft }: BudgetChildCardProps) {
         placeholder="Ex: 12,00"
         placeholderTextColor={theme.textSecondary}
       />
-      <Text style={[styles.label, { color: theme.text, marginBottom: 4 }]}>Récurrence</Text>
+      <Text style={[styles.label, { color: theme.text }]}>Récurrence</Text>
       <View style={styles.budgetRecurrenceRow}>
         <AppButton
           onPress={() => actions.updateBudgetChildDraft(draft.childId, { recurrence: "weekly" })}
@@ -56,7 +56,7 @@ export function BudgetChildCard({ state, draft }: BudgetChildCardProps) {
           </Text>
         </AppButton>
       </View>
-      <Text style={[styles.label, { color: theme.text, marginBottom: 4 }]}>Jour de réinitialisation</Text>
+      <Text style={[styles.label, { color: theme.text }]}>Jour de réinitialisation</Text>
       <AppTextInput
         style={styles.budgetCompactInput}
         keyboardType="number-pad"
@@ -66,23 +66,26 @@ export function BudgetChildCard({ state, draft }: BudgetChildCardProps) {
         placeholderTextColor={theme.textSecondary}
       />
       <View style={styles.switchRow}>
-        <Text style={[styles.label, { color: theme.text, marginBottom: 0 }]}>Autoriser les avances</Text>
+        <Text style={[styles.label, { color: theme.text }]}>Autoriser les avances</Text>
         <Switch
           value={draft.allowAdvances}
           onValueChange={(value) => actions.updateBudgetChildDraft(draft.childId, { allowAdvances: value })}
           trackColor={{ false: theme.icon, true: theme.tint }}
         />
       </View>
-      <Text style={[styles.label, { color: theme.text, marginBottom: 4 }]}>Plafond d&apos;avance</Text>
-      <AppTextInput
-        style={styles.budgetCompactInput}
-        keyboardType="decimal-pad"
-        value={draft.maxAdvanceInput}
-        onChangeText={(value) => actions.updateBudgetChildDraft(draft.childId, { maxAdvanceInput: value })}
-        placeholder="Ex: 20,00"
-        placeholderTextColor={theme.textSecondary}
-        editable={draft.allowAdvances}
-      />
+      {draft.allowAdvances ? (
+        <>
+          <Text style={[styles.label, { color: theme.text }]}>Plafond d&apos;avance</Text>
+          <AppTextInput
+            style={styles.budgetCompactInput}
+            keyboardType="decimal-pad"
+            value={draft.maxAdvanceInput}
+            onChangeText={(value) => actions.updateBudgetChildDraft(draft.childId, { maxAdvanceInput: value })}
+            placeholder="Ex: 20,00"
+            placeholderTextColor={theme.textSecondary}
+          />
+        </>
+      ) : null}
       <AppButton
         onPress={() => {
           void actions.saveBudgetChildDraft(draft);
@@ -104,33 +107,29 @@ export function BudgetChildCard({ state, draft }: BudgetChildCardProps) {
 }
 
 const styles = StyleSheet.create({
-  label: { fontSize: 14, fontWeight: "600", marginBottom: 8 },
+  label: { fontSize: 14, fontWeight: "600", marginBottom: 8, marginTop: 8 },
   switchRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginBottom: 8,
+
   },
   budgetChildCard: { borderWidth: 1, borderRadius: 12, padding: 8 },
-  memberName: { fontSize: 14, fontWeight: "700" },
+  memberName: { fontSize: 14, fontWeight: "700", paddingBottom: 6 },
   budgetCompactInput: {
-    height: 42,
-    borderRadius: 10,
-    borderWidth: 1,
     paddingHorizontal: 12,
-    marginBottom: 6,
     fontSize: 14,
   },
   budgetRecurrenceRow: { flexDirection: "row", gap: 8, marginBottom: 6 },
   budgetChoiceBtn: {
     flex: 1,
-    minHeight: 36,
+    minHeight: 45,
     borderRadius: 10,
     borderWidth: 1,
     alignItems: "center",
     justifyContent: "center",
   },
-  budgetChoiceText: { fontSize: 12, fontWeight: "700" },
-  budgetSaveBtn: { minHeight: 38, borderRadius: 10, alignItems: "center", justifyContent: "center" },
-  budgetSaveBtnText: { color: "white", fontSize: 13, fontWeight: "700" },
+  budgetChoiceText: { fontSize: 14, fontWeight: "700" },
+  budgetSaveBtn: { minHeight: 38, borderRadius: 10, alignItems: "center", justifyContent: "center", marginTop: 12 },
+  budgetSaveBtnText: { color: "white", fontSize: 15, fontWeight: "700" },
 });
