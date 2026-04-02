@@ -60,20 +60,6 @@ export default function BudgetTabScreen() {
     () => (board?.pending_advance_requests ?? []).length,
     [board?.pending_advance_requests]
   );
-  const childAdvancePending = useMemo(
-    () =>
-      (myBudget?.transactions ?? []).filter(
-        (tx) => tx.type === "advance" && tx.status === "pending" && (tx.request_kind ?? "advance") === "advance"
-      ).length,
-    [myBudget?.transactions]
-  );
-  const childReimbursementPending = useMemo(
-    () =>
-      (myBudget?.transactions ?? []).filter(
-        (tx) => tx.type === "advance" && tx.status === "pending" && tx.request_kind === "reimbursement"
-      ).length,
-    [myBudget?.transactions]
-  );
   const childExpectedAmount = useMemo(() => (myBudget ? computePaymentBreakdown(myBudget).remainingToPay : 0), [myBudget]);
 
   const cardThemeStyle = useMemo(
@@ -117,8 +103,6 @@ export default function BudgetTabScreen() {
         id: "child-overview",
         title: "Mon argent de poche",
         description: `À recevoir : ${formatMoney(childExpectedAmount, currency)}`,
-        chipLabel: formatMoney(childExpectedAmount, currency),
-        chipTone: "info",
         icon: "wallet-outline",
         color: colorScheme === "dark" ? "#4DABFF" : theme.tint,
         route: "/budget/my-pocket-money",
@@ -126,9 +110,7 @@ export default function BudgetTabScreen() {
       {
         id: "child-advance",
         title: "Demande d'avance",
-        description: childAdvancePending > 0 ? `${childAdvancePending} demande(s) en attente` : "Créer une nouvelle demande",
-        chipLabel: childAdvancePending > 0 ? `${childAdvancePending} en attente` : "Nouvelle",
-        chipTone: childAdvancePending > 0 ? "warning" : "success",
+        description: "Créer une nouvelle demande",
         icon: "cash-plus",
         color: theme.accentWarm,
         route: "/budget/request-advance",
@@ -136,18 +118,14 @@ export default function BudgetTabScreen() {
       {
         id: "child-reimbursement",
         title: "Demande de remboursement",
-        description: childReimbursementPending > 0 ? `${childReimbursementPending} demande(s) en attente` : "Montant + justification",
-        chipLabel: childReimbursementPending > 0 ? `${childReimbursementPending} en attente` : "Nouveau",
-        chipTone: childReimbursementPending > 0 ? "warning" : "success",
+        description: "Montant + justification",
         icon: "receipt-text-check-outline",
         color: theme.accentCool,
         route: "/budget/request-reimbursement",
       },
     ],
     [
-      childAdvancePending,
       childExpectedAmount,
-      childReimbursementPending,
       colorScheme,
       currency,
       theme.accentCool,

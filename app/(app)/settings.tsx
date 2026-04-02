@@ -1,5 +1,15 @@
 import React from "react";
-import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View, useColorScheme } from "react-native";
+import {
+    ActivityIndicator,
+    KeyboardAvoidingView,
+    Platform,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
+    useColorScheme,
+} from "react-native";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { Colors } from "@/constants/theme";
 
@@ -23,12 +33,19 @@ export default function SettingsScreen() {
     }
 
     return (
-        <ScrollView
-            keyboardShouldPersistTaps="handled"
-            stickyHeaderIndices={[0]}
+        <KeyboardAvoidingView
+            behavior={Platform.OS === "ios" ? "padding" : "height"}
+            keyboardVerticalOffset={Platform.OS === "ios" ? 8 : 0}
             style={[styles.container, { backgroundColor: theme.background }]}
-            contentContainerStyle={styles.scrollContent}
         >
+            <ScrollView
+                keyboardShouldPersistTaps="handled"
+                keyboardDismissMode="on-drag"
+                automaticallyAdjustKeyboardInsets={Platform.OS === "ios"}
+                stickyHeaderIndices={[0]}
+                style={[styles.container, { backgroundColor: theme.background }]}
+                contentContainerStyle={styles.scrollContent}
+            >
             <View style={{ backgroundColor: theme.background, paddingHorizontal: 12, zIndex: 20, elevation: 20 }}>
                 <ScreenHeader
                     title="Paramètres utilisateur"
@@ -225,7 +242,8 @@ export default function SettingsScreen() {
                     </View>
                 </View>
             </View>
-        </ScrollView>
+            </ScrollView>
+        </KeyboardAvoidingView>
     );
 }
 

@@ -1,5 +1,5 @@
 import React from "react";
-import { ActivityIndicator, Modal, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { ActivityIndicator, KeyboardAvoidingView, Modal, Platform, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 
 type CalendarReasonModalProps = {
@@ -34,7 +34,11 @@ export function CalendarReasonModal({
 }: CalendarReasonModalProps) {
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <View style={styles.modalBackdrop}>
+      <KeyboardAvoidingView
+        style={styles.modalBackdrop}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        keyboardVerticalOffset={Platform.OS === "ios" ? 8 : 0}
+      >
         <View style={[styles.modalCard, { backgroundColor: colors.card }]}>
           <View style={styles.cardTitleRow}>
             <Text style={[styles.cardTitle, { color: colors.text, marginBottom: 0 }]}>
@@ -85,7 +89,7 @@ export function CalendarReasonModal({
             </TouchableOpacity>
           </View>
         </View>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
     View, Text, StyleSheet, ScrollView, TouchableOpacity,
-    ActivityIndicator, TextInput, Alert, Modal
+    ActivityIndicator, TextInput, Alert, Modal, KeyboardAvoidingView, Platform
 } from 'react-native';
 import { Stack, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -293,7 +293,11 @@ export default function RecipeDetailScreen() {
     };
 
     return (
-        <View style={[styles.container, { backgroundColor: themeColors.background }]}>
+        <KeyboardAvoidingView
+            style={[styles.container, { backgroundColor: themeColors.background }]}
+            behavior={Platform.OS === "ios" ? "padding" : "height"}
+            keyboardVerticalOffset={Platform.OS === "ios" ? 8 : 0}
+        >
             <Stack.Screen options={{ headerShown: false }} />
             <ScreenHeader
                 title={recipe.title}
@@ -316,7 +320,12 @@ export default function RecipeDetailScreen() {
                 }
             />
 
-            <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: insets.bottom + 20 }}>
+            <ScrollView
+                keyboardShouldPersistTaps="handled"
+                keyboardDismissMode="on-drag"
+                automaticallyAdjustKeyboardInsets={Platform.OS === "ios"}
+                contentContainerStyle={{ paddingBottom: insets.bottom + 20 }}
+            >
                 {/* Section Description */}
                 <View style={styles.section}>
                     {isEditing && editForm ? (
@@ -578,7 +587,7 @@ export default function RecipeDetailScreen() {
                     </View>
                 </TouchableOpacity>
             </Modal>
-        </View>
+        </KeyboardAvoidingView>
     );
 }
 

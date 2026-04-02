@@ -1,5 +1,15 @@
 import React from "react";
-import { ActivityIndicator, Modal, ScrollView, Text, TextInput, TouchableOpacity, View } from "react-native";
+import {
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  ScrollView,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from "react-native";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 
 import type { MealType } from "@/src/features/calendar/calendar-types";
@@ -69,7 +79,11 @@ export function CalendarMealPlanEditorModal({
 }: CalendarMealPlanEditorModalProps) {
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <View style={styles.modalBackdrop}>
+      <KeyboardAvoidingView
+        style={styles.modalBackdrop}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        keyboardVerticalOffset={Platform.OS === "ios" ? 8 : 0}
+      >
         <View style={[styles.modalCard, { backgroundColor: colors.card }]}>
           <View style={styles.cardTitleRow}>
             <Text style={[styles.cardTitle, { color: colors.text, marginBottom: 0 }]}>Modifier le repas</Text>
@@ -78,7 +92,13 @@ export function CalendarMealPlanEditorModal({
             </TouchableOpacity>
           </View>
 
-          <ScrollView keyboardShouldPersistTaps="handled" style={styles.modalScroll} contentContainerStyle={styles.modalContent}>
+          <ScrollView
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
+            automaticallyAdjustKeyboardInsets={Platform.OS === "ios"}
+            style={styles.modalScroll}
+            contentContainerStyle={styles.modalContent}
+          >
             <TextInput
               style={[styles.input, { backgroundColor: colors.background, color: colors.text, borderColor: colors.icon }]}
               value={mealPlanDate}
@@ -194,7 +214,7 @@ export function CalendarMealPlanEditorModal({
             </TouchableOpacity>
           </View>
         </View>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }

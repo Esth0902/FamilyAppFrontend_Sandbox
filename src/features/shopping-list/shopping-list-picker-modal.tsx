@@ -1,7 +1,9 @@
 import React from "react";
 import {
   ActivityIndicator,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -61,13 +63,24 @@ export function ShoppingListPickerModal({
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <View style={styles.overlay}>
+      <KeyboardAvoidingView
+        style={styles.overlay}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        keyboardVerticalOffset={Platform.OS === "ios" ? 8 : 0}
+      >
         <TouchableOpacity style={styles.backdrop} onPress={onClose} />
         <View style={[styles.sheet, { backgroundColor: theme.card, borderTopColor: theme.icon }]}>
           <View style={styles.handle} />
           <Text style={[styles.title, { color: theme.text }]}>{title}</Text>
 
-          <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer} showsVerticalScrollIndicator={false}>
+          <ScrollView
+            style={styles.content}
+            contentContainerStyle={styles.contentContainer}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
+            automaticallyAdjustKeyboardInsets={Platform.OS === "ios"}
+          >
             {lists.length > 0 ? (
               <View>
                 <Text style={[styles.label, { color: theme.text }]}>Listes existantes</Text>
@@ -137,7 +150,7 @@ export function ShoppingListPickerModal({
             {extraContent ? <View style={{ marginTop: 14 }}>{extraContent}</View> : null}
           </ScrollView>
 
-          <View style={styles.actionsRow}>
+        <View style={styles.actionsRow}>
             <TouchableOpacity
               onPress={onClose}
               style={[styles.btn, styles.secondaryBtn, { borderColor: theme.icon, backgroundColor: theme.background }]}
@@ -154,7 +167,7 @@ export function ShoppingListPickerModal({
             </TouchableOpacity>
           </View>
         </View>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }

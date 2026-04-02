@@ -1,5 +1,14 @@
 import React from "react";
-import { ActivityIndicator, Modal, ScrollView, Text, TouchableOpacity, View } from "react-native";
+import {
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  ScrollView,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 
 import type {
@@ -147,7 +156,11 @@ export function CalendarCreateEntryModal({
 }: CalendarCreateEntryModalProps) {
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <View style={styles.modalBackdrop}>
+      <KeyboardAvoidingView
+        style={styles.modalBackdrop}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        keyboardVerticalOffset={Platform.OS === "ios" ? 8 : 0}
+      >
         <View style={[styles.modalCard, { backgroundColor: colors.card }]}>
           <View style={styles.cardTitleRow}>
             <Text style={[styles.cardTitle, { color: colors.text, marginBottom: 0 }]}>
@@ -164,7 +177,13 @@ export function CalendarCreateEntryModal({
             </TouchableOpacity>
           </View>
 
-          <ScrollView keyboardShouldPersistTaps="handled" style={styles.modalScroll} contentContainerStyle={styles.modalContent}>
+          <ScrollView
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
+            automaticallyAdjustKeyboardInsets={Platform.OS === "ios"}
+            style={styles.modalScroll}
+            contentContainerStyle={styles.modalContent}
+          >
             {editingEventId === null ? (
               <>
                 <View style={styles.visibilityRow}>
@@ -333,7 +352,7 @@ export function CalendarCreateEntryModal({
             </TouchableOpacity>
           </View>
         </View>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }

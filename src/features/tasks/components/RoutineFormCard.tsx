@@ -271,6 +271,7 @@ export const RoutineFormCard = memo(function RoutineFormCard({
           <Text style={[styles.label, { color: theme.text }]}>Membres concernés</Text>
           <ScrollView
             keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
             horizontal
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.memberRow}
@@ -296,6 +297,7 @@ export const RoutineFormCard = memo(function RoutineFormCard({
           <Text style={[styles.label, { color: theme.text }]}>Attribuer à</Text>
           <ScrollView
             keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
             horizontal
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.memberRow}
