@@ -60,10 +60,6 @@ export default function BudgetRequestAdvanceScreen() {
   });
 
   const onBackPress = useCallback(() => {
-    if (router.canGoBack()) {
-      router.back();
-      return;
-    }
     router.replace("/(app)/(tabs)/budget");
   }, [router]);
 

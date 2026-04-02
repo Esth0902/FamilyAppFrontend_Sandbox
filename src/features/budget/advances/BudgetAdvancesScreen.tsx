@@ -163,12 +163,8 @@ export default function BudgetAdvancesScreen() {
   }
 
   return (
-    <ScrollView
-      stickyHeaderIndices={[0]}
-      style={[styles.container, { backgroundColor: theme.background }]}
-      contentContainerStyle={styles.content}
-    >
-      <View style={{ backgroundColor: theme.background, paddingHorizontal: 16, zIndex: 20, elevation: 20 }}>
+    <View style={[styles.container, { backgroundColor: theme.background }]}>
+      <View style={{ backgroundColor: theme.background, paddingHorizontal: 16 }}>
         <ScreenHeader
           title="Demandes d'avance"
           subtitle="Avances et remboursements enfants"
@@ -182,26 +178,28 @@ export default function BudgetAdvancesScreen() {
         />
       </View>
 
-      <BudgetAdvancesPendingCard
-        theme={theme}
-        pendingRequests={pendingRequests}
-        currency={currency}
-        reviewAmounts={reviewAmounts}
-        reviewComments={reviewComments}
-        saving={saving}
-        onAmountChange={handleAmountChange}
-        onCommentChange={handleCommentChange}
-        onApprove={handleApprove}
-        onReject={handleReject}
-      />
+      <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
+        <BudgetAdvancesPendingCard
+          theme={theme}
+          pendingRequests={pendingRequests}
+          currency={currency}
+          reviewAmounts={reviewAmounts}
+          reviewComments={reviewComments}
+          saving={saving}
+          onAmountChange={handleAmountChange}
+          onCommentChange={handleCommentChange}
+          onApprove={handleApprove}
+          onReject={handleReject}
+        />
 
-      <BudgetAdvancesHistoryCard
-        theme={theme}
-        historyOpen={historyOpen}
-        reviewedHistory={reviewedHistory}
-        currency={currency}
-        onToggleHistory={() => setHistoryOpen((prev) => !prev)}
-      />
-    </ScrollView>
+        <BudgetAdvancesHistoryCard
+          theme={theme}
+          historyOpen={historyOpen}
+          reviewedHistory={reviewedHistory}
+          currency={currency}
+          onToggleHistory={() => setHistoryOpen((prev) => !prev)}
+        />
+      </ScrollView>
+    </View>
   );
 }
