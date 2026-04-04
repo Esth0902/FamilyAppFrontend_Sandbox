@@ -11,7 +11,10 @@
     "ios": {
       "supportsTablet": true,
       "icon": "./assets/images/logo_whiteBG.png",
-      "bundleIdentifier": "com.esther0902.frontend"
+      "bundleIdentifier": "com.esther0902.frontend",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "edgeToEdgeEnabled": true,
@@ -47,6 +50,7 @@
         }
       ],
       "expo-font",
+      "expo-notifications",
       "expo-build-properties"
     ],
     "experiments": {

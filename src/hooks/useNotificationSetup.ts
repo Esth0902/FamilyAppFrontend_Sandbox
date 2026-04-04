@@ -1,12 +1,15 @@
 import Constants from "expo-constants";
+import * as Device from "expo-device";
 import { useRouter } from "expo-router";
 import { useCallback, useEffect, useRef } from "react";
+import { Platform } from "react-native";
 import type { QueryClient } from "@tanstack/react-query";
 
 import { resolveNotificationNavigationTarget, toPositiveInt } from "@/src/notifications/navigation";
 import { queryKeys } from "@/src/query/query-keys";
 import { switchStoredHousehold } from "@/src/session/user-cache";
 import { fetchPendingNotifications } from "@/src/services/homeService";
+import { registerPushToken } from "@/src/services/pushNotificationsService";
 
 type NotificationsModule = typeof import("expo-notifications");
 
@@ -46,11 +49,18 @@ export const useNotificationSetup = ({
   const notificationsModuleRef = useRef<NotificationsModule | null>(null);
   const notifiedNotificationIdsRef = useRef<Set<number>>(new Set());
   const handledNotificationPressIdsRef = useRef<Set<number>>(new Set());
+  const canUseRemotePushRef = useRef(false);
+  const registeredPushTokenRef = useRef<string | null>(null);
 
   const scheduleLocalNotification = useCallback(
     async ({ notificationId, title, body, data = {} }: ScheduleLocalNotificationArgs) => {
       const Notifications = notificationsModuleRef.current;
       if (!Notifications) {
+        return;
+      }
+
+      // Si le push distant est actif, on évite les doublons via push local.
+      if (canUseRemotePushRef.current) {
         return;
       }
 
@@ -79,6 +89,7 @@ export const useNotificationSetup = ({
   useEffect(() => {
     if (!enabled || !token) {
       notificationsModuleRef.current = null;
+      canUseRemotePushRef.current = false;
       return;
     }
 
@@ -143,6 +154,7 @@ export const useNotificationSetup = ({
     const bootstrapNotifications = async () => {
       try {
         let Notifications: NotificationsModule | null = null;
+        canUseRemotePushRef.current = false;
         if (!isExpoGo) {
           Notifications = await loadNotificationsModule();
           Notifications.setNotificationHandler({
@@ -161,6 +173,29 @@ export const useNotificationSetup = ({
               name: "default",
               importance: Notifications.AndroidImportance.DEFAULT,
             });
+
+            if (Device.isDevice) {
+              const easProjectId = Constants.easConfig?.projectId
+                ?? (Constants.expoConfig?.extra as { eas?: { projectId?: string } } | undefined)?.eas?.projectId
+                ?? null;
+              const expoPushToken = easProjectId
+                ? await Notifications.getExpoPushTokenAsync({ projectId: easProjectId })
+                : await Notifications.getExpoPushTokenAsync();
+              const pushTokenValue = String(expoPushToken?.data ?? "").trim();
+
+              if (pushTokenValue.length > 0) {
+                if (registeredPushTokenRef.current !== pushTokenValue) {
+                  await registerPushToken({
+                    token: pushTokenValue,
+                    platform: Platform.OS,
+                    deviceName: Device.deviceName ?? null,
+                  });
+                  registeredPushTokenRef.current = pushTokenValue;
+                }
+
+                canUseRemotePushRef.current = true;
+              }
+            }
           } else {
             Notifications = null;
           }
