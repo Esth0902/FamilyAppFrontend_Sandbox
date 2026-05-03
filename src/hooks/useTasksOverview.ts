@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { queryKeys } from "@/src/query/query-keys";
 import {
   fetchTasksBoardForCurrentWeek,
@@ -15,10 +15,12 @@ type UseTasksOverviewArgs = {
 };
 
 export const useTasksOverview = ({ householdId }: UseTasksOverviewArgs) => {
+  const queryClient = useQueryClient();
   const [plannedWeekStartDay, setPlannedWeekStartDay] = useState<number>(1);
+  const overviewQueryKey = useMemo(() => queryKeys.tasks.overviewCurrentWeek(householdId), [householdId]);
 
   const query = useQuery({
-    queryKey: queryKeys.tasks.overviewCurrentWeek(householdId),
+    queryKey: overviewQueryKey,
     enabled: householdId !== null,
     staleTime: 12_000,
     queryFn: () => fetchTasksBoardForCurrentWeek(plannedWeekStartDay),
@@ -32,8 +34,11 @@ export const useTasksOverview = ({ householdId }: UseTasksOverviewArgs) => {
   }, [plannedWeekStartDay, query.data?.resolvedWeekStartDay]);
 
   const refreshBoard = useCallback(async () => {
-    await query.refetch();
-  }, [query]);
+    await queryClient.invalidateQueries({
+      queryKey: overviewQueryKey,
+      exact: true,
+    });
+  }, [overviewQueryKey, queryClient]);
 
   const payload = useMemo(() => (query.data?.payload ?? null) as TasksBoardPayload | null, [query.data?.payload]);
 
