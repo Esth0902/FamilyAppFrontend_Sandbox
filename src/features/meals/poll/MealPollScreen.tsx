@@ -42,7 +42,7 @@ import {
   refreshStoredUserFromStorage,
   useStoredUserState,
 } from "@/src/session/user-cache";
-import { addDaysFromIso, addDaysIso, parseOptionalIsoDate, toIsoDate, todayIso } from "@/src/utils/date";
+import { addDaysIso, parseOptionalIsoDate, toIsoDate, todayIso } from "@/src/utils/date";
 import { MealPollCreateView } from "@/src/features/meals/poll/components/MealPollCreateView";
 import { MealPollOpenView } from "@/src/features/meals/poll/components/MealPollOpenView";
 import { MealPollClosedView } from "@/src/features/meals/poll/components/MealPollClosedView";
@@ -694,20 +694,7 @@ export default function MealPollScreen() {
           ? defaultSelection
           : poll.options.slice(0, 3).map((option) => option.recipe_id)
       );
-
       const initialAssignments: Record<string, MealPlanAssignment> = {};
-      const basePlanningDate = poll.planning_start_date ?? todayIso();
-      fallbackRecipeIds.slice(0, 3).forEach((recipeId, index) => {
-        const date = addDaysFromIso(basePlanningDate, index);
-        const slotKey = `${date}_soir`;
-        initialAssignments[slotKey] = {
-          slotKey,
-          date,
-          meal_type: "soir",
-          recipe_id: recipeId,
-          servings: configuredDefaultServings,
-        };
-      });
 
       closedDraftSeedPollIdRef.current = poll.id;
       setSelectedRecipeIdsForValidation(fallbackRecipeIds);
