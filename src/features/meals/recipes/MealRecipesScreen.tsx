@@ -1,16 +1,17 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
   FlatList,
   RefreshControl,
+  StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
-import { router, Stack } from "expo-router";
+import { router, Stack, useLocalSearchParams } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Colors } from "@/constants/theme";
@@ -26,6 +27,14 @@ import { RecipeCard } from "@/src/features/recipes/RecipeCard";
 import { RecipeModal } from "@/src/features/recipes/RecipeModal";
 import { ShoppingListPickerModal } from "@/src/features/shopping-list/shopping-list-picker-modal";
 import type { Recipe } from "@/src/services/recipeService";
+import {
+  clearMealPollRecipePickerLaunchState,
+  getMealPollRecipePickerLaunchState,
+  setMealPollRecipePickerSelectionState,
+} from "@/src/features/meals/recipes/recipe-picker-session";
+
+const normalizeRecipeIds = (recipeIds: number[]) =>
+  Array.from(new Set(recipeIds.filter((id) => Number.isInteger(id) && id > 0)));
 
 export default function MealRecipesScreen() {
   const insets = useSafeAreaInsets();
@@ -34,11 +43,15 @@ export default function MealRecipesScreen() {
   const isDarkMode = colorScheme === "dark";
   const { householdId, role } = useStoredUserState();
   const isParent = role === "parent";
+  const params = useLocalSearchParams<{ picker?: string }>();
+  const isPollRecipePickerMode = params.picker === "meal-poll-create";
 
   const [search, setSearch] = useState("");
   const [selectedTab, setSelectedTab] = useState<RecipeTab>("mine");
   const [selectedTypeFilter, setSelectedTypeFilter] = useState<string>("all");
   const [isModalVisible, setIsModalVisible] = useState(false);
+  const [pickerSelectedRecipeIds, setPickerSelectedRecipeIds] = useState<number[]>([]);
+  const [isTypeFilterExpanded, setIsTypeFilterExpanded] = useState(true);
 
   const debouncedSearch = useDebounce(search, 400);
   const recipesApi = useRecipes({
@@ -55,6 +68,20 @@ export default function MealRecipesScreen() {
     onNavigateToList: (listId) => router.push(`/meal/shopping-list/${listId}`),
   });
   const isSubmitting = recipesApi.isMutationPending || shopping.isShoppingSubmitting;
+
+  useEffect(() => {
+    if (!isPollRecipePickerMode) {
+      setPickerSelectedRecipeIds([]);
+      return;
+    }
+
+    const launchState = getMealPollRecipePickerLaunchState();
+    setPickerSelectedRecipeIds(normalizeRecipeIds(launchState?.selectedRecipeIds ?? []));
+  }, [isPollRecipePickerMode]);
+
+  useEffect(() => {
+    setIsTypeFilterExpanded(!isPollRecipePickerMode);
+  }, [isPollRecipePickerMode]);
 
   const openRecipeActions = useCallback((recipe: Recipe) => {
     if (!isParent || !recipe.is_owned_by_household) return;
@@ -79,6 +106,38 @@ export default function MealRecipesScreen() {
       },
     ]);
   }, [isParent, recipesApi]);
+
+  const togglePickerRecipe = useCallback((recipeId: number) => {
+    setPickerSelectedRecipeIds((previous) => (
+      previous.includes(recipeId)
+        ? previous.filter((id) => id !== recipeId)
+        : [...previous, recipeId]
+    ));
+  }, []);
+
+  const selectedPickerRecipes = useMemo(
+    () => recipesApi.recipes.filter((recipe) => pickerSelectedRecipeIds.includes(recipe.id)),
+    [pickerSelectedRecipeIds, recipesApi.recipes]
+  );
+
+  const confirmPickerSelection = useCallback(() => {
+    const normalizedIds = normalizeRecipeIds(pickerSelectedRecipeIds);
+    setMealPollRecipePickerSelectionState({
+      selectedRecipeIds: normalizedIds,
+      selectedRecipes: selectedPickerRecipes.map((recipe) => ({
+        id: recipe.id,
+        title: recipe.title,
+        type: recipe.type,
+      })),
+    });
+    clearMealPollRecipePickerLaunchState();
+    router.back();
+  }, [pickerSelectedRecipeIds, selectedPickerRecipes]);
+
+  const cancelPickerSelection = useCallback(() => {
+    clearMealPollRecipePickerLaunchState();
+    router.back();
+  }, []);
 
   const renderRecipeItem = useCallback(({ item }: { item: Recipe }) => (
     <RecipeCard
@@ -112,6 +171,34 @@ export default function MealRecipesScreen() {
     theme,
   ]);
 
+  const renderPickerRecipeItem = useCallback(({ item }: { item: Recipe }) => {
+    const selected = pickerSelectedRecipeIds.includes(item.id);
+    return (
+      <TouchableOpacity
+        onPress={() => togglePickerRecipe(item.id)}
+        style={[
+          pickerStyles.recipeRow,
+          {
+            borderColor: selected ? theme.tint : theme.icon,
+            backgroundColor: selected ? `${theme.tint}18` : (isDarkMode ? "#1E1E1E" : "#FFFFFF"),
+          },
+        ]}
+      >
+        <View style={pickerStyles.recipeRowText}>
+          <Text style={{ color: theme.text, fontWeight: "700" }} numberOfLines={1}>{item.title}</Text>
+          <Text style={{ color: theme.textSecondary, marginTop: 2 }} numberOfLines={1}>
+            {item.type || "autre"}
+          </Text>
+        </View>
+        <MaterialCommunityIcons
+          name={selected ? "check-circle" : "checkbox-blank-circle-outline"}
+          size={22}
+          color={selected ? theme.tint : theme.icon}
+        />
+      </TouchableOpacity>
+    );
+  }, [isDarkMode, pickerSelectedRecipeIds, theme.icon, theme.text, theme.textSecondary, theme.tint, togglePickerRecipe]);
+
   if (recipesApi.isInitialLoading) {
     return (
       <View
@@ -129,9 +216,11 @@ export default function MealRecipesScreen() {
     <View style={[styles.container, { backgroundColor: theme.background }]}>
       <Stack.Screen options={{ headerShown: false }} />
       <ScreenHeader
-        title="Gestion des recettes"
+        title={isPollRecipePickerMode ? "Choisir des recettes" : "Gestion des recettes"}
+        subtitle={isPollRecipePickerMode ? "Sélectionne des recettes puis valide pour revenir au sondage." : undefined}
         withBackButton
-        backHref="/(app)/(tabs)/meal"
+        onBackPress={isPollRecipePickerMode ? cancelPickerSelection : undefined}
+        backHref={isPollRecipePickerMode ? undefined : "/(app)/(tabs)/meal"}
         safeTop
         showBorder
       />
@@ -187,18 +276,29 @@ export default function MealRecipesScreen() {
         ]}
       >
         <View style={styles.typeFilterHeader}>
-          <View style={styles.typeFilterHeaderLeft}>
+          <TouchableOpacity
+            onPress={() => setIsTypeFilterExpanded((previous) => !previous)}
+            style={styles.typeFilterHeaderLeft}
+            accessibilityRole="button"
+            accessibilityLabel="Ouvrir ou fermer le filtre par type"
+          >
+            <MaterialCommunityIcons
+              name={isTypeFilterExpanded ? "chevron-down" : "chevron-right"}
+              size={18}
+              color={theme.icon}
+            />
             <MaterialCommunityIcons name="tune-variant" size={18} color={theme.icon} />
             <Text style={{ color: theme.text, fontWeight: "700" }}>Filtrer par type</Text>
-          </View>
-          {selectedTypeFilter !== "all" ? (
+          </TouchableOpacity>
+          {isTypeFilterExpanded && selectedTypeFilter !== "all" ? (
             <TouchableOpacity onPress={() => setSelectedTypeFilter("all")}>
               <Text style={{ color: theme.tint, fontWeight: "600" }}>Réinitialiser</Text>
             </TouchableOpacity>
           ) : null}
         </View>
 
-        <View style={styles.typeFiltersWrap}>
+        {isTypeFilterExpanded ? (
+          <View style={styles.typeFiltersWrap}>
           {RECIPE_TYPE_FILTERS.map((filter) => {
             const selected = selectedTypeFilter === filter.value;
             return (
@@ -230,7 +330,8 @@ export default function MealRecipesScreen() {
               </TouchableOpacity>
             );
           })}
-        </View>
+          </View>
+        ) : null}
       </View>
 
       {recipesApi.recipesError ? (
@@ -252,7 +353,7 @@ export default function MealRecipesScreen() {
       <FlatList
         data={recipesApi.recipes}
         keyExtractor={(item) => item.id.toString()}
-        renderItem={renderRecipeItem}
+        renderItem={isPollRecipePickerMode ? renderPickerRecipeItem : renderRecipeItem}
         refreshControl={
           <RefreshControl
             refreshing={recipesApi.isRefreshing && !recipesApi.isInitialLoading}
@@ -273,7 +374,10 @@ export default function MealRecipesScreen() {
             ? <ActivityIndicator color={theme.tint} style={{ marginVertical: 12 }} />
             : null
         }
-        contentContainerStyle={[styles.listContent, { paddingBottom: insets.bottom + 100 }]}
+        contentContainerStyle={[
+          styles.listContent,
+          { paddingBottom: insets.bottom + (isPollRecipePickerMode ? 170 : 100) },
+        ]}
       />
 
       <RecipeModal
@@ -311,7 +415,30 @@ export default function MealRecipesScreen() {
         onConfirm={() => void shopping.confirmRecipeShoppingListSelection()}
       />
 
-      {isParent ? (
+      {isPollRecipePickerMode ? (
+        <View
+          style={[
+            pickerStyles.bottomBar,
+            {
+              borderColor: theme.icon,
+              backgroundColor: theme.card,
+              paddingBottom: insets.bottom > 0 ? insets.bottom + 8 : 16,
+            },
+          ]}
+        >
+          <Text style={{ color: theme.text, fontWeight: "700" }}>
+            {pickerSelectedRecipeIds.length} recette{pickerSelectedRecipeIds.length > 1 ? "s" : ""} sélectionnée{pickerSelectedRecipeIds.length > 1 ? "s" : ""}
+          </Text>
+          <TouchableOpacity
+            onPress={confirmPickerSelection}
+            style={[pickerStyles.confirmButton, { backgroundColor: theme.tint }]}
+          >
+            <Text style={pickerStyles.confirmButtonText}>Ajouter au sondage</Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
+
+      {isParent && !isPollRecipePickerMode ? (
         <TouchableOpacity
           activeOpacity={0.8}
           style={[
@@ -326,4 +453,41 @@ export default function MealRecipesScreen() {
     </View>
   );
 }
+
+const pickerStyles = StyleSheet.create({
+  recipeRow: {
+    borderWidth: 1,
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginBottom: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  recipeRowText: {
+    flex: 1,
+  },
+  bottomBar: {
+    position: "absolute",
+    left: 12,
+    right: 12,
+    bottom: 0,
+    borderTopWidth: 1,
+    borderTopLeftRadius: 14,
+    borderTopRightRadius: 14,
+    paddingHorizontal: 14,
+    paddingTop: 12,
+    gap: 10,
+  },
+  confirmButton: {
+    borderRadius: 12,
+    paddingVertical: 12,
+    alignItems: "center",
+  },
+  confirmButtonText: {
+    color: "white",
+    fontWeight: "700",
+  },
+});
 

@@ -15,7 +15,7 @@ import {
 import { Stack, useRouter } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { type EventArg, type NavigationAction, useNavigation } from "@react-navigation/native";
+import { type EventArg, type NavigationAction, useFocusEffect, useNavigation } from "@react-navigation/native";
 
 import { Colors } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
@@ -49,6 +49,11 @@ import { MealPollClosedView } from "@/src/features/meals/poll/components/MealPol
 import { MealPollValidatedView } from "@/src/features/meals/poll/components/MealPollValidatedView";
 import { MealPollPlanningDateModal } from "@/src/features/meals/poll/components/MealPollPlanningDateModal";
 import { MealPollPlannerModal } from "@/src/features/meals/poll/components/MealPollPlannerModal";
+import {
+  clearMealPollRecipePickerLaunchState,
+  consumeMealPollRecipePickerSelectionState,
+  setMealPollRecipePickerLaunchState,
+} from "@/src/features/meals/recipes/recipe-picker-session";
 
 type Recipe = {
   id: number;
@@ -498,6 +503,19 @@ export default function MealPollScreen() {
   useEffect(() => {
     hasUnsavedChangesRef.current = hasUnsavedChanges;
   }, [hasUnsavedChanges]);
+
+  useFocusEffect(
+    useCallback(() => {
+      const pickerSelection = consumeMealPollRecipePickerSelectionState();
+      if (!pickerSelection) {
+        return;
+      }
+
+      setRecipes((previousRecipes) => mergeUniqueRecipes(previousRecipes, pickerSelection.selectedRecipes));
+      setSelectedRecipeIdsForCreation(pickerSelection.selectedRecipeIds);
+      clearMealPollRecipePickerLaunchState();
+    }, [])
+  );
 
   useEffect(() => {
     if (!isEditOpenPollMode) {
@@ -1257,6 +1275,12 @@ export default function MealPollScreen() {
     }, { bypassBeforeRemove: true });
   };
 
+  const openRecipeDirectoryPicker = useCallback(() => {
+    setMealPollRecipePickerLaunchState(selectedRecipeIdsForCreation);
+    allowNextNavigationRef.current = true;
+    router.push("/meal/recipes?picker=meal-poll-create");
+  }, [router, selectedRecipeIdsForCreation]);
+
   const openPlanner = (recipeId: number) => {
     setPlannerRecipeId(recipeId);
     const plannerStartDate = activePoll?.planning_start_date && parseOptionalIsoDate(activePoll.planning_start_date)
@@ -1475,6 +1499,7 @@ export default function MealPollScreen() {
         onMaxVotesPerUserChange={setMaxVotesPerUser}
         onOpenPlanningPicker={openPlanningPicker}
         onSearchRecipeChange={setSearchRecipe}
+        onOpenRecipeDirectoryPicker={openRecipeDirectoryPicker}
         onToggleCreateRecipe={toggleCreateRecipe}
         onManualTitleChange={setManualTitle}
         onSaveManualRecipeForCreation={() => {

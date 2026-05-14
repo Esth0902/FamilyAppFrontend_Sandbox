@@ -55,6 +55,7 @@ type MealPollCreateViewProps = {
   onMaxVotesPerUserChange: (updater: (previous: number) => number) => void;
   onOpenPlanningPicker: (target: "start" | "end") => void;
   onSearchRecipeChange: (value: string) => void;
+  onOpenRecipeDirectoryPicker: () => void;
   onToggleCreateRecipe: (recipeId: number) => void;
   onManualTitleChange: (value: string) => void;
   onSaveManualRecipeForCreation: () => void;
@@ -88,6 +89,7 @@ export function MealPollCreateView({
   onMaxVotesPerUserChange,
   onOpenPlanningPicker,
   onSearchRecipeChange,
+  onOpenRecipeDirectoryPicker,
   onToggleCreateRecipe,
   onManualTitleChange,
   onSaveManualRecipeForCreation,
@@ -179,6 +181,16 @@ export function MealPollCreateView({
       </View>
 
       <Text style={[styles.label, { color: theme.text, marginTop: 12 }]}>Rechercher dans mon répertoire</Text>
+      <TouchableOpacity
+        onPress={onOpenRecipeDirectoryPicker}
+        style={[
+          styles.smallActionBtn,
+          styles.manualActionBtn,
+          { backgroundColor: theme.tint, marginTop: 8, marginBottom: 8 },
+        ]}
+      >
+        <Text style={[styles.smallActionBtnText, { textAlign: "center" }]}>Ouvrir le répertoire complet</Text>
+      </TouchableOpacity>
       <View style={[styles.searchBox, { borderColor: theme.icon, backgroundColor: theme.background }]}>
         <MaterialCommunityIcons name="magnify" size={20} color={theme.textSecondary} />
         <TextInput
