@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "572899750727",
+    "project_id": "familyflow-480cc",
+    "storage_bucket": "familyflow-480cc.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:572899750727:android:f7db74a7d61ad0d07ad262",
+        "android_client_info": {
+          "package_name": "com.esther0902.frontend"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBAQ4frOns2gjt4oV1MwSXuOQqWQNvRQYQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

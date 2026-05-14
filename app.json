@@ -19,7 +19,8 @@
     "android": {
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
-      "package": "com.esther0902.frontend"
+      "package": "com.esther0902.frontend",
+      "googleServicesFile": "./google-services.json"
     },
     "splash": {
       "image": "./assets/images/logo.png",

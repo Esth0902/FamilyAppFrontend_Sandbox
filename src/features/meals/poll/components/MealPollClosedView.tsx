@@ -117,7 +117,7 @@ export function MealPollClosedView({
                   onPress={() => onOpenPlanner(option.recipe_id)}
                   style={[styles.resultActionBtn, { borderColor: theme.icon, backgroundColor: theme.card }]}
                 >
-                  <Text style={{ color: theme.text, fontWeight: "600" }}>Planifier</Text>
+                  <Text style={{ color: theme.text, fontWeight: "600" }}>Planifier au menu de la semaine</Text>
                 </TouchableOpacity>
               </View>
             ) : null}
@@ -202,7 +202,7 @@ export function MealPollClosedView({
             ]}
             disabled={saving || sortedAssignments.length === 0}
           >
-            <Text style={{ color: theme.text, fontWeight: "700" }}>Ajouter à la liste de courses</Text>
+            <Text style={{ color: theme.text, fontWeight: "700" }}>Ajouter le menu à la liste de courses</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
