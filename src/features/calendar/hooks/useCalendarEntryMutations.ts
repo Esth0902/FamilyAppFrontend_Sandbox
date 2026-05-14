@@ -4,6 +4,7 @@ import { Alert } from "react-native";
 import type { MealType } from "@/src/features/calendar/calendar-types";
 import type {
   CreateEntryType,
+  EventAudienceMode,
 } from "@/src/features/calendar/calendar-tab.types";
 import {
   createMealPlanEntry,
@@ -29,6 +30,10 @@ type UseCalendarEntryMutationsParams = {
     eventStartTime: string;
     eventEndTime: string;
     shareWithOtherHousehold: boolean;
+    audienceMode: EventAudienceMode;
+    responseRequired: boolean;
+    invitedUserIds: number[];
+    currentUserId: number | null;
   };
   mealForm: {
     editingMealPlanId: number | null;
@@ -106,6 +111,27 @@ export function useCalendarEntryMutations({
 
     setSaving(true);
     try {
+      let invitedUserIds: number[] = [];
+      const responseRequired = eventForm.audienceMode === "only_me"
+        ? false
+        : eventForm.responseRequired;
+      if (eventForm.audienceMode === "only_me") {
+        if (!Number.isInteger(eventForm.currentUserId) || Number(eventForm.currentUserId) <= 0) {
+          Alert.alert("Calendrier", "Impossible de déterminer votre profil pour un événement privé.");
+          return;
+        }
+        invitedUserIds = [Number(eventForm.currentUserId)];
+      } else if (eventForm.audienceMode === "selected_members") {
+        invitedUserIds = eventForm.invitedUserIds
+          .filter((id) => Number.isInteger(id) && id > 0)
+          .map((id) => Number(id));
+
+        if (invitedUserIds.length === 0) {
+          Alert.alert("Calendrier", "Sélectionne au moins un membre pour cet événement.");
+          return;
+        }
+      }
+
       await saveCalendarEvent(
         {
           title: cleanTitle,
@@ -113,6 +139,9 @@ export function useCalendarEntryMutations({
           start_at: eventRange.startAt.toISOString(),
           end_at: eventRange.endAt.toISOString(),
           is_shared_with_other_household: eventForm.shareWithOtherHousehold,
+          audience_mode: eventForm.audienceMode,
+          invited_user_ids: invitedUserIds,
+          response_required: responseRequired,
         },
         eventForm.editingEventId
       );

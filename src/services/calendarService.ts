@@ -1,5 +1,6 @@
 import { apiFetch } from "@/src/api/client";
 import type { MealType } from "@/src/features/calendar/calendar-types";
+import type { EventAudienceMode } from "@/src/features/calendar/calendar-tab.types";
 
 export const fetchCalendarBoardForRange = async <T = unknown>(
   from: string,
@@ -15,6 +16,9 @@ export const saveCalendarEvent = async (
     start_at: string;
     end_at: string;
     is_shared_with_other_household: boolean;
+    audience_mode: EventAudienceMode;
+    invited_user_ids?: number[];
+    response_required: boolean;
   },
   eventId?: number | null
 ): Promise<void> => {
@@ -23,6 +27,33 @@ export const saveCalendarEvent = async (
     method: isEdit ? "PATCH" : "POST",
     body: JSON.stringify(payload),
   });
+};
+
+export type HouseholdMemberSummary = {
+  id: number;
+  name: string;
+  role: "parent" | "enfant";
+};
+
+export const fetchHouseholdMembers = async (): Promise<HouseholdMemberSummary[]> => {
+  const response = await apiFetch("/household/members");
+  const membersRaw: unknown[] = Array.isArray(response?.members) ? response.members : [];
+
+  return membersRaw
+    .map((rawMember: unknown): HouseholdMemberSummary | null => {
+      const member = (rawMember ?? {}) as Record<string, unknown>;
+      const parsedId = Number(member.id ?? 0);
+      if (!Number.isFinite(parsedId) || parsedId <= 0) {
+        return null;
+      }
+
+      return {
+        id: Math.trunc(parsedId),
+        name: String(member.name ?? "").trim() || "Membre",
+        role: String(member.role ?? "") === "parent" ? "parent" : "enfant",
+      };
+    })
+    .filter((member): member is HouseholdMemberSummary => member !== null);
 };
 
 export const deleteCalendarEvent = async (eventId: number): Promise<void> => {

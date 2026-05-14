@@ -1,5 +1,7 @@
 import type { MealType } from "@/src/features/calendar/calendar-types";
 
+export type EventAudienceMode = "all_members" | "only_me" | "selected_members";
+
 export type CalendarEvent = {
   id: number;
   title: string;
@@ -7,6 +9,14 @@ export type CalendarEvent = {
   start_at: string;
   end_at: string;
   is_shared_with_other_household: boolean;
+  audience_mode?: EventAudienceMode;
+  response_required?: boolean;
+  invited_user_ids?: number[];
+  invitation?: {
+    audience_mode?: EventAudienceMode;
+    response_required?: boolean;
+    is_invited?: boolean;
+  } | null;
   created_by?: {
     id?: number | null;
     name?: string | null;
@@ -101,6 +111,11 @@ export type CalendarBoardPayload = {
     can_confirm_meal_presence?: boolean;
     can_confirm_event_participation?: boolean;
   };
+  household_members?: {
+    id: number;
+    name: string;
+    role?: "parent" | "enfant";
+  }[];
   events: CalendarEvent[];
   meal_plan: MealPlanEntry[];
 };

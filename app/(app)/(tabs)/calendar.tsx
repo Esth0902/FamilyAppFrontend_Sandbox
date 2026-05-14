@@ -34,6 +34,7 @@ import type {
   CalendarTaskInstance,
   CreateEntryType,
   DateWheelTarget,
+  EventAudienceMode,
   MealPlanEntry,
   RecipeOption,
   TaskBoardPayload,
@@ -51,8 +52,10 @@ import { useCalendarDerivedData } from "@/src/features/calendar/hooks/useCalenda
 import { useCalendarReasonActions } from "@/src/features/calendar/hooks/useCalendarReasonActions";
 import { useCalendarShoppingListActions } from "@/src/features/calendar/hooks/useCalendarShoppingListActions";
 import {
+  fetchHouseholdMembers,
   fetchCalendarBoardForRange,
 } from "@/src/services/calendarService";
+import type { HouseholdMemberSummary } from "@/src/services/calendarService";
 import {
   fetchTasksBoardForRange,
 } from "@/src/services/tasksService";
@@ -73,7 +76,7 @@ export default function CalendarScreen() {
   const queryClient = useQueryClient();
   const colorScheme = useColorScheme();
   const theme = Colors[colorScheme ?? "light"];
-  const { householdId, role } = useStoredUserState();
+  const { householdId, role, user } = useStoredUserState();
   const canManageHouseholdConfig = role === "parent";
 
   const todayIsoValue = useMemo(() => todayIso(), []);
@@ -90,6 +93,7 @@ export default function CalendarScreen() {
   const [tasksEnabled, setTasksEnabled] = useState(false);
   const [canManageTaskInstances, setCanManageTaskInstances] = useState(false);
   const [taskMembers, setTaskMembers] = useState<TaskBoardPayload["members"]>([]);
+  const [householdMembers, setHouseholdMembers] = useState<HouseholdMemberSummary[]>([]);
   const [taskCurrentUserId, setTaskCurrentUserId] = useState<number | null>(null);
   const [taskCurrentUserRole, setTaskCurrentUserRole] = useState<"parent" | "enfant">("enfant");
   const [taskAssigneeId, setTaskAssigneeId] = useState<number | null>(null);
@@ -112,6 +116,9 @@ export default function CalendarScreen() {
   const [eventStartTime, setEventStartTime] = useState("18:00");
   const [eventEndTime, setEventEndTime] = useState("19:00");
   const [shareWithOtherHousehold, setShareWithOtherHousehold] = useState(false);
+  const [eventAudienceMode, setEventAudienceMode] = useState<EventAudienceMode>("all_members");
+  const [eventResponseRequired, setEventResponseRequired] = useState(true);
+  const [eventInvitedUserIds, setEventInvitedUserIds] = useState<number[]>([]);
   const [createEntryType, setCreateEntryType] = useState<CreateEntryType>("event");
   const [dateWheelVisible, setDateWheelVisible] = useState(false);
   const [dateWheelTarget, setDateWheelTarget] = useState<DateWheelTarget>("event_start");
@@ -168,6 +175,17 @@ export default function CalendarScreen() {
     return days;
   }, [calendarRange.gridEnd, calendarRange.gridStart]);
 
+  const currentUserId = useMemo(() => {
+    const parsedUserId = Number(user?.id ?? 0);
+    if (Number.isFinite(parsedUserId) && parsedUserId > 0) {
+      return Math.trunc(parsedUserId);
+    }
+    if (Number.isInteger(taskCurrentUserId) && Number(taskCurrentUserId) > 0) {
+      return Number(taskCurrentUserId);
+    }
+    return null;
+  }, [taskCurrentUserId, user?.id]);
+
   const prepareNewEventForm = useCallback((targetDate: string) => {
     setEditingEventId(null);
     setEventTitle("");
@@ -177,6 +195,9 @@ export default function CalendarScreen() {
     setEventStartTime("18:00");
     setEventEndTime("19:00");
     setShareWithOtherHousehold(false);
+    setEventAudienceMode("all_members");
+    setEventResponseRequired(true);
+    setEventInvitedUserIds([]);
   }, []);
 
   const resetEventForm = useCallback(() => {
@@ -283,6 +304,36 @@ export default function CalendarScreen() {
     }
   }, [eventEndTime, eventStartTime, timeWheelTarget]);
 
+  const handleEventAudienceModeChange = useCallback((value: EventAudienceMode) => {
+    setEventAudienceMode(value);
+    if (value === "all_members") {
+      setEventInvitedUserIds([]);
+      return;
+    }
+    if (value === "only_me") {
+      setEventResponseRequired(false);
+      setEventInvitedUserIds(currentUserId ? [currentUserId] : []);
+      return;
+    }
+    setEventInvitedUserIds((previousIds) => {
+      if (previousIds.length > 0) {
+        return previousIds;
+      }
+      return currentUserId ? [currentUserId] : [];
+    });
+  }, [currentUserId]);
+
+  const toggleEventInvitedUser = useCallback((userId: number) => {
+    if (!Number.isInteger(userId) || userId <= 0) {
+      return;
+    }
+    setEventInvitedUserIds((previousIds) => (
+      previousIds.includes(userId)
+        ? previousIds.filter((id) => id !== userId)
+        : [...previousIds, userId]
+    ));
+  }, []);
+
   const dateWheelValue = useMemo(() => {
     if (dateWheelTarget === "event_start") return eventDate;
     if (dateWheelTarget === "event_end") return eventEndDate;
@@ -316,9 +367,10 @@ export default function CalendarScreen() {
     }
 
     try {
-      const [calendarResult, tasksResult] = await Promise.allSettled([
+      const [calendarResult, tasksResult, membersResult] = await Promise.allSettled([
         fetchCalendarBoardForRange<CalendarBoardPayload>(calendarRange.from, calendarRange.to),
         fetchTasksBoardForRange<TaskBoardPayload>(calendarRange.from, calendarRange.to),
+        fetchHouseholdMembers(),
       ]);
 
       if (calendarResult.status !== "fulfilled") {
@@ -339,6 +391,9 @@ export default function CalendarScreen() {
       });
       setEvents(Array.isArray(payload?.events) ? payload.events : []);
       setMealPlan(Array.isArray(payload?.meal_plan) ? payload.meal_plan : []);
+      if (membersResult.status === "fulfilled") {
+        setHouseholdMembers(membersResult.value);
+      }
 
       const recipesFromMealPlan = (Array.isArray(payload?.meal_plan) ? payload.meal_plan : [])
         .flatMap((entry) => (Array.isArray(entry?.recipes) ? entry.recipes : []))
@@ -358,6 +413,18 @@ export default function CalendarScreen() {
         setTaskCurrentUserId(Number.isInteger(tasksResult.value?.current_user?.id) ? Number(tasksResult.value?.current_user?.id) : null);
         setTaskCurrentUserRole(tasksResult.value?.current_user?.role === "parent" ? "parent" : "enfant");
         setTaskInstances(Array.isArray(tasksResult.value?.instances) ? tasksResult.value.instances : []);
+        if (membersResult.status !== "fulfilled") {
+          const membersFromTasks = Array.isArray(tasksResult.value?.members)
+            ? tasksResult.value.members
+              .map((member) => ({
+                id: Number(member?.id ?? 0),
+                name: String(member?.name ?? "").trim() || "Membre",
+                role: member?.role === "parent" ? "parent" as const : "enfant" as const,
+              }))
+              .filter((member) => Number.isInteger(member.id) && member.id > 0)
+            : [];
+          setHouseholdMembers(membersFromTasks);
+        }
       } else {
         setTasksEnabled(false);
         setCanManageTaskInstances(false);
@@ -366,6 +433,9 @@ export default function CalendarScreen() {
         setTaskCurrentUserRole("enfant");
         setTaskAssigneeId(null);
         setTaskInstances([]);
+        if (membersResult.status !== "fulfilled") {
+          setHouseholdMembers([]);
+        }
       }
     } catch (error: any) {
       Alert.alert("Calendrier", error?.message || "Impossible de charger le calendrier.");
@@ -408,6 +478,22 @@ export default function CalendarScreen() {
       setShareWithOtherHousehold(false);
     }
   }, [permissions.can_share_with_other_household]);
+
+  useEffect(() => {
+    const allowedIds = new Set(householdMembers.map((member) => member.id));
+    setEventInvitedUserIds((previousIds) => previousIds.filter((id) => allowedIds.has(id)));
+  }, [householdMembers]);
+
+  useEffect(() => {
+    if (eventAudienceMode !== "only_me") {
+      return;
+    }
+    if (!currentUserId) {
+      setEventInvitedUserIds([]);
+      return;
+    }
+    setEventInvitedUserIds([currentUserId]);
+  }, [currentUserId, eventAudienceMode]);
 
   useEffect(() => {
     const selected = parseOptionalIsoDate(selectedDate);
@@ -487,10 +573,16 @@ export default function CalendarScreen() {
   }, [taskAssigneeId, taskCurrentUserId, taskCurrentUserRole, taskMembers]);
 
   const isEventFormMode = editingEventId !== null || createEntryType === "event";
+  const canSubmitEventForm = permissions.can_create_events
+    && (
+      eventAudienceMode === "all_members"
+      || (eventAudienceMode === "only_me" && currentUserId !== null)
+      || (eventAudienceMode === "selected_members" && eventInvitedUserIds.length > 0)
+    );
   const canSubmitCreateModal = editingEventId !== null
-    ? permissions.can_create_events
+    ? canSubmitEventForm
     : createEntryType === "event"
-      ? permissions.can_create_events
+      ? canSubmitEventForm
       : createEntryType === "meal_plan"
         ? permissions.can_manage_meal_plan
         : tasksEnabled
@@ -572,6 +664,9 @@ export default function CalendarScreen() {
     setEventStartTime,
     setEventEndTime,
     setShareWithOtherHousehold,
+    setEventAudienceMode,
+    setEventResponseRequired,
+    setEventInvitedUserIds,
     setMealPlanModalVisible,
   });
 
@@ -603,6 +698,10 @@ export default function CalendarScreen() {
       eventStartTime,
       eventEndTime,
       shareWithOtherHousehold,
+      audienceMode: eventAudienceMode,
+      responseRequired: eventResponseRequired,
+      invitedUserIds: eventInvitedUserIds,
+      currentUserId,
     },
     mealForm: {
       editingMealPlanId,
@@ -931,6 +1030,13 @@ export default function CalendarScreen() {
             onChangeShareWithOtherHousehold={setShareWithOtherHousehold}
             sharedViewEnabled={settings.shared_view_enabled}
             canShareWithOtherHousehold={permissions.can_share_with_other_household}
+            eventAudienceMode={eventAudienceMode}
+            onChangeEventAudienceMode={handleEventAudienceModeChange}
+            eventResponseRequired={eventResponseRequired}
+            onChangeEventResponseRequired={setEventResponseRequired}
+            inviteeMembers={householdMembers}
+            eventInvitedUserIds={eventInvitedUserIds}
+            onToggleEventInvitedUser={toggleEventInvitedUser}
             mealPlanDate={mealPlanDate}
             mealTypes={MEAL_TYPES}
             mealPlanType={mealPlanType}

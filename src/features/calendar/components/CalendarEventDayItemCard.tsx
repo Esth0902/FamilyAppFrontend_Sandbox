@@ -39,6 +39,14 @@ export function CalendarEventDayItemCard({
   onOpenEditor,
   onConfirmDelete,
 }: CalendarEventDayItemCardProps) {
+  const audienceMode = event.audience_mode ?? event.invitation?.audience_mode ?? "all_members";
+  const responseRequired = event.response_required ?? event.invitation?.response_required ?? true;
+  const audienceLabel = audienceMode === "only_me"
+    ? "Moi uniquement"
+    : audienceMode === "selected_members"
+      ? "Membres ciblés"
+      : "Tout le foyer";
+
   return (
     <View style={[styles.itemCard, { borderColor: colors.icon, backgroundColor: colors.background }]}>
       <View style={styles.itemHeaderRow}>
@@ -58,6 +66,9 @@ export function CalendarEventDayItemCard({
             {event.is_shared_with_other_household ? "Partagé" : "Privé"}
           </Text>
         </View>
+        <View style={[styles.badge, { backgroundColor: `${colors.tint}1A` }]}>
+          <Text style={[styles.badgeText, { color: colors.tint }]}>{audienceLabel}</Text>
+        </View>
       </View>
 
       <Text style={[styles.itemMetaText, { color: colors.textSecondary }]}>
@@ -65,12 +76,12 @@ export function CalendarEventDayItemCard({
       </Text>
       {event.description ? <Text style={[styles.bodyText, { color: colors.textSecondary }]}>{event.description}</Text> : null}
       {event.created_by?.name ? (
-        <Text style={[styles.itemMetaText, { color: colors.textSecondary }]}>
-          Créé par {event.created_by.name}
-        </Text>
+        <Text style={[styles.itemMetaText, { color: colors.textSecondary }]}>Créé par {event.created_by.name}</Text>
       ) : null}
 
-      {event.permissions?.can_confirm_participation !== false ? (
+      {!responseRequired ? (
+        <Text style={[styles.itemMetaText, { color: colors.textSecondary }]}>Événement informatif: aucune réponse n&apos;est demandée.</Text>
+      ) : event.permissions?.can_confirm_participation !== false ? (
         <>
           <Text style={[styles.itemMetaText, { color: colors.textSecondary }]}>
             {event.my_participation
@@ -78,9 +89,7 @@ export function CalendarEventDayItemCard({
               : "Votre participation n'est pas encore confirmée."}
           </Text>
           {event.my_participation?.reason ? (
-            <Text style={[styles.bodyText, { color: colors.textSecondary }]}>
-              Justification: {event.my_participation.reason}
-            </Text>
+            <Text style={[styles.bodyText, { color: colors.textSecondary }]}>Justification: {event.my_participation.reason}</Text>
           ) : null}
           <View style={styles.itemActionsRow}>
             <TouchableOpacity

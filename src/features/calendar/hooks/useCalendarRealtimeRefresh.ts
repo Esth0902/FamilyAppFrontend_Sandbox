@@ -66,11 +66,13 @@ export const useCalendarRealtimeRefresh = ({
 
         const module = String(message?.module ?? "");
         const type = String(message?.type ?? "");
-        if (module !== "notifications" || type !== "task_reassignment_invite_responded") {
+        if (module === "calendar" || module === "tasks") {
+          refreshBoard();
           return;
         }
-
-        refreshBoard();
+        if (module === "notifications" && type === "task_reassignment_invite_responded") {
+          refreshBoard();
+        }
       });
 
       if (!active) {

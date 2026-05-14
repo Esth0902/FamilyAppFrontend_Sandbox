@@ -14,10 +14,12 @@ import { MaterialCommunityIcons } from "@expo/vector-icons";
 import type {
   CreateEntryType,
   DateWheelTarget,
+  EventAudienceMode,
   RecipeOption,
   TaskBoardPayload,
 } from "@/src/features/calendar/calendar-tab.types";
 import type { MealType } from "@/src/features/calendar/calendar-types";
+import type { HouseholdMemberSummary } from "@/src/services/calendarService";
 import { CalendarEventFormFields } from "@/src/features/calendar/components/CalendarEventFormFields";
 import { CalendarMealFormFields } from "@/src/features/calendar/components/CalendarMealFormFields";
 import { CalendarTaskFormFields } from "@/src/features/calendar/components/CalendarTaskFormFields";
@@ -61,6 +63,13 @@ type CalendarCreateEntryModalProps = {
   onChangeShareWithOtherHousehold: (value: boolean) => void;
   sharedViewEnabled: boolean;
   canShareWithOtherHousehold: boolean;
+  eventAudienceMode: EventAudienceMode;
+  onChangeEventAudienceMode: (value: EventAudienceMode) => void;
+  eventResponseRequired: boolean;
+  onChangeEventResponseRequired: (value: boolean) => void;
+  inviteeMembers: HouseholdMemberSummary[];
+  eventInvitedUserIds: number[];
+  onToggleEventInvitedUser: (userId: number) => void;
   mealPlanDate: string;
   mealTypes: { label: string; value: MealType }[];
   mealPlanType: MealType;
@@ -124,6 +133,13 @@ export function CalendarCreateEntryModal({
   onChangeShareWithOtherHousehold,
   sharedViewEnabled,
   canShareWithOtherHousehold,
+  eventAudienceMode,
+  onChangeEventAudienceMode,
+  eventResponseRequired,
+  onChangeEventResponseRequired,
+  inviteeMembers,
+  eventInvitedUserIds,
+  onToggleEventInvitedUser,
   mealPlanDate,
   mealTypes,
   mealPlanType,
@@ -268,6 +284,13 @@ export function CalendarCreateEntryModal({
                 onChangeShareWithOtherHousehold={onChangeShareWithOtherHousehold}
                 sharedViewEnabled={sharedViewEnabled}
                 canShareWithOtherHousehold={canShareWithOtherHousehold}
+                eventAudienceMode={eventAudienceMode}
+                onChangeEventAudienceMode={onChangeEventAudienceMode}
+                eventResponseRequired={eventResponseRequired}
+                onChangeEventResponseRequired={onChangeEventResponseRequired}
+                inviteeMembers={inviteeMembers}
+                eventInvitedUserIds={eventInvitedUserIds}
+                onToggleEventInvitedUser={onToggleEventInvitedUser}
               />
             ) : createEntryType === "meal_plan" ? (
               <CalendarMealFormFields

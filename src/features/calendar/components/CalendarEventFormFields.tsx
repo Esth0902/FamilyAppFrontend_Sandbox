@@ -2,7 +2,8 @@ import React from "react";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { Text, TextInput, TouchableOpacity, View } from "react-native";
 
-import type { DateWheelTarget } from "@/src/features/calendar/calendar-tab.types";
+import type { DateWheelTarget, EventAudienceMode } from "@/src/features/calendar/calendar-tab.types";
+import type { HouseholdMemberSummary } from "@/src/services/calendarService";
 
 type CalendarEventFormFieldsProps = {
   styles: Record<string, any>;
@@ -32,6 +33,13 @@ type CalendarEventFormFieldsProps = {
   onChangeShareWithOtherHousehold: (value: boolean) => void;
   sharedViewEnabled: boolean;
   canShareWithOtherHousehold: boolean;
+  eventAudienceMode: EventAudienceMode;
+  onChangeEventAudienceMode: (value: EventAudienceMode) => void;
+  eventResponseRequired: boolean;
+  onChangeEventResponseRequired: (value: boolean) => void;
+  inviteeMembers: HouseholdMemberSummary[];
+  eventInvitedUserIds: number[];
+  onToggleEventInvitedUser: (userId: number) => void;
 };
 
 export function CalendarEventFormFields({
@@ -56,6 +64,13 @@ export function CalendarEventFormFields({
   onChangeShareWithOtherHousehold,
   sharedViewEnabled,
   canShareWithOtherHousehold,
+  eventAudienceMode,
+  onChangeEventAudienceMode,
+  eventResponseRequired,
+  onChangeEventResponseRequired,
+  inviteeMembers,
+  eventInvitedUserIds,
+  onToggleEventInvitedUser,
 }: CalendarEventFormFieldsProps) {
   return (
     <>
@@ -118,6 +133,99 @@ export function CalendarEventFormFields({
 
       {dateWheelVisible ? renderDateWheelPanel() : null}
       {timeWheelVisible ? renderTimeWheelPanel() : null}
+
+      <Text style={[styles.label, { color: colors.text }]}>Participants du foyer</Text>
+      <View style={styles.visibilityRow}>
+        <TouchableOpacity
+          onPress={() => onChangeEventAudienceMode("all_members")}
+          style={[
+            styles.visibilityChip,
+            { borderColor: colors.icon, backgroundColor: colors.background },
+            eventAudienceMode === "all_members" && { borderColor: colors.tint, backgroundColor: `${colors.tint}18` },
+          ]}
+        >
+          <Text style={{ color: colors.text, textAlign: "center", lineHeight: 18 }}>Tout le foyer</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          onPress={() => onChangeEventAudienceMode("only_me")}
+          style={[
+            styles.visibilityChip,
+            { borderColor: colors.icon, backgroundColor: colors.background },
+            eventAudienceMode === "only_me" && { borderColor: colors.tint, backgroundColor: `${colors.tint}18` },
+          ]}
+        >
+          <Text style={{ color: colors.text, textAlign: "center", lineHeight: 18 }}>Moi</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          onPress={() => onChangeEventAudienceMode("selected_members")}
+          style={[
+            styles.visibilityChip,
+            { borderColor: colors.icon, backgroundColor: colors.background },
+            eventAudienceMode === "selected_members" && { borderColor: colors.tint, backgroundColor: `${colors.tint}18` },
+            inviteeMembers.length === 0 && { opacity: 0.45 },
+          ]}
+          disabled={inviteeMembers.length === 0}
+        >
+          <Text style={{ color: colors.text, textAlign: "center", lineHeight: 18 }}>Membres ciblés</Text>
+        </TouchableOpacity>
+      </View>
+
+      {eventAudienceMode === "selected_members" ? (
+        <>
+          <Text style={[styles.label, { color: colors.text }]}>Inviter des membres</Text>
+          <View style={styles.recipePickerRow}>
+            {inviteeMembers.map((member) => {
+              const isSelected = eventInvitedUserIds.includes(member.id);
+              const memberRoleLabel = member.role === "parent" ? "parent" : "enfant";
+
+              return (
+                <TouchableOpacity
+                  key={`invitee-${member.id}`}
+                  onPress={() => onToggleEventInvitedUser(member.id)}
+                  style={[
+                    styles.recipeChip,
+                    { borderColor: colors.icon, backgroundColor: colors.background },
+                    isSelected && { borderColor: colors.tint, backgroundColor: `${colors.tint}18` },
+                  ]}
+                >
+                  <Text style={[styles.recipeChipText, { color: colors.text }]}>
+                    {`${member.name} (${memberRoleLabel})`}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+          <Text style={[styles.helperText, { color: colors.textSecondary }]}>Sélectionne un ou plusieurs membres concernés.</Text>
+        </>
+      ) : null}
+
+      {eventAudienceMode !== "only_me" ? (
+        <>
+          <Text style={[styles.label, { color: colors.text }]}>Réponse demandée</Text>
+          <View style={styles.visibilityRow}>
+            <TouchableOpacity
+              onPress={() => onChangeEventResponseRequired(true)}
+              style={[
+                styles.visibilityChip,
+                { borderColor: colors.icon, backgroundColor: colors.background },
+                eventResponseRequired && { borderColor: colors.tint, backgroundColor: `${colors.tint}18` },
+              ]}
+            >
+              <Text style={{ color: colors.text }}>Oui (RSVP)</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => onChangeEventResponseRequired(false)}
+              style={[
+                styles.visibilityChip,
+                { borderColor: colors.icon, backgroundColor: colors.background },
+                !eventResponseRequired && { borderColor: colors.tint, backgroundColor: `${colors.tint}18` },
+              ]}
+            >
+              <Text style={{ color: colors.text }}>Non (info)</Text>
+            </TouchableOpacity>
+          </View>
+        </>
+      ) : null}
 
       <Text style={[styles.label, { color: colors.text }]}>Visibilité inter-foyers</Text>
       <View style={styles.visibilityRow}>

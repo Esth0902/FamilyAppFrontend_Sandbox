@@ -4,6 +4,7 @@ import type { MealType } from "@/src/features/calendar/calendar-types";
 import type {
   CalendarEvent,
   CreateEntryType,
+  EventAudienceMode,
   MealPlanEntry,
 } from "@/src/features/calendar/calendar-tab.types";
 import {
@@ -44,6 +45,9 @@ type UseCalendarEntryModalControlsParams = {
   setEventStartTime: (value: string) => void;
   setEventEndTime: (value: string) => void;
   setShareWithOtherHousehold: (value: boolean) => void;
+  setEventAudienceMode: (value: EventAudienceMode) => void;
+  setEventResponseRequired: (value: boolean) => void;
+  setEventInvitedUserIds: (value: number[]) => void;
   setMealPlanModalVisible: (value: boolean) => void;
 };
 
@@ -80,6 +84,9 @@ export function useCalendarEntryModalControls({
   setEventStartTime,
   setEventEndTime,
   setShareWithOtherHousehold,
+  setEventAudienceMode,
+  setEventResponseRequired,
+  setEventInvitedUserIds,
   setMealPlanModalVisible,
 }: UseCalendarEntryModalControlsParams) {
   const openNewEventModal = useCallback((targetDate?: string) => {
@@ -179,6 +186,15 @@ export function useCalendarEntryModalControls({
     setEventStartTime(timeInputFromDateTime(event.start_at));
     setEventEndTime(timeInputFromDateTime(event.end_at));
     setShareWithOtherHousehold(Boolean(event.is_shared_with_other_household));
+    setEventAudienceMode(event.audience_mode ?? "all_members");
+    setEventResponseRequired(event.response_required !== false);
+    setEventInvitedUserIds(
+      Array.isArray(event.invited_user_ids)
+        ? event.invited_user_ids
+          .map((id) => Number(id))
+          .filter((id) => Number.isInteger(id) && id > 0)
+        : []
+    );
     setEventModalVisible(true);
   }, [
     selectedDate,
@@ -192,6 +208,9 @@ export function useCalendarEntryModalControls({
     setEventModalVisible,
     setEventStartTime,
     setEventTitle,
+    setEventAudienceMode,
+    setEventInvitedUserIds,
+    setEventResponseRequired,
     setShareWithOtherHousehold,
   ]);
 
