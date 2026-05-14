@@ -4,6 +4,8 @@ import {
   ActivityIndicator,
   Alert,
   Animated,
+  KeyboardAvoidingView,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -13,6 +15,7 @@ import {
 import { Stack, useRouter } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { type EventArg, type NavigationAction, useNavigation } from "@react-navigation/native";
 
 import { Colors } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
@@ -101,9 +104,110 @@ type AiPreviewRecipe = {
   ingredients: AiPreviewIngredient[];
 };
 
+type PollDraftSnapshot = {
+  title: string;
+  durationHours: number;
+  maxVotesPerUser: number;
+  planningStartDate: string;
+  planningEndDate: string;
+  recipeIds: number[];
+};
+
+type ValidationDraftSnapshot = {
+  selectedRecipeIds: number[];
+  assignmentsSignature: string;
+};
+
 const PLANNING_WEEKDAYS = ["Lu", "Ma", "Me", "Je", "Ve", "Sa", "Di"];
 
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
+
+const normalizeRecipeIds = (recipeIds: number[]) =>
+  Array.from(new Set(recipeIds.filter((id) => Number.isInteger(id) && id > 0))).sort((a, b) => a - b);
+
+const calculatePollDurationFromDates = (poll: Poll) => {
+  const startsAt = poll.starts_at ? new Date(poll.starts_at) : null;
+  const endsAt = poll.ends_at ? new Date(poll.ends_at) : null;
+  const hasValidDates = startsAt && endsAt && !Number.isNaN(startsAt.getTime()) && !Number.isNaN(endsAt.getTime());
+  return hasValidDates
+    ? clamp(Math.round(((endsAt as Date).getTime() - (startsAt as Date).getTime()) / (1000 * 60 * 60)), 1, 168)
+    : 24;
+};
+
+const buildPollDraftSnapshot = ({
+  title,
+  durationHours,
+  maxVotesPerUser,
+  planningStartDate,
+  planningEndDate,
+  recipeIds,
+}: {
+  title: string;
+  durationHours: number;
+  maxVotesPerUser: number;
+  planningStartDate: string;
+  planningEndDate: string;
+  recipeIds: number[];
+}): PollDraftSnapshot => ({
+  title: title.trim(),
+  durationHours: clamp(durationHours, 1, 168),
+  maxVotesPerUser: clamp(maxVotesPerUser, 1, 20),
+  planningStartDate: planningStartDate.trim(),
+  planningEndDate: planningEndDate.trim(),
+  recipeIds: normalizeRecipeIds(recipeIds),
+});
+
+const arePollDraftSnapshotsEqual = (left: PollDraftSnapshot | null, right: PollDraftSnapshot | null) => {
+  if (!left || !right) {
+    return false;
+  }
+
+  if (
+    left.title !== right.title
+    || left.durationHours !== right.durationHours
+    || left.maxVotesPerUser !== right.maxVotesPerUser
+    || left.planningStartDate !== right.planningStartDate
+    || left.planningEndDate !== right.planningEndDate
+    || left.recipeIds.length !== right.recipeIds.length
+  ) {
+    return false;
+  }
+
+  return left.recipeIds.every((recipeId, index) => recipeId === right.recipeIds[index]);
+};
+
+const buildAssignmentsSignature = (assignments: Record<string, MealPlanAssignment>) => {
+  return Object.values(assignments)
+    .map((assignment) => `${assignment.slotKey}|${assignment.recipe_id}|${assignment.servings}`)
+    .sort()
+    .join(";");
+};
+
+const buildValidationDraftSnapshot = ({
+  selectedRecipeIds,
+  mealPlanAssignments,
+}: {
+  selectedRecipeIds: number[];
+  mealPlanAssignments: Record<string, MealPlanAssignment>;
+}): ValidationDraftSnapshot => ({
+  selectedRecipeIds: normalizeRecipeIds(selectedRecipeIds),
+  assignmentsSignature: buildAssignmentsSignature(mealPlanAssignments),
+});
+
+const areValidationDraftSnapshotsEqual = (
+  left: ValidationDraftSnapshot | null,
+  right: ValidationDraftSnapshot | null
+) => {
+  if (!left || !right) {
+    return false;
+  }
+
+  if (left.assignmentsSignature !== right.assignmentsSignature || left.selectedRecipeIds.length !== right.selectedRecipeIds.length) {
+    return false;
+  }
+
+  return left.selectedRecipeIds.every((recipeId, index) => recipeId === right.selectedRecipeIds[index]);
+};
 
 const monthLabel = (date: Date) =>
   date.toLocaleDateString("fr-BE", { month: "long", year: "numeric" });
@@ -218,6 +322,7 @@ const normalizeAiPreviewRecipe = (payload: any): AiPreviewRecipe | null => {
 
 export default function MealPollScreen() {
   const router = useRouter();
+  const navigation = useNavigation();
   const queryClient = useQueryClient();
   const colorScheme = useColorScheme();
   const theme = Colors[colorScheme ?? "light"];
@@ -270,6 +375,12 @@ export default function MealPollScreen() {
   const [useNewShoppingList, setUseNewShoppingList] = useState(false);
   const [newShoppingListTitle, setNewShoppingListTitle] = useState(defaultShoppingListTitle());
   const [selectedAssignmentKeysForShopping, setSelectedAssignmentKeysForShopping] = useState<string[]>([]);
+  const createDraftBaselineRef = useRef<PollDraftSnapshot | null>(null);
+  const editDraftBaselineRef = useRef<PollDraftSnapshot | null>(null);
+  const validationDraftBaselineRef = useRef<ValidationDraftSnapshot | null>(null);
+  const closedDraftSeedPollIdRef = useRef<number | null>(null);
+  const allowNextNavigationRef = useRef(false);
+  const hasUnsavedChangesRef = useRef(false);
 
   const creationRecipeSearch = useRecipeSearch({
     householdId,
@@ -332,9 +443,126 @@ export default function MealPollScreen() {
 
   const voteLimit = activePoll?.max_votes_per_user ?? maxVotesPerUser;
   const canSubmitVotes = !!activePoll && activePoll.status === "open" && draftVoteOptionIds.length === voteLimit;
+  const isCreateMode = Boolean(isParent && !activePoll);
+  const isEditOpenPollMode = Boolean(isParent && activePoll?.status === "open" && showPollBuilder);
+  const isValidationMode = Boolean(isParent && activePoll?.status === "closed");
+
+  const currentPollDraftSnapshot = useMemo(
+    () =>
+      buildPollDraftSnapshot({
+        title: pollTitle,
+        durationHours,
+        maxVotesPerUser,
+        planningStartDate,
+        planningEndDate,
+        recipeIds: selectedRecipeIdsForCreation,
+      }),
+    [durationHours, maxVotesPerUser, planningEndDate, planningStartDate, pollTitle, selectedRecipeIdsForCreation]
+  );
+
+  const currentValidationDraftSnapshot = useMemo(
+    () =>
+      buildValidationDraftSnapshot({
+        selectedRecipeIds: selectedRecipeIdsForValidation,
+        mealPlanAssignments,
+      }),
+    [mealPlanAssignments, selectedRecipeIdsForValidation]
+  );
+
+  const hasUnsavedCreateChanges = isCreateMode
+    && createDraftBaselineRef.current !== null
+    && !arePollDraftSnapshotsEqual(createDraftBaselineRef.current, currentPollDraftSnapshot);
+
+  const hasUnsavedEditChanges = isEditOpenPollMode
+    && editDraftBaselineRef.current !== null
+    && !arePollDraftSnapshotsEqual(editDraftBaselineRef.current, currentPollDraftSnapshot);
+
+  const hasUnsavedCreateOrEditDraftText = (isCreateMode || isEditOpenPollMode)
+    && (manualTitle.trim().length > 0 || aiPreview !== null);
+
+  const hasUnsavedValidationChanges = isValidationMode
+    && validationDraftBaselineRef.current !== null
+    && !areValidationDraftSnapshotsEqual(validationDraftBaselineRef.current, currentValidationDraftSnapshot);
+
+  const hasUnsavedValidationDraftText = isValidationMode && validationManualTitle.trim().length > 0;
+
+  const hasUnsavedChanges = hasUnsavedCreateChanges
+    || hasUnsavedEditChanges
+    || hasUnsavedCreateOrEditDraftText
+    || hasUnsavedValidationChanges
+    || hasUnsavedValidationDraftText;
 
   const mealPollQueryKey = useMemo(() => ["mealPoll", "active", householdId ?? 0] as const, [householdId]);
   const shoppingListsQueryKey = useMemo(() => ["shoppingLists", householdId ?? 0] as const, [householdId]);
+
+  useEffect(() => {
+    hasUnsavedChangesRef.current = hasUnsavedChanges;
+  }, [hasUnsavedChanges]);
+
+  useEffect(() => {
+    if (!isEditOpenPollMode) {
+      editDraftBaselineRef.current = null;
+    }
+  }, [isEditOpenPollMode]);
+
+  useEffect(() => {
+    if (!isValidationMode) {
+      closedDraftSeedPollIdRef.current = null;
+      validationDraftBaselineRef.current = null;
+    }
+  }, [isValidationMode]);
+
+  const confirmLeaveWithUnsavedChanges = useCallback((onDiscardChanges: () => void) => {
+    Alert.alert(
+      "Modifications non sauvegardées",
+      "Tu as des changements non sauvegardés sur ce sondage. Quitter sans enregistrer ?",
+      [
+        { text: "Rester", style: "cancel" },
+        { text: "Quitter", style: "destructive", onPress: onDiscardChanges },
+      ]
+    );
+  }, []);
+
+  const guardNavigationWithUnsavedChanges = useCallback(
+    (onLeave: () => void, options?: { bypassBeforeRemove?: boolean }) => {
+      if (!hasUnsavedChangesRef.current) {
+        onLeave();
+        return;
+      }
+
+      confirmLeaveWithUnsavedChanges(() => {
+        if (options?.bypassBeforeRemove) {
+          allowNextNavigationRef.current = true;
+        }
+        onLeave();
+      });
+    },
+    [confirmLeaveWithUnsavedChanges]
+  );
+
+  useEffect(() => {
+    const unsubscribe = navigation.addListener(
+      "beforeRemove",
+      (event: EventArg<"beforeRemove", true, { action: NavigationAction }>) => {
+        if (allowNextNavigationRef.current) {
+          allowNextNavigationRef.current = false;
+          return;
+        }
+
+        if (!hasUnsavedChangesRef.current) {
+          return;
+        }
+
+        event.preventDefault();
+        confirmLeaveWithUnsavedChanges(() => {
+          allowNextNavigationRef.current = true;
+          navigation.dispatch(event.data.action);
+        });
+      }
+    );
+
+    return unsubscribe;
+  }, [confirmLeaveWithUnsavedChanges, navigation]);
 
   const invalidateMealPoll = useCallback(async () => {
     await queryClient.invalidateQueries({ queryKey: mealPollQueryKey });
@@ -422,12 +650,27 @@ export default function MealPollScreen() {
 
     if (poll) {
       createDefaultsAppliedRef.current = false;
-    } else if (currentRole === "parent" && !createDefaultsAppliedRef.current) {
-      setDurationHours(configuredDuration);
-      setMaxVotesPerUser(configuredMaxVotes);
-      setPlanningStartDate(todayIso());
-      setPlanningEndDate(addDaysIso(6));
-      createDefaultsAppliedRef.current = true;
+      createDraftBaselineRef.current = null;
+    } else if (currentRole === "parent") {
+      const defaultPlanningStartDate = todayIso();
+      const defaultPlanningEndDate = addDaysIso(6);
+
+      if (!createDefaultsAppliedRef.current) {
+        setDurationHours(configuredDuration);
+        setMaxVotesPerUser(configuredMaxVotes);
+        setPlanningStartDate(defaultPlanningStartDate);
+        setPlanningEndDate(defaultPlanningEndDate);
+        createDefaultsAppliedRef.current = true;
+      }
+
+      createDraftBaselineRef.current = buildPollDraftSnapshot({
+        title: "",
+        durationHours: configuredDuration,
+        maxVotesPerUser: configuredMaxVotes,
+        planningStartDate: defaultPlanningStartDate,
+        planningEndDate: defaultPlanningEndDate,
+        recipeIds: [],
+      });
     }
 
     if (poll?.status === "open") {
@@ -438,33 +681,47 @@ export default function MealPollScreen() {
     }
 
     if (poll?.status === "closed" && currentRole === "parent") {
+      if (closedDraftSeedPollIdRef.current === poll.id) {
+        return;
+      }
+
       const defaultSelection = [...poll.options]
         .filter((option) => option.votes_count > 0)
         .sort((a, b) => b.votes_count - a.votes_count)
         .map((option) => option.recipe_id);
+      const fallbackRecipeIds = normalizeRecipeIds(
+        defaultSelection.length > 0
+          ? defaultSelection
+          : poll.options.slice(0, 3).map((option) => option.recipe_id)
+      );
 
-      const fallback = defaultSelection.length > 0 ? defaultSelection : poll.options.slice(0, 3).map((option) => option.recipe_id);
-      setSelectedRecipeIdsForValidation(fallback);
-
-      setMealPlanAssignments((prev) => {
-        if (Object.keys(prev).length > 0) return prev;
-
-        const next: Record<string, MealPlanAssignment> = {};
-        const basePlanningDate = poll.planning_start_date ?? todayIso();
-        fallback.slice(0, 3).forEach((recipeId, index) => {
-          const date = addDaysFromIso(basePlanningDate, index);
-          const slotKey = `${date}_soir`;
-          next[slotKey] = {
-            slotKey,
-            date,
-            meal_type: "soir",
-            recipe_id: recipeId,
-            servings: configuredDefaultServings,
-          };
-        });
-
-        return next;
+      const initialAssignments: Record<string, MealPlanAssignment> = {};
+      const basePlanningDate = poll.planning_start_date ?? todayIso();
+      fallbackRecipeIds.slice(0, 3).forEach((recipeId, index) => {
+        const date = addDaysFromIso(basePlanningDate, index);
+        const slotKey = `${date}_soir`;
+        initialAssignments[slotKey] = {
+          slotKey,
+          date,
+          meal_type: "soir",
+          recipe_id: recipeId,
+          servings: configuredDefaultServings,
+        };
       });
+
+      closedDraftSeedPollIdRef.current = poll.id;
+      setSelectedRecipeIdsForValidation(fallbackRecipeIds);
+      setMealPlanAssignments(initialAssignments);
+      validationDraftBaselineRef.current = buildValidationDraftSnapshot({
+        selectedRecipeIds: fallbackRecipeIds,
+        mealPlanAssignments: initialAssignments,
+      });
+      return;
+    }
+
+    if (poll?.status !== "closed") {
+      closedDraftSeedPollIdRef.current = null;
+      validationDraftBaselineRef.current = null;
     }
   }, [mealPollQuery.data]);
 
@@ -586,18 +843,25 @@ export default function MealPollScreen() {
 
   const openPollBuilderForEdit = useCallback((poll: Poll) => {
     const recipeIds = poll.options.map((option) => option.recipe_id);
-    const startsAt = poll.starts_at ? new Date(poll.starts_at) : null;
-    const endsAt = poll.ends_at ? new Date(poll.ends_at) : null;
-    const hasValidDates = startsAt && endsAt && !Number.isNaN(startsAt.getTime()) && !Number.isNaN(endsAt.getTime());
-    const durationFromDates = hasValidDates
-      ? clamp(Math.round(((endsAt as Date).getTime() - (startsAt as Date).getTime()) / (1000 * 60 * 60)), 1, 168)
-      : 24;
+    const durationFromDates = calculatePollDurationFromDates(poll);
+    const planningStart = poll.planning_start_date || todayIso();
+    const planningEnd = poll.planning_end_date || addDaysIso(6);
+    const initialDraft = buildPollDraftSnapshot({
+      title: poll.title ?? "",
+      durationHours: durationFromDates,
+      maxVotesPerUser: clamp(Number(poll.max_votes_per_user || 3), 1, 20),
+      planningStartDate: planningStart,
+      planningEndDate: planningEnd,
+      recipeIds,
+    });
+
+    editDraftBaselineRef.current = initialDraft;
 
     setPollTitle(poll.title ?? "");
     setDurationHours(durationFromDates);
     setMaxVotesPerUser(clamp(Number(poll.max_votes_per_user || 3), 1, 20));
-    setPlanningStartDate(poll.planning_start_date || todayIso());
-    setPlanningEndDate(poll.planning_end_date || addDaysIso(6));
+    setPlanningStartDate(planningStart);
+    setPlanningEndDate(planningEnd);
     setSelectedRecipeIdsForCreation(recipeIds);
     setSearchRecipe("");
     setManualTitle("");
@@ -995,11 +1259,15 @@ export default function MealPollScreen() {
     }
 
     if (activePoll?.status === "open" && showPollBuilder) {
-      setShowPollBuilder(false);
+      guardNavigationWithUnsavedChanges(() => {
+        setShowPollBuilder(false);
+      });
       return;
     }
 
-    router.replace("/(app)/(tabs)/meal");
+    guardNavigationWithUnsavedChanges(() => {
+      router.replace("/(app)/(tabs)/meal");
+    }, { bypassBeforeRemove: true });
   };
 
   const openPlanner = (recipeId: number) => {
@@ -1347,7 +1615,17 @@ export default function MealPollScreen() {
         showBorder
       />
 
-      <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
+      <KeyboardAvoidingView
+        style={styles.flex}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        keyboardVerticalOffset={Platform.OS === "ios" ? 92 : 0}
+      >
+        <ScrollView
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
+          automaticallyAdjustKeyboardInsets
+          contentContainerStyle={styles.content}
+        >
         {(isParent && !activePoll) || (isParent && activePoll?.status === "open" && showPollBuilder) ? (
           renderCreateView()
         ) : !activePoll ? (
@@ -1363,7 +1641,8 @@ export default function MealPollScreen() {
         ) : (
           renderValidatedView()
         )}
-      </ScrollView>
+        </ScrollView>
+      </KeyboardAvoidingView>
 
       <MealPollPlanningDateModal
         visible={planningPickerVisible}
@@ -1456,6 +1735,7 @@ export default function MealPollScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
+  flex: { flex: 1 },
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
   content: { padding: 16, paddingBottom: 40 },
 

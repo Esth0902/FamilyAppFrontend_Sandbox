@@ -212,7 +212,7 @@ export function MealPollCreateView({
                     <View style={[styles.recipeIcon, { backgroundColor: `${theme.tint}1A` }]}>
                       <MaterialCommunityIcons name="silverware-fork-knife" size={18} color={theme.tint} />
                     </View>
-                    <Text style={{ color: theme.text, fontWeight: "600" }} numberOfLines={2}>{recipe.title}</Text>
+                    <Text style={{ color: theme.text, fontWeight: "600", flexShrink: 1 }}>{recipe.title}</Text>
                     <Text style={{ color: theme.textSecondary, fontSize: 12 }} numberOfLines={1}>{recipe.type || "autre"}</Text>
                     <MaterialCommunityIcons
                       name={selected ? "check-circle" : "plus-circle-outline"}
@@ -231,7 +231,7 @@ export function MealPollCreateView({
           )}
         </>
       ) : null}
-      <Text style={[styles.label, { color: theme.text, marginTop: 12 }]}>Ajouter une recette</Text>
+      <Text style={[styles.label, { color: theme.text, marginTop: 12 }]}>Ajouter une nouvelle recette</Text>
       <View style={styles.manualCreateBlock}>
         <View style={[styles.searchBox, { borderColor: theme.icon, backgroundColor: theme.background }]}>
           <MaterialCommunityIcons name="silverware-fork-knife" size={20} color={theme.textSecondary} />
@@ -246,24 +246,28 @@ export function MealPollCreateView({
         <View style={styles.manualActionsRow}>
           <TouchableOpacity
             onPress={onSaveManualRecipeForCreation}
-            style={[styles.smallActionBtn, styles.manualActionBtn, { backgroundColor: theme.tint, opacity: saving ? 0.7 : 1 }]}
+            style={[
+              styles.smallActionBtn,
+              styles.manualActionBtn,
+              { backgroundColor: theme.background, borderColor: theme.icon, borderWidth: 1, opacity: saving ? 0.7 : 1 },
+            ]}
             disabled={saving}
           >
-            <Text style={styles.smallActionBtnText}>Ajouter</Text>
+            <Text style={[styles.smallActionBtnText, { color: theme.text, textAlign: "center" }]}>Ajouter au répertoire</Text>
           </TouchableOpacity>
           <TouchableOpacity
             onPress={onPreviewAiRecipe}
             style={[
               styles.smallActionBtn,
               styles.manualActionBtn,
-              { backgroundColor: theme.background, borderColor: theme.icon, borderWidth: 1, opacity: aiLoading ? 0.7 : 1 },
+              { backgroundColor: theme.tint, opacity: aiLoading ? 0.7 : 1 },
             ]}
             disabled={aiLoading}
           >
             {aiLoading ? (
-              <ActivityIndicator size="small" color={theme.tint} />
+              <ActivityIndicator size="small" color="white" />
             ) : (
-              <Text style={[styles.smallActionBtnText, { color: theme.text }]}>Demander à l&apos;IA</Text>
+              <Text style={[styles.smallActionBtnText, { textAlign: "center" }]}>Demander à l&apos;IA</Text>
             )}
           </TouchableOpacity>
         </View>

@@ -93,7 +93,7 @@ export function MealPollOpenView({
                 disabled && { opacity: 0.45 },
               ]}
             >
-              <Text style={{ color: theme.text, fontWeight: "700" }} numberOfLines={2}>{option.recipe?.title || "Recette"}</Text>
+              <Text style={{ color: theme.text, fontWeight: "700", flexShrink: 1 }}>{option.recipe?.title || "Recette"}</Text>
               <Text style={{ color: theme.textSecondary, fontSize: 12, marginTop: 4 }}>{option.votes_count} vote(s)</Text>
 
               <View style={styles.voteCardFooter}>
