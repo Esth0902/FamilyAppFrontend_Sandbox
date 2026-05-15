@@ -4,6 +4,7 @@ const mockPersistStoredUser = jest.fn();
 const mockNormalizeStoredUser = jest.fn((user: unknown) => user);
 const mockLogoutAuth = jest.fn();
 const mockPersistAuthToken = jest.fn();
+const mockRevokeCurrentPushToken = jest.fn();
 
 jest.mock("@/src/api/client", () => ({
   apiFetch: (endpoint: string, options?: unknown) => mockApiFetch(endpoint, options),
@@ -34,6 +35,10 @@ jest.mock("@/src/store/useAuthStore", () => ({
   persistAuthToken: (token: unknown) => mockPersistAuthToken(token),
 }));
 
+jest.mock("@/src/services/pushNotificationsService", () => ({
+  revokeCurrentPushToken: () => mockRevokeCurrentPushToken(),
+}));
+
 import {
   AuthServiceError,
   login,
@@ -48,11 +53,13 @@ describe("authService", () => {
     mockNormalizeStoredUser.mockReset();
     mockLogoutAuth.mockReset();
     mockPersistAuthToken.mockReset();
+    mockRevokeCurrentPushToken.mockReset();
 
     mockNormalizeStoredUser.mockImplementation((user: unknown) => user);
     mockLogoutAuth.mockResolvedValue(undefined);
     mockPersistAuthToken.mockResolvedValue(undefined);
     mockPersistStoredUser.mockResolvedValue(undefined);
+    mockRevokeCurrentPushToken.mockResolvedValue(undefined);
   });
 
   it("maps API validation errors with field errors", () => {
@@ -166,6 +173,7 @@ describe("authService", () => {
 
     await logout();
 
+    expect(mockRevokeCurrentPushToken).toHaveBeenCalledTimes(1);
     expect(mockLogoutAuth).toHaveBeenCalledTimes(1);
     expect(warnSpy).toHaveBeenCalledTimes(1);
 
@@ -179,6 +187,7 @@ describe("authService", () => {
 
     await logout();
 
+    expect(mockRevokeCurrentPushToken).toHaveBeenCalledTimes(2);
     expect(mockLogoutAuth).toHaveBeenCalledTimes(2);
     expect(warnSpy).not.toHaveBeenCalled();
 

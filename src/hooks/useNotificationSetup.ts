@@ -1,15 +1,13 @@
-import Constants from "expo-constants";
-import * as Device from "expo-device";
 import { useRouter } from "expo-router";
 import { useCallback, useEffect, useRef } from "react";
-import { Platform } from "react-native";
+import { AppState } from "react-native";
 import type { QueryClient } from "@tanstack/react-query";
 
 import { resolveNotificationNavigationTarget, toPositiveInt } from "@/src/notifications/navigation";
 import { queryKeys } from "@/src/query/query-keys";
 import { switchStoredHousehold } from "@/src/session/user-cache";
 import { fetchPendingNotifications } from "@/src/services/homeService";
-import { registerPushToken } from "@/src/services/pushNotificationsService";
+import { syncPushTokenWithSystemPermissions } from "@/src/services/pushNotificationsService";
 
 type NotificationsModule = typeof import("expo-notifications");
 
@@ -30,8 +28,6 @@ type UseNotificationSetupResult = {
   scheduleLocalNotification: (args: ScheduleLocalNotificationArgs) => Promise<void>;
 };
 
-const isExpoGo = Constants.executionEnvironment === "storeClient" || Constants.appOwnership === "expo";
-
 let notificationsModulePromise: Promise<NotificationsModule> | null = null;
 const loadNotificationsModule = async (): Promise<NotificationsModule> => {
   if (!notificationsModulePromise) {
@@ -50,7 +46,6 @@ export const useNotificationSetup = ({
   const notifiedNotificationIdsRef = useRef<Set<number>>(new Set());
   const handledNotificationPressIdsRef = useRef<Set<number>>(new Set());
   const canUseRemotePushRef = useRef(false);
-  const registeredPushTokenRef = useRef<string | null>(null);
 
   const scheduleLocalNotification = useCallback(
     async ({ notificationId, title, body, data = {} }: ScheduleLocalNotificationArgs) => {
@@ -155,50 +150,22 @@ export const useNotificationSetup = ({
       try {
         let Notifications: NotificationsModule | null = null;
         canUseRemotePushRef.current = false;
-        if (!isExpoGo) {
-          Notifications = await loadNotificationsModule();
-          Notifications.setNotificationHandler({
-            handleNotification: async () => ({
-              shouldShowAlert: true,
-              shouldPlaySound: true,
-              shouldSetBadge: false,
-              shouldShowBanner: true,
-              shouldShowList: true,
-            }),
-          });
+        Notifications = await loadNotificationsModule();
+        Notifications.setNotificationHandler({
+          handleNotification: async () => ({
+            shouldShowAlert: true,
+            shouldPlaySound: true,
+            shouldSetBadge: false,
+            shouldShowBanner: true,
+            shouldShowList: true,
+          }),
+        });
 
-          const { status } = await Notifications.requestPermissionsAsync();
-          if (status === "granted") {
-            await Notifications.setNotificationChannelAsync("default", {
-              name: "default",
-              importance: Notifications.AndroidImportance.DEFAULT,
-            });
+        const syncResult = await syncPushTokenWithSystemPermissions({ requestPermission: true });
+        canUseRemotePushRef.current = syncResult.canUseRemotePush;
 
-            if (Device.isDevice) {
-              const easProjectId = Constants.easConfig?.projectId
-                ?? (Constants.expoConfig?.extra as { eas?: { projectId?: string } } | undefined)?.eas?.projectId
-                ?? null;
-              const expoPushToken = easProjectId
-                ? await Notifications.getExpoPushTokenAsync({ projectId: easProjectId })
-                : await Notifications.getExpoPushTokenAsync();
-              const pushTokenValue = String(expoPushToken?.data ?? "").trim();
-
-              if (pushTokenValue.length > 0) {
-                if (registeredPushTokenRef.current !== pushTokenValue) {
-                  await registerPushToken({
-                    token: pushTokenValue,
-                    platform: Platform.OS,
-                    deviceName: Device.deviceName ?? null,
-                  });
-                  registeredPushTokenRef.current = pushTokenValue;
-                }
-
-                canUseRemotePushRef.current = true;
-              }
-            }
-          } else {
-            Notifications = null;
-          }
+        if (syncResult.permissionStatus !== "granted") {
+          Notifications = null;
         }
 
         if (isCancelled) {
@@ -233,6 +200,33 @@ export const useNotificationSetup = ({
         if (lastResponse) {
           onNotificationResponse(lastResponse as { notification?: { request?: { content?: { data?: unknown } } } });
         }
+
+        let currentAppState = AppState.currentState;
+        const appStateSubscription = AppState.addEventListener("change", (nextAppState) => {
+          const wasBackgrounded = currentAppState === "inactive" || currentAppState === "background";
+          currentAppState = nextAppState;
+
+          if (!wasBackgrounded || nextAppState !== "active") {
+            return;
+          }
+
+          void (async () => {
+            try {
+              const resumeSyncResult = await syncPushTokenWithSystemPermissions({ requestPermission: false });
+              canUseRemotePushRef.current = resumeSyncResult.canUseRemotePush;
+            } catch (error) {
+              console.error("Erreur sync notifications au retour app:", error);
+            }
+          })();
+        });
+
+        const previousCleanup = notificationResponseSubscription;
+        notificationResponseSubscription = {
+          remove: () => {
+            previousCleanup?.remove();
+            appStateSubscription.remove();
+          },
+        };
       } catch (error) {
         console.error("Erreur initialisation notifications:", error);
       }

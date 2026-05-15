@@ -9,6 +9,7 @@ import {
   persistStoredUser,
   type StoredUser,
 } from "@/src/session/user-cache";
+import { revokeCurrentPushToken } from "@/src/services/pushNotificationsService";
 import { logoutAuth, persistAuthToken } from "@/src/store/useAuthStore";
 
 type AuthApiResponse = {
@@ -385,6 +386,12 @@ export const resetPassword = async (
 
 export const logout = async (): Promise<void> => {
   try {
+    try {
+      await revokeCurrentPushToken();
+    } catch (error) {
+      console.warn("Logout push-token revoke error:", error);
+    }
+
     await apiFetch("/logout", {
       method: "POST",
     });

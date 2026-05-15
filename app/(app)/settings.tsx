@@ -1,7 +1,9 @@
-import React from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
     ActivityIndicator,
+    AppState,
     KeyboardAvoidingView,
+    Linking,
     Platform,
     ScrollView,
     StyleSheet,
@@ -17,12 +19,82 @@ import { AppTextInput } from "@/src/components/ui/AppTextInput";
 import { AppButton } from "@/src/components/ui/AppButton";
 import { ScreenHeader } from "@/src/components/ui/ScreenHeader";
 import { useSettings, getHouseholdRole } from "@/src/hooks/useSettings";
+import {
+    getNotificationsPermissionStatus,
+    syncPushTokenWithSystemPermissions,
+} from "@/src/services/pushNotificationsService";
+
+type NotificationPermissionStatus = "granted" | "denied" | "undetermined" | "unavailable";
 
 export default function SettingsScreen() {
     const colorScheme = useColorScheme();
     const theme = Colors[colorScheme ?? "light"];
   
     const { state, computed, setters, actions } = useSettings();
+    const [notificationPermissionStatus, setNotificationPermissionStatus] = useState<NotificationPermissionStatus>("undetermined");
+    const [notificationActionLoading, setNotificationActionLoading] = useState(false);
+    const previousAppStateRef = useRef(AppState.currentState);
+    const openedSystemSettingsRef = useRef(false);
+
+    const refreshNotificationStatus = useCallback(async (options?: { syncToken?: boolean }) => {
+        try {
+            const shouldSyncToken = options?.syncToken === true;
+            if (shouldSyncToken) {
+                const syncResult = await syncPushTokenWithSystemPermissions({ requestPermission: false });
+                setNotificationPermissionStatus(syncResult.permissionStatus);
+                return;
+            }
+
+            const status = await getNotificationsPermissionStatus();
+            setNotificationPermissionStatus(status);
+        } catch (error) {
+            console.error("Erreur lecture état notifications:", error);
+            setNotificationPermissionStatus("undetermined");
+        }
+    }, []);
+
+    useEffect(() => {
+        void refreshNotificationStatus();
+    }, [refreshNotificationStatus]);
+
+    useEffect(() => {
+        const appStateSubscription = AppState.addEventListener("change", (nextAppState) => {
+            const wasBackgrounded = previousAppStateRef.current === "inactive" || previousAppStateRef.current === "background";
+            previousAppStateRef.current = nextAppState;
+
+            if (!openedSystemSettingsRef.current || !wasBackgrounded || nextAppState !== "active") {
+                return;
+            }
+
+            openedSystemSettingsRef.current = false;
+
+            void (async () => {
+                setNotificationActionLoading(true);
+                try {
+                    await refreshNotificationStatus({ syncToken: true });
+                } finally {
+                    setNotificationActionLoading(false);
+                }
+            })();
+        });
+
+        return () => {
+            appStateSubscription.remove();
+        };
+    }, [refreshNotificationStatus]);
+
+    const onOpenNotificationSettings = useCallback(async () => {
+        setNotificationActionLoading(true);
+        try {
+            openedSystemSettingsRef.current = true;
+            await Linking.openSettings();
+        } catch (error) {
+            openedSystemSettingsRef.current = false;
+            console.error("Erreur ouverture paramètres système:", error);
+        } finally {
+            setNotificationActionLoading(false);
+        }
+    }, []);
 
     if (state.loading) {
         return (
@@ -227,6 +299,26 @@ export default function SettingsScreen() {
                     />
                                                 
                     <View style={[styles.accountDangerWrap, { borderTopColor: theme.icon }]}>
+                        <Text style={[styles.sectionTitle, { color: theme.text, marginBottom: 8 }]}>Notifications</Text>
+                        <Text style={[styles.sectionText, { color: theme.textSecondary, marginBottom: 12 }]}>
+                            {notificationPermissionStatus === "granted"
+                                ? "Les notifications push sont actives sur cet appareil."
+                                : "Les notifications push sont désactivées sur cet appareil."}
+                        </Text>
+
+                        <AppButton
+                            title={notificationPermissionStatus === "granted" ? "Désactiver les notifications" : "Activer les notifications"}
+                            variant="ghost"
+                            onPress={() => {
+                                void onOpenNotificationSettings();
+                            }}
+                            loading={notificationActionLoading}
+                            disabled={notificationPermissionStatus === "unavailable" || notificationActionLoading}
+                            style={[styles.inlineButton, { borderColor: theme.tint, borderWidth: 1 }]}
+                            textStyle={{ color: theme.tint }}
+                        />
+                    </View>
+                    <View style={[styles.accountDangerWrap, { borderTopColor: theme.icon }]}>
                         <Text style={[styles.accountDangerText, { color: theme.textSecondary }]}>
                             Supprime ton compte uniquement si tu as finalisé la gestion de tes foyers.
                         </Text>
@@ -278,3 +370,4 @@ const styles = StyleSheet.create({
 
     },
 });
+
