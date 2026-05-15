@@ -303,17 +303,25 @@ export default function SettingsScreen() {
                         <Text style={[styles.sectionText, { color: theme.textSecondary, marginBottom: 12 }]}>
                             {notificationPermissionStatus === "granted"
                                 ? "Les notifications push sont actives sur cet appareil."
-                                : "Les notifications push sont désactivées sur cet appareil."}
+                                : notificationPermissionStatus === "unavailable"
+                                    ? "Paramètre indisponible en Expo Go. Ouvre les réglages système ou utilise un build dev/production."
+                                    : "Les notifications push sont désactivées sur cet appareil."}
                         </Text>
 
                         <AppButton
-                            title={notificationPermissionStatus === "granted" ? "Désactiver les notifications" : "Activer les notifications"}
+                            title={
+                                notificationPermissionStatus === "unavailable"
+                                    ? "Ouvrir les réglages système"
+                                    : notificationPermissionStatus === "granted"
+                                        ? "Désactiver les notifications"
+                                        : "Activer les notifications"
+                            }
                             variant="ghost"
                             onPress={() => {
                                 void onOpenNotificationSettings();
                             }}
                             loading={notificationActionLoading}
-                            disabled={notificationPermissionStatus === "unavailable" || notificationActionLoading}
+                            disabled={notificationActionLoading}
                             style={[styles.inlineButton, { borderColor: theme.tint, borderWidth: 1 }]}
                             textStyle={{ color: theme.tint }}
                         />
